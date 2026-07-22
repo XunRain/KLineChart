@@ -46,6 +46,12 @@ local function loadPlayer(player: Player)
 		end
 		return
 	end
+	local snapshot = PlayerDataService.GetSnapshot(player)
+	local expansionLevel = if snapshot then math.max(0, math.floor(tonumber(snapshot.OwnedExpansions) or 0)) else 0
+	local expanded, expansionReason = PlotService.ApplyExpansion(player, expansionLevel)
+	if not expanded then
+		warn(string.format("[PlayerLifecycleService] Apply expansion failed for %s: %s", player.Name, tostring(expansionReason)))
+	end
 
 	InventoryService.Sync(player)
 	local restored, restoreReason = PlantService.RestorePlayer(player)

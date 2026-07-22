@@ -15,7 +15,7 @@ export type ItemDefinition = {
 	HarvestType: HarvestType,
 	-- 从种下到首次可收获所需的秒数，服务端以时间戳进行权威判断。
 	GrowthTime: number,
-	-- 重复收获品种再次结果所需的秒数；单次收获品种必须为 nil。
+	-- 重复收获品种在有空果实槽时长出下一颗果实所需的秒数；单次收获品种必须为 nil，满槽时计时暂停。
 	RegrowTime: number?,
 	-- 新玩家首次创建存档时获得的该品种种子数量。
 	StartingSeeds: number,
@@ -90,7 +90,7 @@ ItemConfig.Items = {
 		PlacementOffsetY = 0,
 		MinSpacing = 3.5,
 	},
-	-- 草莓用于验证重复收获流程：首次成熟后植株保留，并按 RegrowTime 再次结果。
+	-- 草莓用于验证重复收获流程：首次成熟后植株保留，有空果实槽时按 RegrowTime 逐颗补果，满槽时暂停。
 	Strawberry = {
 		Id = "Strawberry",
 		DisplayName = "Strawberry",

@@ -7,10 +7,14 @@ export type TestAction = {
 	ActionId: string,
 	-- 白名单客户端按钮显示文本；不参与服务端奖励计算，可在不迁移存档的前提下修改。
 	DisplayText: string,
-	-- 服务端写入 Inventory.Seeds 的稳定植物标识；必须存在于 ItemConfig，客户端不得提交或覆盖。
-	SeedId: string,
-	-- 单次服务端权威增加的种子整数数量；必须处于 1 到 MaximumGrantAmount，修改会直接影响测试账号存档库存。
-	Amount: number,
+	-- 测试动作类型；GrantSeed 表示发种子，GrantCurrency 表示发 Sheckles，服务端按类型走不同白名单事务。
+	Kind: "GrantSeed" | "GrantCurrency",
+	-- GrantSeed 写入 Inventory.Seeds 的稳定植物标识；必须存在于 ItemConfig，客户端不得提交或覆盖。
+	SeedId: string?,
+	-- GrantSeed 单次服务端权威增加的种子整数数量；必须处于 1 到 MaximumSeedGrantAmount。
+	Amount: number?,
+	-- GrantCurrency 单次服务端权威增加的 Sheckles 整数数量；必须处于 1 到 MaximumCurrencyGrantAmount。
+	CurrencyAmount: number?,
 	-- 功能按钮的升序排列值；允许任意有限整数，仅影响客户端显示顺序，不影响权限或奖励。
 	SortOrder: number,
 }
@@ -28,17 +32,21 @@ TestMenuConfig.Whitelist = {
 -- 同一白名单玩家两次服务端请求之间的最短间隔，单位为秒；必须大于等于 0，用于限制重复点击与 Remote 滥用。
 TestMenuConfig.RequestCooldown = 0.5
 
--- 单个测试动作允许发放的最大正整数数量；服务端用它拦截错误配置，修改会改变测试奖励风险上限。
-TestMenuConfig.MaximumGrantAmount = 100
+-- 单个种子测试动作允许发放的最大正整数数量；服务端用它拦截错误配置，修改会改变测试种子奖励风险上限。
+TestMenuConfig.MaximumSeedGrantAmount = 100
+
+-- 单个金币测试动作允许发放的最大正整数数量；当前为 1B，用于白名单调试扩地等高价经济流程。
+TestMenuConfig.MaximumCurrencyGrantAmount = 1_000_000_000
 
 -- 测试动作写入后允许的种子库存上限；服务端在事务内检查，防止错误配置或反复测试造成数值溢出。
 TestMenuConfig.MaximumSeedInventory = 2_000_000_000
 
--- 动作表是服务端奖励的唯一来源；客户端只发送 ActionId，绝不能发送 SeedId、Amount 或目标库存值。
+-- 动作表是服务端奖励的唯一来源；客户端只发送 ActionId，绝不能发送 SeedId、Amount、CurrencyAmount 或目标库存/余额。
 TestMenuConfig.Actions = {
 	{
 		ActionId = "GrantCarrotSeeds5",
 		DisplayText = "胡萝卜种子 ×5",
+		Kind = "GrantSeed",
 		SeedId = "Carrot",
 		Amount = 5,
 		SortOrder = 10,
@@ -46,9 +54,31 @@ TestMenuConfig.Actions = {
 	{
 		ActionId = "GrantStrawberrySeeds5",
 		DisplayText = "草莓种子 ×5",
+		Kind = "GrantSeed",
 		SeedId = "Strawberry",
 		Amount = 5,
 		SortOrder = 20,
+	},
+	{
+		ActionId = "GrantSheckles1K",
+		DisplayText = "+1K 金币",
+		Kind = "GrantCurrency",
+		CurrencyAmount = 1_000,
+		SortOrder = 30,
+	},
+	{
+		ActionId = "GrantSheckles1M",
+		DisplayText = "+1M 金币",
+		Kind = "GrantCurrency",
+		CurrencyAmount = 1_000_000,
+		SortOrder = 40,
+	},
+	{
+		ActionId = "GrantSheckles1B",
+		DisplayText = "+1B 金币",
+		Kind = "GrantCurrency",
+		CurrencyAmount = 1_000_000_000,
+		SortOrder = 50,
 	},
 } :: { TestAction }
 

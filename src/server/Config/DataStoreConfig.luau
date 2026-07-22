@@ -7,7 +7,7 @@ return {
 	Name = "KLineChart_PlayerData_v1",
 	-- 玩家数据键前缀，最终键为该值拼接 UserId；随意修改等同于更换全部线上玩家的数据键。
 	KeyPrefix = "Player_",
-	-- 当前存档结构版本 2；本次新增顶层 Sheckles，v1/缺字段由归一化补默认值，未来升级不得只改数字而不实现兼容迁移。
+	-- 当前存档结构版本 2；v1/缺字段由归一化补 Sheckles、OwnedExpansions 等默认值，未来升级不得只改数字而不实现兼容迁移。
 	SchemaVersion = 2,
 	-- 自动保存并刷新会话锁心跳的间隔，单位为秒；必须明显短于 SessionLockTimeout。
 	AutoSaveInterval = 60,

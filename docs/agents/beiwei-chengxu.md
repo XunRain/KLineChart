@@ -20,29 +20,32 @@ KLineChart 已实现第一版种植与存档基础：
 - `PlantService` 从 `ReplicatedStorage.Assets.Plants` 严格验证并克隆 Carrot、Strawberry，并按品种 `PlacementOffsetY` 调整运行时 Root 高度；重复收获品种从 `Assets.Fruits` 按 `BodyRoot` 的 `FruitSlot=true` Attachment 创建视觉果实，缺资源时种植失败并退种，不生成几何降级。
 - 无 Handle 种子 Tool 仍是代码侧交互载体。固定基础价出售代码已实现；动态市场、天气、事件和价格曲线仍未实现。
 - `TestMenuService` 与 `TestMenuController` 已提供仅白名单 UserId `10972923838` 可用的代码测试菜单；客户端只提交 `ActionId`，服务端从 `TestMenuConfig` 权威读取种子类型和固定数量。
-- `SeedShopService` 在靠近 `Workspace.NPCS.Sam.HumanoidRootPart` 时按配置完成“扣 Sheckles + 加 1 种子”的权威事务；`SeedShopController` 只复用 Studio `SeedShop` 外壳并生成商品卡。
+- `SeedShopService` 参考模板思路实现 5 分钟一轮的个人库存刷新，当前 Carrot 每轮 20、Strawberry 每轮 15；购买时在靠近 `Workspace.NPCS.Sam.HumanoidRootPart` 后按配置完成“扣 Sheckles + 扣个人库存 + 加 1 种子”的权威事务，`SeedShopController` 克隆 Studio `SeedShop.Frame.NormalShop.ItemTemplate` 模板商品行，填充名称、价格、真实库存、稀有度、Restock 倒计时，并强制从 `ReplicatedStorage.Assets.Seeds.<ItemId>` 渲染种子预览，缺资源时留空告警而不显示模板占位块。
+- `HudCurrencyController` 从服务端物化的 `KLineInventory.Sheckles` 只读同步 HUD 金币显示，当前会同时写入 `PlayerGui.HUD.Currencies.CoinsCounter.TextLabel` 描边底字和其子级 `TextLabel` 前景数字，并同步模板 `Target`/`Goal` NumberValue，避免显示 Studio 假值或父子文字重影。
 - `InterfaceVisualController` 用 owner 集合统一管理多个界面的 Blur=20 与当前真实 FOV-10，最后一个界面关闭后恢复；SeedShop 与测试菜单共用该模块。
 - `TeleportController` 只绑定 `PlayerGui.TeleportButtons.TeleportButtons` 的三个现有按钮并提交稳定目的地标识；`TeleportService` 校验白名单、冷却和存活角色后，权威解析固定目标或玩家自己的地块 SpawnPoint，当前仍待 Studio Play 验收。
-- `SellShopService` 以 Carrot=20、Strawberry=15 的服务端基础价完成单品种全部出售或 SellAll 原子事务；客户端只提交稳定动作，动态行情尚未实现且待 Studio Play 验收。
-- `NpcPromptVisualController` 将 Sam/Steven 的 Custom Prompt 恢复为默认可见样式；`SellShopController` 只使用 `Assets.NpcUIs` 资源契约，克隆 Talk_UI/Option_UI 前检查并从副本剥离 BaseScript，同时验证 Response_UI，当前 Studio 缺少 NpcUIs 时安全禁用出售 UI。
+- `SellShopService` 以 Carrot=20、Strawberry=15 的服务端基础价完成单品种全部出售或 SellAll 原子事务，并通过 `SellProduceResult` 把出售数量、收益和失败原因回传给触发玩家用于 Steven 对话展示；客户端只提交稳定动作，动态行情尚未实现且待 Studio Play 验收。
+- `NpcPromptVisualController` 严格识别已流送的 Sam/Steven Prompt 并幂等恢复默认样式；`SellShopController` 只使用当前已补齐并验证的 `Assets.NpcUIs` 资源契约，克隆 Talk_UI/Response_UI/Option_UI 副本并防御性剥离 BaseScript，按“种植花园2模板”的 NPC 对话样式在本地生成 `Billboard_UI.Objects` 承载选项；当前 `Option_UI.Frame.Frame.Text_Element` 为选项文案节点，控制器递归查找以兼容该嵌套层级，未来缺失时安全禁用出售 UI。
+- `NpcPromptService` 在服务器完整 Workspace 中统一配置 Sam/Steven 现有 Prompt；客户端商店控制器通过 `ProximityPromptService.PromptShown/PromptTriggered` 严格匹配 NPC 路径，兼容 StreamingEnabled 下 NPC 延迟流送、流出和替换，当前待 Studio Play 验收。
 
 实施任务时仍需先用 `rg --files` 和 `rg` 检查真实结构，不能把目标蓝图中的接口当成现有接口。
 
 ## 已落地接口与数据契约
 
-- Remotes 统一位于 `ReplicatedStorage.KLineRemotes`，名称只从 `NetworkConfig` 读取；当前另包含权威出售入口 `RequestSellProduce`。
-- 存档包含 `Version`、顶层权威 `Sheckles`、`Inventory.Seeds`、`Inventory.Produce`、`Plants`。植物记录只保存 `recordId`、`plantId`、局部 `position`、`rotationY`、`plantedAt`、`nextHarvestAt`、`harvestCount`。
-- 运行时植物模型带 `PlantRecordId`、`PlantId`、`OwnerUserId`、`PlantedAt`、`GrowthTime`、`NextHarvestAt`、`HarvestType` 和 `HarvestCount` 属性。
+- Remotes 统一位于 `ReplicatedStorage.KLineRemotes`，名称只从 `NetworkConfig` 读取；当前另包含权威出售入口 `RequestSellProduce` 和仅用于 Steven 对话展示的出售结果事件 `SellProduceResult`。
+- 存档包含 `Version`、顶层权威 `Sheckles`、`Inventory.Seeds`、`Inventory.Produce`、`Plants`。植物记录保存 `recordId`、`plantId`、局部 `position`、`rotationY`、`plantedAt`、`nextHarvestAt`、`harvestCount`；重复结果植物额外保存 `fruitCount` 与 `nextFruitAt`，用于表达当前成熟果实槽数量和下一个空槽成熟时间。
+- 运行时植物模型带 `PlantRecordId`、`PlantId`、`OwnerUserId`、`PlantedAt`、`GrowthTime`、`NextHarvestAt`、`HarvestType` 和 `HarvestCount` 属性；重复结果植物还带 `FruitCount` 与 `FruitNextReadyAt` 供客户端展示成熟果实数量和正在生长的空位进度。
 - 植株预制体必须为以 `Root` 为 PrimaryPart 的 Model，并包含以 `BodyRoot` 为 PrimaryPart 的 `Body` Model；果实预制体必须包含 `Root` 和以 `VisualRoot` 为 PrimaryPart 的 `Visual` Model。
-- 重复收获视觉果实位于运行时 `RuntimeFruits` Folder，带 `KLineFruitVisual`、`FruitSlotName`、`FruitSlotIndex` 属性，外层植物带 `FruitSlotCount`。客户端以 `(harvestCount % FruitSlotCount) + 1` 只激活一个果实并顺序轮换；挂点数量不改变每次 `YieldAmount`。
+- 重复收获视觉果实位于运行时 `RuntimeFruits` Folder，带 `KLineFruitVisual`、`FruitSlotName`、`FruitSlotIndex` 属性，外层植物带 `FruitSlotCount`。客户端按 `FruitCount` 显示已成熟果实，并只让第一个空槽按 `FruitNextReadyAt` 生长；满槽时服务端暂停下一个空槽计时，挂点数量不改变每次 `YieldAmount`。
 - 植物存档位置始终是种植面基准坐标，`PlacementOffsetY` 仅在服务端生成或恢复预制体时应用一次，不能写回存档或累积。
 - `RequestPlant` 的客户端参数为世界命中点、`seedId` 和种子 Tool；三者均由服务端重新验证，客户端不能提交库存、成长或收获结果。
 - 收获使用服务端创建的 `ProximityPrompt`；服务端重新验证所有权、距离、记录、成熟时间，并用 per-plant lock 防止重复收获。
 - `RequestTestAction` 只接受稳定 `ActionId`；服务端重新检查功能开关、白名单、数据加载、冷却、动作配置及库存上限，不接受客户端数量、SeedId 或目标库存。
-- `RequestBuySeed` 只接受稳定 `itemId`；服务端从 `ItemConfig` 读取价格、从 `SeedShopConfig` 读取每次数量，并重新检查数据、冷却、Sam 距离、余额和库存上限。
+- `RequestBuySeed` 只接受稳定 `itemId`；服务端从 `ItemConfig` 读取价格、从 `SeedShopConfig` 读取每次数量和本轮库存，并重新检查数据、冷却、Sam 距离、余额、商店库存和背包库存上限。
+- `RequestSeedShopState` 无参数请求当前玩家个人商店库存；`SeedShopStateChanged` 只用于服务端向客户端展示当前库存、下次刷新 Unix 秒和倒计时，不承载权威结算结果。
 - `RequestTeleport` 只接受 `Seeds`、`Garden` 或 `Sell` 稳定标识；服务端不接受坐标或 Instance，固定目标仅从 `Workspace.Teleports` 读取 BasePart/Model，Garden 仅使用当前玩家已分配地块的 SpawnPoint。
-- `KLineInventory.Sheckles` 只是权威存档的复制 `IntValue`，客户端不得通过修改它影响购买结果。
-- Studio 模板 `SeedShop` 与 Sam Prompt 中的遗留 BaseScript 不属于现有代码链路；控制器只检测并警告，必须由工具人删除。
+- `KLineInventory.Sheckles` 只是权威存档的复制 `IntValue`，客户端可用它展示 HUD 余额，但不得通过修改它影响购买或出售结果。
+- Studio 模板 `SeedShop` 与 Sam Prompt 中的遗留 BaseScript 不属于现有代码链路；控制器只检测并警告，运行时克隆商品行会剥离脚本，源模板脚本仍必须由工具人删除。
 
 ## 目标技术职责
 

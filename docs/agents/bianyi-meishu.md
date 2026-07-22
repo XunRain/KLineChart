@@ -10,15 +10,17 @@
 
 ## 当前状态与目标方向
 
-KLineChart 已验证并接入 `ReplicatedStorage.Assets.Plants.Carrot`、`Plants.Strawberry` 与 `Assets.Fruits.Strawberry`。植株预制体由外层 `Root` 定位、`Body/BodyRoot` 承担成长缩放；草莓运行时下沉 0.4 stud，并在 `BodyRoot` 的四个 `FruitSlot=true` Attachment 间一次显示一个果实、按收获次数循环。种子图标、成长动画、收获反馈、天气资源、事件资源、市场面板和价格曲线 UI 仍为“待补资源”。
+KLineChart 已验证并接入 `ReplicatedStorage.Assets.Plants.Carrot`、`Plants.Strawberry` 与 `Assets.Fruits.Strawberry`。植株预制体由外层 `Root` 定位、`Body/BodyRoot` 承担成长缩放；草莓运行时下沉 0.4 stud，并在 `BodyRoot` 的四个 `FruitSlot=true` Attachment 中按顺序保留已成熟果实、只让第一个空槽继续生长，满槽后暂停。种子图标、成长动画、收获反馈、天气资源、事件资源、市场面板和价格曲线 UI 仍为“待补资源”。
 
-新增植物资源时必须保持 `ItemConfig` 的稳定植物 ID，并沿用 `Root`、`Body/BodyRoot` 契约；重复收获植物还需提供果实预制体和至少一个稳定、唯一命名的 FruitSlot。挂点索引只决定单活跃果实的轮换位置，不能被当作单次收获产量。当前不要求工具人在 Studio 修改资源，除非收到单独编辑器任务单。
+新增植物资源时必须保持 `ItemConfig` 的稳定植物 ID，并沿用 `Root`、`Body/BodyRoot` 契约；重复收获植物还需提供果实预制体和至少一个稳定、唯一命名的 FruitSlot。挂点索引只决定成熟果实的显示顺序和下一个空槽的位置，不能被当作单次收获产量。当前不要求工具人在 Studio 修改资源，除非收到单独编辑器任务单。
 
 当前白名单测试菜单由代码生成，仅服务开发验证，不代表正式 UI 视觉标准，也不替代后续市场面板、库存和价格曲线的美术设计。
 
-首版种子商店临时复用 Studio `StarterGui.SeedShop` 外壳，商品卡和 Sheckles 余额由代码生成，并隐藏 Exclusive、Robux 与库存刷新入口。它是过渡资源，不代表正式商店视觉定稿；后续替换外壳时必须保留控制器要求的 Frame/Header/ExitButton/NormalShop 稳定层级。
+首版 HUD 金币显示复用 Studio `StarterGui.HUD.Currencies.CoinsCounter.TextLabel` 及其子级 `TextLabel`，父级承担描边/阴影底字、子级承担前景数字；代码只替换两层数字文本并同步模板 `Target`/`Goal` 值，不调整视觉层级、字体、描边、图标或布局。
 
-首版出售对话代码要求 `ReplicatedStorage.Assets.NpcUIs.Talk_UI`、`Response_UI` 与 `Option_UI`，但当前 KLineChart Studio 尚未包含 `NpcUIs`，因此三者均为待补资源；代码只剥离模板 BaseScript 并复用视觉节点，不复刻模板 TopText 或 Sell_Steven 逻辑。
+首版种子商店复用 Studio `StarterGui.SeedShop` 的模板视觉，并由代码克隆 `Frame.NormalShop.ItemTemplate` 生成商品行；名称、价格、真实个人库存、稀有度和 Restock 倒计时由代码填充，`ViewportFrame` 种子预览必须来自 `ReplicatedStorage.Assets.Seeds.<ItemId>` 的植物种子模型，缺资源时留空告警而不显示模板占位块。当前刷新周期为 5 分钟，库存售罄时显示 `NO STOCK`；后续替换外壳时必须保留控制器要求的 Frame/Header/ExitButton/NormalShop/ItemTemplate 稳定层级。
+
+首版出售对话所需 `ReplicatedStorage.Assets.NpcUIs.Talk_UI`、`Response_UI` 与 `Option_UI` 当前已补齐并只读验证，三者均无 BaseScript；`Option_UI` 的选项文案节点当前位于 `Option_UI.Frame.Frame.Text_Element`，代码会递归查找该节点并防御性清理运行时副本，并用本地生成的 `Billboard_UI.Objects` 尽量复现“种植花园2模板”的 Steven 对话选项视觉。
 
 项目目标是建立种植、收获、出售的基础体验，并用原创的动态市场形成差异化。天气和事件会影响同一服务器内共享的植物价格，客户端以单一价格随时间变化的价格曲线图帮助玩家选择出售时机。
 

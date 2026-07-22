@@ -119,7 +119,10 @@ function TeleportService.Init(dependencies: { PlotService: any, RemoteService: a
 	RemoteService = dependencies.RemoteService
 
 	RemoteService.GetEvent("RequestTeleport").OnServerEvent:Connect(function(player, destinationId)
-		local ok, err = pcall(handleRequest, player, destinationId)
+		local ok, err = pcall(function()
+			handleRequest(player, destinationId)
+			return true
+		end)
 		if not ok then
 			warn(string.format("[TeleportService] 传送请求处理失败 %s：%s", player.Name, tostring(err)))
 		end

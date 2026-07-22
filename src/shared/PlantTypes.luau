@@ -18,6 +18,10 @@ export type PlantRecord = {
 	plantedAt: number,
 	nextHarvestAt: number,
 	harvestCount: number,
+	-- 重复结果植物当前已成熟、仍挂在槽位上的果实数量；单次收获植物可为 nil。
+	fruitCount: number?,
+	-- 重复结果植物下一个空位成熟的 Unix 秒时间戳；满槽暂停时可为 0，单次收获植物可为 nil。
+	nextFruitAt: number?,
 }
 
 -- 玩家库存数据，分别按物品标识记录种子与已收获产物数量。

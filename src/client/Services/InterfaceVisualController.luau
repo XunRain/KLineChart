@@ -28,11 +28,10 @@ local function hasOwners(): boolean
 	return next(owners) ~= nil
 end
 
-local function cancelTween(tween: Tween?): nil
+local function cancelTween(tween: Tween?)
 	if tween then
 		tween:Cancel()
 	end
-	return nil
 end
 
 local function ensureBlur(): BlurEffect
@@ -56,28 +55,31 @@ local function ensureBlur(): BlurEffect
 end
 
 local function tweenBlur(target: number)
-	blurTween = cancelTween(blurTween)
+	cancelTween(blurTween)
 	local effect = ensureBlur()
-	blurTween = TweenService:Create(effect, TWEEN_INFO, { Size = target })
-	blurTween:Play()
+	local tween = TweenService:Create(effect, TWEEN_INFO, { Size = target })
+	blurTween = tween
+	tween:Play()
 end
 
 local function tweenCamera(target: number)
-	cameraTween = cancelTween(cameraTween)
+	cancelTween(cameraTween)
 	if not activeCamera then
 		return
 	end
-	cameraTween = TweenService:Create(activeCamera, TWEEN_INFO, {
+	local tween = TweenService:Create(activeCamera, TWEEN_INFO, {
 		FieldOfView = math.clamp(target, MINIMUM_FOV, MAXIMUM_FOV),
 	})
-	cameraTween:Play()
+	cameraTween = tween
+	tween:Play()
 end
 
 local function activateCurrentCamera()
 	local camera = Workspace.CurrentCamera
 	if activeCamera ~= camera then
 		if activeCamera and baselineFov then
-			cameraTween = cancelTween(cameraTween)
+			cancelTween(cameraTween)
+			cameraTween = nil
 			activeCamera.FieldOfView = baselineFov
 		end
 		activeCamera = camera
@@ -94,7 +96,8 @@ end
 local function onCurrentCameraChanged()
 	local oldCamera = activeCamera
 	local oldBaseline = baselineFov
-	cameraTween = cancelTween(cameraTween)
+	cancelTween(cameraTween)
+	cameraTween = nil
 	if oldCamera and oldBaseline then
 		oldCamera.FieldOfView = oldBaseline
 	end

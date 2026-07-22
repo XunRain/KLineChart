@@ -1,6 +1,6 @@
 --!strict
 
--- 本服务端入口按依赖顺序初始化存档、种植、商店、传送、白名单测试与玩家生命周期服务。
+-- 本服务端入口按依赖顺序初始化存档、种植、商店、传送、扩地、白名单测试与玩家生命周期服务。
 
 local Services = script.Services
 
@@ -15,6 +15,7 @@ local SeedShopService = require(Services.SeedShopService)
 local SellShopService = require(Services.SellShopService)
 local TeleportService = require(Services.TeleportService)
 local TestMenuService = require(Services.TestMenuService)
+local PlotExpansionService = require(Services.PlotExpansionService)
 local PlayerLifecycleService = require(Services.PlayerLifecycleService)
 
 RemoteService.Init()
@@ -55,6 +56,12 @@ TeleportService.Init({
 })
 TestMenuService.Init({
 	PlayerDataService = PlayerDataService,
+	InventoryService = InventoryService,
+	RemoteService = RemoteService,
+})
+PlotExpansionService.Init({
+	PlayerDataService = PlayerDataService,
+	PlotService = PlotService,
 	InventoryService = InventoryService,
 	RemoteService = RemoteService,
 })

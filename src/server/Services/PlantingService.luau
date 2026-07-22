@@ -83,6 +83,8 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 		plantedAt = now,
 		nextHarvestAt = now + definition.GrowthTime,
 		harvestCount = 0,
+		fruitCount = if definition.HarvestType == "Repeat" then 0 else nil,
+		nextFruitAt = if definition.HarvestType == "Repeat" then now + definition.GrowthTime else nil,
 	}
 
 	local changed, reason = PlayerDataService.Update(player, function(data)
@@ -108,7 +110,7 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 		end
 		seeds[seedId] -= 1
 		data.Plants[recordId] = record
-		return true
+		return true, nil
 	end)
 
 	if not changed then
@@ -129,7 +131,7 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 				data.Plants[recordId] = nil
 				data.Inventory.Seeds[seedId] = (data.Inventory.Seeds[seedId] or 0) + 1
 			end
-			return true
+			return true, nil
 		end)
 		InventoryService.Sync(player)
 		reject(player, "Plant model could not be created; your seed was returned.")
@@ -157,7 +159,10 @@ function PlantingService.Init(dependencies: {
 	RemoteService = dependencies.RemoteService
 
 	RemoteService.GetEvent("RequestPlant").OnServerEvent:Connect(function(player, requestedPosition, seedId, tool)
-		local ok, err = pcall(handleRequest, player, requestedPosition, seedId, tool)
+		local ok, err = pcall(function()
+			handleRequest(player, requestedPosition, seedId, tool)
+			return true
+		end)
 		if not ok then
 			warn(string.format("[PlantingService] Request failed for %s: %s", player.Name, tostring(err)))
 			reject(player, "Planting failed. Please try again.")

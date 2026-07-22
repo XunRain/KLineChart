@@ -9,12 +9,29 @@ local Workspace = game:GetService("Workspace")
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
+local NpcPromptService = require(script.Parent.NpcPromptService)
 
 local SellShopService = {}
 local PlayerDataService: any
 local InventoryService: any
 local RemoteService: any
 local lastRequestAt: { [Player]: number } = {}
+
+local function sendSellResult(player: Player, payload: { [string]: any })
+	RemoteService.GetEvent("SellProduceResult"):FireClient(player, payload)
+end
+
+local function failRequest(player: Player, actionId: any, reason: string, message: string?, notifyLevel: string?)
+	sendSellResult(player, {
+		ActionId = if type(actionId) == "string" then actionId else "",
+		Success = false,
+		Reason = reason,
+		Message = message,
+	})
+	if message then
+		RemoteService.Notify(player, message, notifyLevel or "Warning")
+	end
+end
 
 local function safeInteger(value: any, minimum: number, maximum: number): boolean
 	return type(value) == "number" and value == math.floor(value) and value >= minimum and value <= maximum
@@ -43,19 +60,22 @@ local function handleRequest(player: Player, actionId: any)
 	if not SellShopConfig.Enabled or player.Parent ~= Players then return end
 	local now = os.clock()
 	local previous = lastRequestAt[player]
-	if previous and now - previous < SellShopConfig.RequestCooldown then return end
+	if previous and now - previous < SellShopConfig.RequestCooldown then
+		failRequest(player, actionId, "Cooldown", nil, nil)
+		return
+	end
 	lastRequestAt[player] = now
 	if type(actionId) ~= "string" then
-		RemoteService.Notify(player, "无效的出售项目。", "Warning")
+		failRequest(player, actionId, "InvalidAction", "无效的出售项目。", "Warning")
 		return
 	end
 	local sellAll = actionId == SellShopConfig.SellAllActionId
 	if not sellAll and not ItemConfig.Get(actionId) then
-		RemoteService.Notify(player, "无效的出售项目。", "Warning")
+		failRequest(player, actionId, "InvalidAction", "无效的出售项目。", "Warning")
 		return
 	end
 	if not PlayerDataService.IsLoaded(player) or not isAliveNearSteven(player) then
-		RemoteService.Notify(player, "请靠近 Steven 后再出售。", "Warning")
+		failRequest(player, actionId, "NotNear", "请靠近 Steven 后再出售。", "Warning")
 		return
 	end
 
@@ -80,14 +100,26 @@ local function handleRequest(player: Player, actionId: any)
 		end
 		if soldCount <= 0 then return false, "NoProduce" end
 		data.Sheckles += payout
-		return true
+		return true, nil
 	end)
 	if not changed then
-		RemoteService.Notify(player, if reason == "NoProduce" then "没有可出售的产物。" else "出售失败，请稍后重试。", "Warning")
+		failRequest(
+			player,
+			actionId,
+			tostring(reason or "Failed"),
+			if reason == "NoProduce" then "没有可出售的产物。" else "出售失败，请稍后重试。",
+			"Warning"
+		)
 		return
 	end
 	PlayerDataService.RequestSave(player)
 	InventoryService.Sync(player)
+	sendSellResult(player, {
+		ActionId = actionId,
+		Success = true,
+		SoldCount = soldCount,
+		Payout = payout,
+	})
 	RemoteService.Notify(player, string.format("出售 %d 个产物，获得 %d Sheckles。", soldCount, payout), "Success")
 end
 
@@ -97,10 +129,23 @@ function SellShopService.Init(dependencies: { PlayerDataService: any, InventoryS
 	InventoryService = dependencies.InventoryService
 	RemoteService = dependencies.RemoteService
 	RemoteService.GetEvent("RequestSellProduce").OnServerEvent:Connect(function(player, actionId)
-		local ok, err = pcall(handleRequest, player, actionId)
+		local ok, err = pcall(function()
+			handleRequest(player, actionId)
+			return true
+		end)
 		if not ok then warn(string.format("[SellShopService] 出售请求失败 %s：%s", player.Name, tostring(err))) end
 	end)
 	Players.PlayerRemoving:Connect(function(player) lastRequestAt[player] = nil end)
+	NpcPromptService.Configure(
+		SellShopConfig.NpcFolderName,
+		SellShopConfig.NpcModelName,
+		SellShopConfig.NpcRootName,
+		SellShopConfig.PreferredPromptName,
+		SellShopConfig.FallbackPromptName,
+		SellShopConfig.PromptActionText,
+		SellShopConfig.PromptObjectText,
+		SellShopConfig.MaximumInteractionDistance
+	)
 end
 
 return SellShopService

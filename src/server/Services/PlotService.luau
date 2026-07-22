@@ -6,10 +6,12 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local PlotExpansionConfig = require(ReplicatedStorage.Shared.PlotExpansionConfig)
 
 local PlotService = {}
 local plotByPlayer: { [Player]: Model } = {}
 local playerByPlot: { [Model]: Player } = {}
+local expansionBaseByPart: { [BasePart]: { Size: Vector3, CFrame: CFrame } } = {}
 
 local function getGardens(): Instance?
 	return Workspace:FindFirstChild("Gardens")
@@ -30,6 +32,63 @@ local function sortedPlots(): { Model }
 		return a.Name < b.Name
 	end)
 	return plots
+end
+
+local function getPlotId(plot: Model): number?
+	local idText = string.match(plot.Name, "^Plot(%d+)$")
+	return if idText then tonumber(idText) else nil
+end
+
+local function findPath(root: Instance, path: { string }): Instance?
+	local current: Instance? = root
+	for _, name in path do
+		current = current and current:FindFirstChild(name)
+		if not current then
+			return nil
+		end
+	end
+	return current
+end
+
+local function getMaxExpansionLevel(): number
+	local maximum = 0
+	for _, level in PlotExpansionConfig.Levels do
+		maximum = math.max(maximum, tonumber(level.Expansion) or 0)
+	end
+	return maximum
+end
+
+local function clampExpansionLevel(level: number): number
+	return math.clamp(math.floor(level), 0, getMaxExpansionLevel())
+end
+
+local function applyExpansionPart(part: BasePart, stepZ: number, offsetDirectionZ: number, level: number)
+	local base = expansionBaseByPart[part]
+	if not base then
+		base = {
+			Size = part.Size,
+			CFrame = part.CFrame,
+		}
+		expansionBaseByPart[part] = base
+	end
+
+	local grow = stepZ * level
+	part.Size = Vector3.new(base.Size.X, base.Size.Y, base.Size.Z + grow)
+	part.CFrame = base.CFrame * CFrame.new(0, 0, offsetDirectionZ * grow * 0.5)
+end
+
+local function resolveExpansionTargets(plot: Model): ({ BasePart }, { string })
+	local targets: { BasePart } = {}
+	local missing: { string } = {}
+	for _, rule in PlotExpansionConfig.ExpandableParts do
+		local target = findPath(plot, rule.Path)
+		if target and target:IsA("BasePart") then
+			table.insert(targets, target)
+		elseif rule.Required == true then
+			table.insert(missing, table.concat(rule.Path, "."))
+		end
+	end
+	return targets, missing
 end
 
 -- 返回当前分配给玩家的地块模型，尚未分配时返回 nil。
@@ -73,6 +132,9 @@ function PlotService.Assign(player: Player): (boolean, string?)
 				plotByPlayer[player] = plot
 				playerByPlot[plot] = player
 				plot:SetAttribute("OwnerUserId", player.UserId)
+				plot:SetAttribute("Owner", player.Name)
+				player:SetAttribute("PlotId", getPlotId(plot))
+				player:SetAttribute(PlotExpansionConfig.PlayerExpansionAttribute, 0)
 				return true
 			end
 		end
@@ -86,9 +148,58 @@ function PlotService.Release(player: Player)
 	if not plot then
 		return
 	end
+	PlotService.ApplyExpansion(player, 0)
 	plot:SetAttribute("OwnerUserId", nil)
+	plot:SetAttribute("Owner", nil)
+	plot:SetAttribute(PlotExpansionConfig.PlotExpansionAttribute, 0)
+	player:SetAttribute("PlotId", nil)
+	player:SetAttribute(PlotExpansionConfig.PlayerExpansionAttribute, nil)
 	plotByPlayer[player] = nil
 	playerByPlot[plot] = nil
+end
+
+-- 返回玩家地块是否具备首版扩展所需的核心 Part，缺失时返回 false。
+function PlotService.HasExpansionTargets(player: Player): boolean
+	local plot = plotByPlayer[player]
+	if not plot then
+		return false
+	end
+	local _, missing = resolveExpansionTargets(plot)
+	return #missing == 0
+end
+
+-- 按指定等级绝对应用地块扩展尺寸，并同步玩家与地块属性。
+function PlotService.ApplyExpansion(player: Player, level: number): (boolean, string?)
+	local plot = plotByPlayer[player]
+	if not plot then
+		return false, "NoPlot"
+	end
+	return PlotService.ApplyExpansionToPlot(plot, player, level)
+end
+
+-- 对指定 Plot 应用扩展尺寸；player 可为 nil，此时只写 Plot 属性不写玩家属性。
+function PlotService.ApplyExpansionToPlot(plot: Model, player: Player?, level: number): (boolean, string?)
+	local normalizedLevel = clampExpansionLevel(level)
+	local targets, missing = resolveExpansionTargets(plot)
+	if #missing > 0 then
+		return false, "MissingExpansionParts:" .. table.concat(missing, ",")
+	end
+	if #targets == 0 then
+		return false, "NoExpansionParts"
+	end
+
+	for _, rule in PlotExpansionConfig.ExpandableParts do
+		local target = findPath(plot, rule.Path)
+		if target and target:IsA("BasePart") then
+			applyExpansionPart(target, tonumber(rule.StepZ) or 0, tonumber(rule.OffsetDirectionZ) or -1, normalizedLevel)
+		end
+	end
+
+	plot:SetAttribute(PlotExpansionConfig.PlotExpansionAttribute, normalizedLevel)
+	if player then
+		player:SetAttribute(PlotExpansionConfig.PlayerExpansionAttribute, normalizedLevel)
+	end
+	return true, nil
 end
 
 local function candidateAreas(plot: Model): { BasePart }

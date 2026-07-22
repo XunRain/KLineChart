@@ -34,7 +34,7 @@ local function createTextButton(name: string, text: string, size: UDim2): TextBu
 	button.AutoButtonColor = true
 	button.BackgroundColor3 = Color3.fromRGB(42, 55, 72)
 	button.TextColor3 = Color3.fromRGB(244, 247, 252)
-	button.Font = Enum.Font.GothamSemibold
+	button.Font = Enum.Font.GothamBold
 	button.TextSize = 16
 	button.TextWrapped = true
 	button.Text = text

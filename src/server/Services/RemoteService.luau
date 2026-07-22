@@ -14,19 +14,21 @@ function RemoteService.Init()
 	local existing = ReplicatedStorage:FindFirstChild(NetworkConfig.FolderName)
 	if existing and not existing:IsA("Folder") then
 		existing:Destroy()
-		existing = nil
 	end
-	local folder = existing :: Folder?
-	if not folder then
+	local folder: Folder
+	if existing and existing:IsA("Folder") then
+		folder = existing
+	else
 		folder = Instance.new("Folder")
 		folder.Name = NetworkConfig.FolderName
 		folder.Parent = ReplicatedStorage
 	end
 
-	for logicalName, instanceName in NetworkConfig.Events do
+	local configuredEvents = NetworkConfig.Events :: { [string]: string }
+	for eventKey: string, remoteName: string in configuredEvents do
 		local remote: RemoteEvent? = nil
 		for _, child in folder:GetChildren() do
-			if child.Name == instanceName then
+			if child.Name == remoteName then
 				if child:IsA("RemoteEvent") and not remote then
 					remote = child
 				else
@@ -36,10 +38,10 @@ function RemoteService.Init()
 		end
 		if not remote then
 			remote = Instance.new("RemoteEvent")
-			remote.Name = instanceName
+			remote.Name = remoteName
 			remote.Parent = folder
 		end
-		events[logicalName] = remote
+		events[eventKey] = remote :: RemoteEvent
 	end
 end
 

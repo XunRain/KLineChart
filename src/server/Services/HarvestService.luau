@@ -44,6 +44,7 @@ local function handlePrompt(prompt: ProximityPrompt, player: Player)
 		finish()
 		return
 	end
+	local fruitSlotCount = if model then model:GetAttribute("FruitSlotCount") else nil
 
 	local removed = false
 	local updatedRecord: any = nil
@@ -57,14 +58,13 @@ local function handlePrompt(prompt: ProximityPrompt, player: Player)
 		if not definition then
 			return false, "PlantConfigMissing"
 		end
-		local now = os.time()
-		if not PlantGrowthService.IsHarvestable(record.nextHarvestAt, now) then
-			return false, "NotReady"
-		end
-
 		harvestedPlantId = record.plantId
-		data.Inventory.Produce[record.plantId] = (data.Inventory.Produce[record.plantId] or 0) + definition.YieldAmount
 		if definition.HarvestType == "Single" then
+			local now = os.time()
+			if not PlantGrowthService.IsHarvestable(record.nextHarvestAt, now) then
+				return false, "NotReady"
+			end
+			data.Inventory.Produce[record.plantId] = (data.Inventory.Produce[record.plantId] or 0) + definition.YieldAmount
 			data.Plants[recordId] = nil
 			removed = true
 		else
@@ -72,11 +72,17 @@ local function handlePrompt(prompt: ProximityPrompt, player: Player)
 			if not regrowTime then
 				return false, "RegrowConfigMissing"
 			end
-			record.harvestCount += 1
-			record.nextHarvestAt = PlantGrowthService.NextRepeatHarvest(now, regrowTime)
+			if type(fruitSlotCount) ~= "number" or fruitSlotCount <= 0 then
+				return false, "FruitSlotCountMissing"
+			end
+			local now = os.time()
+			if not PlantGrowthService.ConsumeRepeatFruit(record, definition.GrowthTime, regrowTime, fruitSlotCount, now) then
+				return false, "NotReady"
+			end
+			data.Inventory.Produce[record.plantId] = (data.Inventory.Produce[record.plantId] or 0) + definition.YieldAmount
 			updatedRecord = record
 		end
-		return true
+		return true, nil
 	end)
 
 	if not changed then
@@ -114,7 +120,10 @@ function HarvestService.Init(dependencies: {
 	RemoteService = dependencies.RemoteService
 
 	ProximityPromptService.PromptTriggered:Connect(function(prompt, player)
-		local ok, err = pcall(handlePrompt, prompt, player)
+		local ok, err = pcall(function()
+			handlePrompt(prompt, player)
+			return true
+		end)
 		if not ok then
 			local recordId = prompt:GetAttribute("PlantRecordId")
 			if type(recordId) == "string" then

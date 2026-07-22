@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local PlotExpansionConfig = require(ReplicatedStorage.Shared.PlotExpansionConfig)
 local DataStoreConfig = require(script.Parent.Parent.Config.DataStoreConfig)
 
 type PlantRecord = {
@@ -20,11 +21,14 @@ type PlantRecord = {
 	plantedAt: number,
 	nextHarvestAt: number,
 	harvestCount: number,
+	fruitCount: number?,
+	nextFruitAt: number?,
 }
 
 type PlayerData = {
 	Version: number,
 	Sheckles: number,
+	OwnedExpansions: number,
 	Inventory: {
 		Seeds: { [string]: number },
 		Produce: { [string]: number },
@@ -66,6 +70,7 @@ local function defaultData(): PlayerData
 	return {
 		Version = DataStoreConfig.SchemaVersion,
 		Sheckles = EconomyConfig.StartingSheckles,
+		OwnedExpansions = 0,
 		Inventory = {
 			Seeds = ItemConfig.GetStartingSeeds(),
 			Produce = {},
@@ -91,6 +96,14 @@ local function finiteNumber(value: any, fallback: number): number
 	return fallback
 end
 
+local function maxExpansionLevel(): number
+	local maximum = 0
+	for _, level in PlotExpansionConfig.Levels do
+		maximum = math.max(maximum, math.floor(finiteNumber(level.Expansion, 0)))
+	end
+	return maximum
+end
+
 -- 只保留可恢复的纯数据，损坏条目会被跳过。
 local function normalize(raw: any): PlayerData
 	if type(raw) ~= "table" then
@@ -104,6 +117,11 @@ local function normalize(raw: any): PlayerData
 		math.floor(finiteNumber(raw.Sheckles, EconomyConfig.StartingSheckles)),
 		0,
 		EconomyConfig.MaximumSheckles
+	)
+	normalized.OwnedExpansions = math.clamp(
+		math.floor(finiteNumber(raw.OwnedExpansions, 0)),
+		0,
+		maxExpansionLevel()
 	)
 
 	if type(raw.Inventory) == "table" then
@@ -134,7 +152,7 @@ local function normalize(raw: any): PlayerData
 				local plantedAt = math.floor(finiteNumber(record.plantedAt, os.time()))
 				local definition = ItemConfig.Get(record.plantId)
 				local nextAt = plantedAt + (definition and definition.GrowthTime or 0)
-				normalized.Plants[recordId] = {
+				local normalizedRecord: PlantRecord = {
 					recordId = recordId,
 					plantId = record.plantId,
 					position = {
@@ -147,6 +165,11 @@ local function normalize(raw: any): PlayerData
 					nextHarvestAt = math.max(plantedAt, math.floor(finiteNumber(record.nextHarvestAt, nextAt))),
 					harvestCount = math.max(0, math.floor(finiteNumber(record.harvestCount, 0))),
 				}
+				if definition and definition.HarvestType == "Repeat" then
+					normalizedRecord.fruitCount = math.max(0, math.floor(finiteNumber(record.fruitCount, 0)))
+					normalizedRecord.nextFruitAt = math.max(0, math.floor(finiteNumber(record.nextFruitAt, normalizedRecord.nextHarvestAt)))
+				end
+				normalized.Plants[recordId] = normalizedRecord
 				plantCount += 1
 			end
 		end

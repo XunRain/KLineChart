@@ -25,20 +25,23 @@ local function ensureFolder(parent: Instance, name: string): Folder
 end
 
 local function setValues(folder: Folder, values: { [string]: number })
-	local expected = {}
+	local expected: { [string]: boolean } = {}
 	for itemId in ItemConfig.Items do
 		expected[itemId] = true
-		local value = folder:FindFirstChild(itemId)
-		if value and not value:IsA("IntValue") then
-			value:Destroy()
-			value = nil
+		local existing = folder:FindFirstChild(itemId)
+		if existing and not existing:IsA("IntValue") then
+			existing:Destroy()
+			existing = nil
 		end
-		if not value then
+		local value: IntValue
+		if existing and existing:IsA("IntValue") then
+			value = existing
+		else
 			value = Instance.new("IntValue")
 			value.Name = itemId
 			value.Parent = folder
 		end
-		(value :: IntValue).Value = values[itemId] or 0
+		value.Value = values[itemId] or 0
 	end
 	for _, child in folder:GetChildren() do
 		if child:IsA("IntValue") and not expected[child.Name] then
@@ -48,22 +51,26 @@ local function setValues(folder: Folder, values: { [string]: number })
 end
 
 local function setIntValue(parent: Instance, name: string, amount: number)
-	local value = parent:FindFirstChild(name)
-	if value and not value:IsA("IntValue") then
-		value:Destroy()
-		value = nil
+	local existing = parent:FindFirstChild(name)
+	if existing and not existing:IsA("IntValue") then
+		existing:Destroy()
+		existing = nil
 	end
-	if not value then
+	local value: IntValue
+	if existing and existing:IsA("IntValue") then
+		value = existing
+	else
 		value = Instance.new("IntValue")
 		value.Name = name
 		value.Parent = parent
 	end
-	(value :: IntValue).Value = amount
+	value.Value = amount
 end
 
 local function findSeedTools(player: Player, seedId: string): { Tool }
-	local tools = {}
-	for _, container in { player:FindFirstChildOfClass("Backpack"), player.Character } do
+	local tools: { Tool } = {}
+	local containers: { Instance? } = { player:FindFirstChildOfClass("Backpack"), player.Character }
+	for _, container in containers do
 		if container then
 			for _, child in container:GetChildren() do
 				if child:IsA("Tool")
@@ -102,12 +109,12 @@ local function syncSeedTool(player: Player, seedId: string, amount: number)
 		tool:SetAttribute("KLineSeedTool", true)
 		tool:SetAttribute("SeedId", seedId)
 		tool:SetAttribute("OwnerUserId", player.UserId)
-		local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
-		if not backpack then
+		local backpackInstance = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
+		if not backpackInstance or not backpackInstance:IsA("Backpack") then
 			tool:Destroy()
 			return
 		end
-		tool.Parent = backpack
+		tool.Parent = backpackInstance
 	end
 	tool.Name = string.format("%s Seed [%d]", definition.DisplayName, amount)
 	tool:SetAttribute("SeedCount", amount)

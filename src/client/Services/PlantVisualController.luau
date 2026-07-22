@@ -1,7 +1,6 @@
 --!strict
 
--- 本模块按服务端时间戳驱动预制植株成长与单活跃挂点果实轮换，仅改变本地视觉。
-
+-- 本模块按服务端时间戳驱动预制植株成长与多果实槽顺序生长，仅改变本地视觉。
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -82,7 +81,7 @@ local function collectFruitBindings(
 	minimumScale: number,
 	expectedCount: any
 ): ({ FruitBinding }, boolean)
-	local bindings = {}
+	local bindings: { FruitBinding } = {}
 	local container = model:FindFirstChild("RuntimeFruits")
 	if not container or not container:IsA("Folder") then
 		return bindings, false
@@ -92,7 +91,8 @@ local function collectFruitBindings(
 		and math.abs(expectedCount) < math.huge
 		and expectedCount == math.floor(expectedCount)
 		and expectedCount > 0
-	local usedIndexes = {}
+	local expectedCountNumber: number? = if expectedIsValid then expectedCount :: number else nil
+	local usedIndexes: { [number]: boolean } = {}
 	local complete = expectedIsValid
 	for _, child in container:GetChildren() do
 		if child:IsA("Model") and child:GetAttribute("KLineFruitVisual") == true then
@@ -105,19 +105,21 @@ local function collectFruitBindings(
 				and math.abs(slotIndex) < math.huge
 				and slotIndex == math.floor(slotIndex)
 				and slotIndex > 0
-				and expectedIsValid
-				and slotIndex <= expectedCount
+				and expectedCountNumber ~= nil
+				and slotIndex <= expectedCountNumber
 				and not usedIndexes[slotIndex]
 			if indexIsValid and slot and slot:IsA("Attachment") and slot:GetAttribute("FruitSlot") == true and child.PrimaryPart then
-				usedIndexes[slotIndex] = true
+				local index = slotIndex :: number
+				local slotAttachment = slot :: Attachment
+				usedIndexes[index] = true
 				table.insert(bindings, {
 					Model = child,
-					Slot = slot,
-					Index = slotIndex,
+					Slot = slotAttachment,
+					Index = index,
 					LastScale = minimumScale,
 					Visible = false,
 				})
-				child:PivotTo(slot.WorldCFrame)
+				child:PivotTo(slotAttachment.WorldCFrame)
 			else
 				complete = false
 			end
@@ -232,6 +234,8 @@ local function track(instance: Instance)
 	end
 	table.insert(state.Connections, instance:GetAttributeChangedSignal("NextHarvestAt"):Connect(markDirty))
 	table.insert(state.Connections, instance:GetAttributeChangedSignal("HarvestCount"):Connect(markDirty))
+	table.insert(state.Connections, instance:GetAttributeChangedSignal("FruitCount"):Connect(markDirty))
+	table.insert(state.Connections, instance:GetAttributeChangedSignal("FruitNextReadyAt"):Connect(markDirty))
 	table.insert(state.Connections, instance:GetAttributeChangedSignal("FruitSlotCount"):Connect(function()
 		refreshFruits(instance, state)
 	end))
@@ -253,6 +257,8 @@ local function updateModel(model: Model, state: VisualState, now: number)
 	local growthTime = model:GetAttribute("GrowthTime")
 	local nextHarvestAt = model:GetAttribute("NextHarvestAt")
 	local harvestCount = model:GetAttribute("HarvestCount")
+	local fruitCount = model:GetAttribute("FruitCount")
+	local fruitNextReadyAt = model:GetAttribute("FruitNextReadyAt")
 	if type(plantedAt) ~= "number"
 		or type(growthTime) ~= "number"
 		or type(nextHarvestAt) ~= "number"
@@ -267,41 +273,58 @@ local function updateModel(model: Model, state: VisualState, now: number)
 	local bodyScale = state.MinimumScale + (1 - state.MinimumScale) * bodyProgress
 	state.LastBodyScale = scaleModel(state.Body, bodyScale, state.LastBodyScale)
 
-	local fruitProgress = 1
-	local fruitVisible = true
-	local activeIndex: number? = nil
+	local matureFruitCount = 0
+	local growingIndex: number? = nil
+	local growingProgress = 0
+	local growingVisible = false
 	if state.ExpectsFruits then
-		if state.FruitBindingsReady and #state.Fruits > 0 then
-			local normalizedHarvestCount = math.max(0, math.floor(harvestCount))
-			activeIndex = (normalizedHarvestCount % #state.Fruits) + 1
-		end
-		if harvestCount <= 0 then
-			local startAlpha = state.FruitStartAlpha
-			fruitVisible = bodyProgress >= startAlpha
-			fruitProgress = if startAlpha >= 1
-				then (if bodyProgress >= 1 then 1 else 0)
-				else math.clamp((bodyProgress - startAlpha) / (1 - startAlpha), 0, 1)
-		else
-			local regrowTime = state.RegrowTime
-			fruitProgress = if regrowTime and regrowTime > 0
-				then math.clamp(1 - (nextHarvestAt - now) / regrowTime, 0, 1)
-				else 1
+		local slotCount = if state.FruitBindingsReady then #state.Fruits else 0
+		local normalizedFruitCount = if type(fruitCount) == "number" and fruitCount == fruitCount
+			then math.max(0, math.floor(fruitCount))
+			else 0
+		matureFruitCount = math.clamp(normalizedFruitCount, 0, slotCount)
+		if slotCount > 0 and matureFruitCount < slotCount then
+			growingIndex = matureFruitCount + 1
+			if matureFruitCount <= 0 and bodyProgress < 1 then
+				local startAlpha = state.FruitStartAlpha
+				growingVisible = bodyProgress >= startAlpha
+				growingProgress = if startAlpha >= 1
+					then (if bodyProgress >= 1 then 1 else 0)
+					else math.clamp((bodyProgress - startAlpha) / (1 - startAlpha), 0, 1)
+			else
+				local regrowTime = state.RegrowTime
+				local nextReadyAt = if type(fruitNextReadyAt) == "number" then fruitNextReadyAt else nextHarvestAt
+				if nextReadyAt > 0 then
+					growingProgress = if regrowTime and regrowTime > 0
+						then math.clamp(1 - (nextReadyAt - now) / regrowTime, 0, 1)
+						else 1
+					growingVisible = growingProgress > 0
+				end
+			end
 		end
 	end
 
-	local fruitScale = state.MinimumScale + (1 - state.MinimumScale) * fruitProgress
 	for _, binding in state.Fruits do
-		local isActive = state.FruitBindingsReady and binding.Index == activeIndex
-		setFruitVisible(binding, isActive and fruitVisible)
-		local targetScale = if isActive then fruitScale else state.MinimumScale
+		local isMature = state.FruitBindingsReady and binding.Index <= matureFruitCount
+		local isGrowing = state.FruitBindingsReady and binding.Index == growingIndex
+		local targetScale = state.MinimumScale
+		if isMature then
+			targetScale = 1
+		elseif isGrowing then
+			targetScale = state.MinimumScale + (1 - state.MinimumScale) * growingProgress
+		end
+		setFruitVisible(binding, isMature or (isGrowing and growingVisible))
 		binding.LastScale = scaleModel(binding.Model, targetScale, binding.LastScale)
-		-- Body 缩放会移动 Attachment；果实每次缩放后重新对齐当前世界挂点。
+		-- Body 缩放会移动 Attachment，果实每次缩放后重新对齐当前世界挂点。
 		binding.Model:PivotTo(binding.Slot.WorldCFrame)
 	end
 
 	state.Dirty = false
 	state.Done = bodyProgress >= 1
-		and (not state.ExpectsFruits or (state.FruitBindingsReady and fruitProgress >= 1))
+		and (
+			not state.ExpectsFruits
+			or (state.FruitBindingsReady and (#state.Fruits == 0 or matureFruitCount >= #state.Fruits or growingProgress >= 1))
+		)
 end
 
 local function handleDescendant(instance: Instance)
@@ -321,7 +344,7 @@ local function handleDescendant(instance: Instance)
 	end
 end
 
--- 跟踪花园内现有和新增预制植物，并以配置频率更新尚未稳定的视觉状态。
+-- 跟踪花园内现有和新增预制植物，并以配置频率刷新尚未稳定的视觉状态。
 function PlantVisualController.Init()
 	local gardens = Workspace:WaitForChild("Gardens")
 	for _, descendant in gardens:GetDescendants() do
