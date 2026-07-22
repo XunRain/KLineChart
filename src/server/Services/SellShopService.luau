@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块在 Steven 附近以单次权威数据事务出售单品种全部产物或全部品种产物。
+-- 本模块在 Steven 附近以权威事务出售全部产物、单品种产物或当前手持产物。
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -56,6 +56,33 @@ local function isAliveNearSteven(player: Player): boolean
 		and (playerRoot.Position - npcRoot.Position).Magnitude <= SellShopConfig.MaximumInteractionDistance
 end
 
+local function isSellAction(actionId: string): boolean
+	return actionId == SellShopConfig.SellAllActionId
+		or actionId == SellShopConfig.SellHeldOneActionId
+		or actionId == SellShopConfig.QuoteHeldOneActionId
+		or ItemConfig.Get(actionId) ~= nil
+end
+
+local function quoteHeldProduce(player: Player, actionId: string)
+	local itemId = InventoryService.GetHeldProduce(player)
+	if not itemId then
+		failRequest(player, actionId, "NoHeldProduce", "请先手持一个产物。", "Warning")
+		return
+	end
+	local definition = ItemConfig.Get(itemId)
+	if not definition or not safeInteger(definition.BaseSellPrice, 1, EconomyConfig.MaximumSheckles) then
+		failRequest(player, actionId, "InvalidProduceData", "估价失败，请稍后重试。", "Warning")
+		return
+	end
+	sendSellResult(player, {
+		ActionId = actionId,
+		Success = true,
+		ItemId = itemId,
+		ItemName = definition.DisplayName,
+		UnitPrice = definition.BaseSellPrice,
+	})
+end
+
 local function handleRequest(player: Player, actionId: any)
 	if not SellShopConfig.Enabled or player.Parent ~= Players then return end
 	local now = os.clock()
@@ -69,8 +96,7 @@ local function handleRequest(player: Player, actionId: any)
 		failRequest(player, actionId, "InvalidAction", "无效的出售项目。", "Warning")
 		return
 	end
-	local sellAll = actionId == SellShopConfig.SellAllActionId
-	if not sellAll and not ItemConfig.Get(actionId) then
+	if not isSellAction(actionId) then
 		failRequest(player, actionId, "InvalidAction", "无效的出售项目。", "Warning")
 		return
 	end
@@ -78,23 +104,41 @@ local function handleRequest(player: Player, actionId: any)
 		failRequest(player, actionId, "NotNear", "请靠近 Steven 后再出售。", "Warning")
 		return
 	end
+	if actionId == SellShopConfig.QuoteHeldOneActionId then
+		quoteHeldProduce(player, actionId)
+		return
+	end
+
+	local sellAll = actionId == SellShopConfig.SellAllActionId
+	local sellHeldOne = actionId == SellShopConfig.SellHeldOneActionId
+	local heldItemId: string? = nil
+	if sellHeldOne then
+		heldItemId = InventoryService.GetHeldProduce(player)
+		if not heldItemId then
+			failRequest(player, actionId, "NoHeldProduce", "请先手持一个产物。", "Warning")
+			return
+		end
+	end
 
 	local soldCount = 0
 	local payout = 0
+	local soldItemId: string? = nil
 	local changed, reason = PlayerDataService.Update(player, function(data)
 		if not safeInteger(data.Sheckles, 0, EconomyConfig.MaximumSheckles) then return false, "InvalidBalance" end
 		for itemId, definition in ItemConfig.Items do
-			if sellAll or itemId == actionId then
+			if sellAll or itemId == actionId or itemId == heldItemId then
 				local count = data.Inventory.Produce[itemId] or 0
 				if not safeInteger(count, 0, EconomyConfig.MaximumSeedInventory)
 					or not safeInteger(definition.BaseSellPrice, 1, EconomyConfig.MaximumSheckles)
 				then return false, "InvalidProduceData" end
 				if count > 0 then
+					local amount = if sellHeldOne then 1 else count
 					local remaining = EconomyConfig.MaximumSheckles - data.Sheckles - payout
-					if count > math.floor(remaining / definition.BaseSellPrice) then return false, "CurrencyOverflow" end
-					payout += count * definition.BaseSellPrice
-					soldCount += count
-					data.Inventory.Produce[itemId] = 0
+					if amount > math.floor(remaining / definition.BaseSellPrice) then return false, "CurrencyOverflow" end
+					payout += amount * definition.BaseSellPrice
+					soldCount += amount
+					soldItemId = itemId
+					data.Inventory.Produce[itemId] = count - amount
 				end
 			end
 		end
@@ -114,11 +158,14 @@ local function handleRequest(player: Player, actionId: any)
 	end
 	PlayerDataService.RequestSave(player)
 	InventoryService.Sync(player)
+	local soldDefinition = if soldItemId then ItemConfig.Get(soldItemId) else nil
 	sendSellResult(player, {
 		ActionId = actionId,
 		Success = true,
 		SoldCount = soldCount,
 		Payout = payout,
+		ItemId = soldItemId,
+		ItemName = if soldDefinition then soldDefinition.DisplayName else nil,
 	})
 	RemoteService.Notify(player, string.format("出售 %d 个产物，获得 %d Sheckles。", soldCount, payout), "Success")
 end

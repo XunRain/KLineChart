@@ -47,9 +47,9 @@ return {
 	IntroLine = "Got anything to sell?",
 	-- 模板同款选项：出售背包中全部可出售产物，对应服务端 SellAll 权威动作。
 	SellInventoryOptionText = "Sell Inventory!",
-	-- 模板同款选项：出售当前手持产物；KLineChart 暂未实现手持产物 Tool，客户端只给 NPC 反馈。
+	-- 模板同款选项：出售当前手持产物 Tool 对应品种的 1 个产物；服务端重新读取当前装备 Tool 与权威库存。
 	SellThisOptionText = "Sell This!",
-	-- 模板同款选项：询问当前手持产物价值；KLineChart 暂未实现手持产物 Tool，客户端只给 NPC 反馈。
+	-- 模板同款选项：询问当前手持产物 Tool 的单个基础价值；未来动态市场上线后改为当前行情单价。
 	PriceCheckOptionText = "How much is this worth?",
 	-- 模板同款选项：议价；动态市场与议价尚未实现，客户端只给 NPC 不可用反馈。
 	BargainOptionText = "Bargain!",
@@ -57,4 +57,8 @@ return {
 	NevermindOptionText = "Nevermind",
 	-- 出售全部品种时客户端唯一允许提交的稳定动作标识。
 	SellAllActionId = "SellAll",
+	-- 出售当前手持产物 1 个时客户端提交的稳定动作标识；服务端不接受客户端传品种或数量。
+	SellHeldOneActionId = "SellHeldOne",
+	-- 询问当前手持产物单个价值时客户端提交的稳定动作标识；服务端不接受客户端传价格。
+	QuoteHeldOneActionId = "QuoteHeldOne",
 }

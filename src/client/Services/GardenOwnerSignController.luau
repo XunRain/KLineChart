@@ -15,7 +15,7 @@ local billboardByPlot: { [Model]: BillboardGui } = {}
 local EMPTY_GARDEN_TEXT = "Empty Garden"
 local OWN_GARDEN_TEXT = "Your Garden"
 local BILLBOARD_NAME_PREFIX = "GardenOwnerBillboard_"
-local BILLBOARD_SIZE = UDim2.fromScale(8, 4.6)
+local BILLBOARD_SIZE = UDim2.fromScale(16, 9.2)
 local BILLBOARD_HEIGHT_OFFSET = Vector3.new(0, 30, 0)
 
 local function disconnectPlot(plot: Model)

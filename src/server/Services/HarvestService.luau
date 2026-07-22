@@ -45,6 +45,7 @@ local function handlePrompt(prompt: ProximityPrompt, player: Player)
 		return
 	end
 	local fruitSlotCount = if model then model:GetAttribute("FruitSlotCount") else nil
+	local fruitSlotIndex = prompt:GetAttribute("FruitSlotIndex")
 
 	local removed = false
 	local updatedRecord: any = nil
@@ -76,7 +77,15 @@ local function handlePrompt(prompt: ProximityPrompt, player: Player)
 				return false, "FruitSlotCountMissing"
 			end
 			local now = os.time()
-			if not PlantGrowthService.ConsumeRepeatFruit(record, definition.GrowthTime, regrowTime, fruitSlotCount, now) then
+			local preferredSlot = if type(fruitSlotIndex) == "number" then fruitSlotIndex else nil
+			if not PlantGrowthService.ConsumeRepeatFruit(
+				record,
+				definition.GrowthTime,
+				regrowTime,
+				fruitSlotCount,
+				preferredSlot,
+				now
+			) then
 				return false, "NotReady"
 			end
 			data.Inventory.Produce[record.plantId] = (data.Inventory.Produce[record.plantId] or 0) + definition.YieldAmount

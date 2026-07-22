@@ -23,6 +23,8 @@ type PlantRecord = {
 	harvestCount: number,
 	fruitCount: number?,
 	nextFruitAt: number?,
+	fruitSlots: { [number]: boolean }?,
+	fruitGrowingSlot: number?,
 }
 
 type PlayerData = {
@@ -32,6 +34,7 @@ type PlayerData = {
 	Inventory: {
 		Seeds: { [string]: number },
 		Produce: { [string]: number },
+		HotbarLayout: { [string]: string },
 	},
 	Plants: { [string]: PlantRecord },
 }
@@ -74,6 +77,7 @@ local function defaultData(): PlayerData
 		Inventory = {
 			Seeds = ItemConfig.GetStartingSeeds(),
 			Produce = {},
+			HotbarLayout = {},
 		},
 		Plants = {},
 	}
@@ -136,6 +140,14 @@ local function normalize(raw: any): PlayerData
 				normalized.Inventory.Produce[itemId] = math.max(0, math.floor(finiteNumber(raw.Inventory.Produce[itemId], 0)))
 			end
 		end
+		if type(raw.Inventory.HotbarLayout) == "table" then
+			for index = 1, 10 do
+				local rawKey = raw.Inventory.HotbarLayout[tostring(index)] or raw.Inventory.HotbarLayout[index]
+				if type(rawKey) == "string" and #rawKey <= 128 then
+					normalized.Inventory.HotbarLayout[tostring(index)] = rawKey
+				end
+			end
+		end
 	end
 
 	if type(raw.Plants) == "table" then
@@ -168,6 +180,21 @@ local function normalize(raw: any): PlayerData
 				if definition and definition.HarvestType == "Repeat" then
 					normalizedRecord.fruitCount = math.max(0, math.floor(finiteNumber(record.fruitCount, 0)))
 					normalizedRecord.nextFruitAt = math.max(0, math.floor(finiteNumber(record.nextFruitAt, normalizedRecord.nextHarvestAt)))
+					if type(record.fruitSlots) == "table" then
+						normalizedRecord.fruitSlots = {}
+						for index, mature in record.fruitSlots do
+							local numericIndex = if type(index) == "number" then index
+								elseif type(index) == "string" then tonumber(index)
+								else nil
+							if numericIndex and numericIndex > 0 and numericIndex == math.floor(numericIndex) then
+								normalizedRecord.fruitSlots[numericIndex] = mature == true
+							end
+						end
+					end
+					local growingSlot = math.floor(finiteNumber(record.fruitGrowingSlot, 0))
+					if growingSlot > 0 then
+						normalizedRecord.fruitGrowingSlot = growingSlot
+					end
 				end
 				normalized.Plants[recordId] = normalizedRecord
 				plantCount += 1

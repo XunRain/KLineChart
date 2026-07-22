@@ -65,8 +65,6 @@ function TeleportController.Init()
 	local existing = playerGui:FindFirstChild(TeleportConfig.ScreenGuiName)
 	if existing then
 		bindScreen(existing, requestTeleport)
-	else
-		warn(string.format("[TeleportController] 缺少 PlayerGui.%s，等待 Studio UI 后续复制", TeleportConfig.ScreenGuiName))
 	end
 	playerGui.ChildAdded:Connect(function(child)
 		if child.Name == TeleportConfig.ScreenGuiName then

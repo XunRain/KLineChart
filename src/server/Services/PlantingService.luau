@@ -32,6 +32,15 @@ local function reject(player: Player, message: string)
 	RemoteService.Notify(player, message, "Warning")
 end
 
+local function getGerminationDelay(): number
+	local minDelay = math.max(0, math.floor(ItemConfig.Limits.GerminationDelayMin or 0))
+	local maxDelay = math.max(minDelay, math.floor(ItemConfig.Limits.GerminationDelayMax or minDelay))
+	if maxDelay <= minDelay then
+		return minDelay
+	end
+	return math.random(minDelay, maxDelay)
+end
+
 local function handleRequest(player: Player, requestedPosition: any, seedId: any, tool: any)
 	if not PlayerDataService.IsLoaded(player) then
 		reject(player, "Your data is not ready yet.")
@@ -75,16 +84,17 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 
 	local recordId = HttpService:GenerateGUID(false)
 	local now = os.time()
+	local growthStartAt = now + getGerminationDelay()
 	local record = {
 		recordId = recordId,
 		plantId = seedId,
 		position = { x = localPosition.X, y = localPosition.Y, z = localPosition.Z },
 		rotationY = 0,
-		plantedAt = now,
-		nextHarvestAt = now + definition.GrowthTime,
+		plantedAt = growthStartAt,
+		nextHarvestAt = growthStartAt + definition.GrowthTime,
 		harvestCount = 0,
 		fruitCount = if definition.HarvestType == "Repeat" then 0 else nil,
-		nextFruitAt = if definition.HarvestType == "Repeat" then now + definition.GrowthTime else nil,
+		nextFruitAt = if definition.HarvestType == "Repeat" then growthStartAt + definition.GrowthTime else nil,
 	}
 
 	local changed, reason = PlayerDataService.Update(player, function(data)
@@ -141,6 +151,7 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 
 	PlayerDataService.RequestSave(player)
 	InventoryService.Sync(player)
+	RemoteService.GetEvent("PlantingFx"):FireAllClients(worldPosition, seedId, recordId)
 	RemoteService.Notify(player, string.format("Planted %s.", definition.DisplayName), "Success")
 end
 

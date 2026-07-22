@@ -21,7 +21,7 @@ local PlayerLifecycleService = require(Services.PlayerLifecycleService)
 RemoteService.Init()
 PlayerDataService.Init()
 PlotService.Init()
-InventoryService.Init({ PlayerDataService = PlayerDataService })
+InventoryService.Init({ PlayerDataService = PlayerDataService, RemoteService = RemoteService })
 PlantService.Init({
 	PlotService = PlotService,
 	PlayerDataService = PlayerDataService,

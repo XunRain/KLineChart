@@ -32,6 +32,7 @@ type VisualState = {
 
 local PlantVisualController = {}
 local tracked: { [Model]: VisualState } = {}
+local warnedInvalidPlants: { [Model]: boolean } = {}
 
 local function setFruitVisible(binding: FruitBinding, visible: boolean)
 	if binding.Visible == visible then
@@ -55,6 +56,7 @@ local function disconnectState(model: Model)
 		return
 	end
 	tracked[model] = nil
+	warnedInvalidPlants[model] = nil
 	for _, connection in state.Connections do
 		connection:Disconnect()
 	end
@@ -73,6 +75,32 @@ local function hideRawFruit(model: Model, minimumScale: number)
 	if model.PrimaryPart then
 		model:ScaleTo(minimumScale)
 	end
+end
+
+local function resolveBodyRoot(body: Model): BasePart?
+	local primaryPart = body.PrimaryPart
+	if primaryPart and primaryPart:IsA("BasePart") and primaryPart.Name == "BodyRoot" then
+		return primaryPart
+	end
+	local bodyRoot = body:FindFirstChild("BodyRoot")
+	if bodyRoot and bodyRoot:IsA("BasePart") then
+		body.PrimaryPart = bodyRoot
+		return bodyRoot
+	end
+	return nil
+end
+
+local function resolveModelPrimaryPart(model: Model, preferredName: string): BasePart?
+	local primaryPart = model.PrimaryPart
+	if primaryPart and primaryPart:IsA("BasePart") then
+		return primaryPart
+	end
+	local part = model:FindFirstChild(preferredName)
+	if part and part:IsA("BasePart") then
+		model.PrimaryPart = part
+		return part
+	end
+	return nil
 end
 
 local function collectFruitBindings(
@@ -108,7 +136,8 @@ local function collectFruitBindings(
 				and expectedCountNumber ~= nil
 				and slotIndex <= expectedCountNumber
 				and not usedIndexes[slotIndex]
-			if indexIsValid and slot and slot:IsA("Attachment") and slot:GetAttribute("FruitSlot") == true and child.PrimaryPart then
+			local fruitRoot = resolveModelPrimaryPart(child, "Root")
+			if indexIsValid and slot and slot:IsA("Attachment") and slot:GetAttribute("FruitSlot") == true and fruitRoot then
 				local index = slotIndex :: number
 				local slotAttachment = slot :: Attachment
 				usedIndexes[index] = true
@@ -201,12 +230,18 @@ local function track(instance: Instance)
 	local definition = if type(plantId) == "string" then ItemConfig.Get(plantId) else nil
 	local body = instance:FindFirstChild("Body")
 	if not definition or not body or not body:IsA("Model") then
-		warn(string.format("[PlantVisualController] 无法绑定植物视觉：%s", instance:GetFullName()))
+		if not warnedInvalidPlants[instance] then
+			warn(string.format("[PlantVisualController] 无法绑定植物视觉：%s", instance:GetFullName()))
+			warnedInvalidPlants[instance] = true
+		end
 		return
 	end
-	local bodyRoot = body.PrimaryPart
-	if not bodyRoot or bodyRoot.Name ~= "BodyRoot" then
-		warn(string.format("[PlantVisualController] BodyRoot 无效：%s", instance:GetFullName()))
+	local bodyRoot = resolveBodyRoot(body)
+	if not bodyRoot then
+		if not warnedInvalidPlants[instance] then
+			warn(string.format("[PlantVisualController] BodyRoot 无效：%s", instance:GetFullName()))
+			warnedInvalidPlants[instance] = true
+		end
 		return
 	end
 
@@ -273,19 +308,53 @@ local function updateModel(model: Model, state: VisualState, now: number)
 	local bodyScale = state.MinimumScale + (1 - state.MinimumScale) * bodyProgress
 	state.LastBodyScale = scaleModel(state.Body, bodyScale, state.LastBodyScale)
 
-	local matureFruitCount = 0
-	local growingIndex: number? = nil
-	local growingProgress = 0
-	local growingVisible = false
+	local fallbackMatureFruitCount = 0
+	local fallbackGrowingIndex: number? = nil
+	local fallbackGrowingProgress = 0
+	local fallbackGrowingVisible = false
 	if state.ExpectsFruits then
 		local slotCount = if state.FruitBindingsReady then #state.Fruits else 0
 		local normalizedFruitCount = if type(fruitCount) == "number" and fruitCount == fruitCount
 			then math.max(0, math.floor(fruitCount))
 			else 0
-		matureFruitCount = math.clamp(normalizedFruitCount, 0, slotCount)
-		if slotCount > 0 and matureFruitCount < slotCount then
-			growingIndex = matureFruitCount + 1
-			if matureFruitCount <= 0 and bodyProgress < 1 then
+		fallbackMatureFruitCount = math.clamp(normalizedFruitCount, 0, slotCount)
+		if slotCount > 0 and fallbackMatureFruitCount < slotCount then
+			fallbackGrowingIndex = fallbackMatureFruitCount + 1
+			if fallbackMatureFruitCount <= 0 and bodyProgress < 1 then
+				local startAlpha = state.FruitStartAlpha
+				fallbackGrowingVisible = bodyProgress >= startAlpha
+				fallbackGrowingProgress = if startAlpha >= 1
+					then (if bodyProgress >= 1 then 1 else 0)
+					else math.clamp((bodyProgress - startAlpha) / (1 - startAlpha), 0, 1)
+			else
+				local regrowTime = state.RegrowTime
+				local nextReadyAt = if type(fruitNextReadyAt) == "number" then fruitNextReadyAt else nextHarvestAt
+				if nextReadyAt > 0 then
+					fallbackGrowingProgress = if regrowTime and regrowTime > 0
+						then math.clamp(1 - (nextReadyAt - now) / regrowTime, 0, 1)
+						else 1
+					fallbackGrowingVisible = fallbackGrowingProgress > 0
+				end
+			end
+		end
+	end
+
+	local matureFruitCount = 0
+	local allFruitSlotsMature = state.FruitBindingsReady
+	for _, binding in state.Fruits do
+		local matureAttribute = binding.Model:GetAttribute("FruitMature")
+		local growingAttribute = binding.Model:GetAttribute("FruitGrowing")
+		local hasSlotState = type(matureAttribute) == "boolean" or type(growingAttribute) == "boolean"
+		local isMature = if hasSlotState
+			then matureAttribute == true
+			else state.FruitBindingsReady and binding.Index <= fallbackMatureFruitCount
+		local isGrowing = if hasSlotState
+			then (not isMature and growingAttribute == true)
+			else state.FruitBindingsReady and binding.Index == fallbackGrowingIndex
+		local growingProgress = fallbackGrowingProgress
+		local growingVisible = fallbackGrowingVisible
+		if hasSlotState and isGrowing then
+			if fallbackMatureFruitCount <= 0 and bodyProgress < 1 then
 				local startAlpha = state.FruitStartAlpha
 				growingVisible = bodyProgress >= startAlpha
 				growingProgress = if startAlpha >= 1
@@ -293,25 +362,31 @@ local function updateModel(model: Model, state: VisualState, now: number)
 					else math.clamp((bodyProgress - startAlpha) / (1 - startAlpha), 0, 1)
 			else
 				local regrowTime = state.RegrowTime
-				local nextReadyAt = if type(fruitNextReadyAt) == "number" then fruitNextReadyAt else nextHarvestAt
+				local slotNextReadyAt = binding.Model:GetAttribute("FruitNextReadyAt")
+				local nextReadyAt = if type(slotNextReadyAt) == "number" and slotNextReadyAt > 0
+					then slotNextReadyAt
+					elseif type(fruitNextReadyAt) == "number" then fruitNextReadyAt
+					else nextHarvestAt
 				if nextReadyAt > 0 then
 					growingProgress = if regrowTime and regrowTime > 0
 						then math.clamp(1 - (nextReadyAt - now) / regrowTime, 0, 1)
 						else 1
 					growingVisible = growingProgress > 0
+				else
+					growingProgress = 0
+					growingVisible = false
 				end
 			end
 		end
-	end
-
-	for _, binding in state.Fruits do
-		local isMature = state.FruitBindingsReady and binding.Index <= matureFruitCount
-		local isGrowing = state.FruitBindingsReady and binding.Index == growingIndex
 		local targetScale = state.MinimumScale
 		if isMature then
 			targetScale = 1
+			matureFruitCount += 1
 		elseif isGrowing then
 			targetScale = state.MinimumScale + (1 - state.MinimumScale) * growingProgress
+		end
+		if not isMature then
+			allFruitSlotsMature = false
 		end
 		setFruitVisible(binding, isMature or (isGrowing and growingVisible))
 		binding.LastScale = scaleModel(binding.Model, targetScale, binding.LastScale)
@@ -323,7 +398,7 @@ local function updateModel(model: Model, state: VisualState, now: number)
 	state.Done = bodyProgress >= 1
 		and (
 			not state.ExpectsFruits
-			or (state.FruitBindingsReady and (#state.Fruits == 0 or matureFruitCount >= #state.Fruits or growingProgress >= 1))
+			or (state.FruitBindingsReady and (#state.Fruits == 0 or allFruitSlotsMature))
 		)
 end
 

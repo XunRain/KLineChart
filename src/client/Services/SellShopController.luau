@@ -358,6 +358,8 @@ local function describeSellFailure(result: any?): string
 	local reason = result.Reason
 	if reason == "NoProduce" then
 		return "You don't have anything to sell!"
+	elseif reason == "NoHeldProduce" then
+		return "You aren't holding anything!"
 	elseif reason == "NotNear" then
 		return "Please stand closer to Steven."
 	elseif reason == "Cooldown" then
@@ -397,20 +399,66 @@ local function runSellInventory(
 	task.wait(1.4)
 end
 
-local function runHeldProduceUnavailable(player: Player, head: BasePart, talkTemplate: BillboardGui, text: string, token: number)
+local function runSellHeldProduce(
+	head: BasePart,
+	talkTemplate: BillboardGui,
+	requestSell: RemoteEvent,
+	resultEvent: RemoteEvent,
+	token: number
+)
 	task.wait(0.5)
 	if conversationToken ~= token then
 		return
 	end
-	if text == SellShopConfig.PriceCheckOptionText then
-		showNpcText(head, talkTemplate, "Let me take a look...")
-		task.wait(1)
-		if conversationToken ~= token then
-			return
-		end
+	showNpcText(head, talkTemplate, "Let me get your payment...")
+	local actionId = SellShopConfig.SellHeldOneActionId
+	local result = requestSellAndWait(requestSell, resultEvent, actionId, token)
+	if conversationToken ~= token then
+		return
 	end
-	showNpcText(head, talkTemplate, "You aren't holding anything!")
-	task.wait(1.2)
+	if result and result.Success == true then
+		local payout = if typeof(result.Payout) == "number" then result.Payout else 0
+		local itemName = if typeof(result.ItemName) == "string" then result.ItemName else "item"
+		showNpcText(head, talkTemplate, string.format(
+			"Here's <font color='#00FF00'>%s</font> for 1 %s!",
+			formatCoins(payout),
+			itemName
+		))
+	else
+		showNpcText(head, talkTemplate, describeSellFailure(result))
+	end
+	task.wait(1.4)
+end
+
+local function runQuoteHeldProduce(
+	head: BasePart,
+	talkTemplate: BillboardGui,
+	requestSell: RemoteEvent,
+	resultEvent: RemoteEvent,
+	token: number
+)
+	task.wait(0.5)
+	if conversationToken ~= token then
+		return
+	end
+	showNpcText(head, talkTemplate, "Let me take a look...")
+	local actionId = SellShopConfig.QuoteHeldOneActionId
+	local result = requestSellAndWait(requestSell, resultEvent, actionId, token)
+	if conversationToken ~= token then
+		return
+	end
+	if result and result.Success == true then
+		local unitPrice = if typeof(result.UnitPrice) == "number" then result.UnitPrice else 0
+		local itemName = if typeof(result.ItemName) == "string" then result.ItemName else "item"
+		showNpcText(head, talkTemplate, string.format(
+			"That %s is worth <font color='#00FF00'>%s</font>.",
+			itemName,
+			formatCoins(unitPrice)
+		))
+	else
+		showNpcText(head, talkTemplate, describeSellFailure(result))
+	end
+	task.wait(1.4)
 end
 
 local function runBargainUnavailable(head: BasePart, talkTemplate: BillboardGui, token: number)
@@ -482,8 +530,10 @@ local function openDialogue(
 
 		if selectedText == SellShopConfig.SellInventoryOptionText then
 			runSellInventory(player, head, talkTemplate, requestSell, resultEvent, token)
-		elseif selectedText == SellShopConfig.SellThisOptionText or selectedText == SellShopConfig.PriceCheckOptionText then
-			runHeldProduceUnavailable(player, head, talkTemplate, selectedText, token)
+		elseif selectedText == SellShopConfig.SellThisOptionText then
+			runSellHeldProduce(head, talkTemplate, requestSell, resultEvent, token)
+		elseif selectedText == SellShopConfig.PriceCheckOptionText then
+			runQuoteHeldProduce(head, talkTemplate, requestSell, resultEvent, token)
 		elseif selectedText == SellShopConfig.BargainOptionText then
 			runBargainUnavailable(head, talkTemplate, token)
 		else

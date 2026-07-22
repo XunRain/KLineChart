@@ -21,6 +21,33 @@ local function normalizeSlotCount(value: any): number
 	return math.max(0, math.floor(value))
 end
 
+local function normalizeSlotIndex(value: any, slotCount: number): number?
+	if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
+		return nil
+	end
+	local index = math.floor(value)
+	return if index >= 1 and index <= slotCount then index else nil
+end
+
+local function countMatureSlots(slots: { [number]: boolean }, slotCount: number): number
+	local count = 0
+	for index = 1, slotCount do
+		if slots[index] == true then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function firstSlotByState(slots: { [number]: boolean }, slotCount: number, mature: boolean): number?
+	for index = 1, slotCount do
+		if slots[index] == mature then
+			return index
+		end
+	end
+	return nil
+end
+
 local function syncRepeatHarvestTime(record: any)
 	local fruitCount = normalizeCount(record.fruitCount)
 	local nextFruitAt = finiteNumber(record.nextFruitAt, 0)
@@ -34,7 +61,84 @@ local function syncRepeatHarvestTime(record: any)
 	end
 end
 
--- 根据种植时间、成长秒数和当前时间返回限制在 0 到 1 的成长比例。
+local function ensureRepeatSlotState(
+	record: any,
+	growthTime: number,
+	regrowTime: number,
+	slotCount: number,
+	now: number
+): boolean
+	local changed = false
+	local safeSlotCount = normalizeSlotCount(slotCount)
+	if safeSlotCount <= 0 then
+		record.fruitCount = 0
+		record.nextFruitAt = 0
+		record.fruitGrowingSlot = nil
+		record.fruitSlots = {}
+		syncRepeatHarvestTime(record)
+		return false
+	end
+
+	local rawSlots = if type(record.fruitSlots) == "table" then record.fruitSlots else nil
+	local slots: { [number]: boolean } = {}
+	if rawSlots then
+		for index = 1, safeSlotCount do
+			slots[index] = rawSlots[index] == true
+		end
+	else
+		local fruitCount = math.clamp(normalizeCount(record.fruitCount), 0, safeSlotCount)
+		for index = 1, safeSlotCount do
+			slots[index] = index <= fruitCount
+		end
+		changed = true
+	end
+	record.fruitSlots = slots
+
+	local matureCount = countMatureSlots(slots, safeSlotCount)
+	if record.fruitCount ~= matureCount then
+		record.fruitCount = matureCount
+		changed = true
+	end
+
+	local growingSlot = normalizeSlotIndex(record.fruitGrowingSlot, safeSlotCount)
+	if growingSlot and slots[growingSlot] == true then
+		growingSlot = nil
+		changed = true
+	end
+
+	if matureCount >= safeSlotCount then
+		if record.nextFruitAt ~= 0 then
+			record.nextFruitAt = 0
+			changed = true
+		end
+		if record.fruitGrowingSlot ~= nil then
+			record.fruitGrowingSlot = nil
+			changed = true
+		end
+		syncRepeatHarvestTime(record)
+		return changed
+	end
+
+	if not growingSlot then
+		growingSlot = firstSlotByState(slots, safeSlotCount, false)
+		if record.fruitGrowingSlot ~= growingSlot then
+			record.fruitGrowingSlot = growingSlot
+			changed = true
+		end
+	end
+	if growingSlot and finiteNumber(record.nextFruitAt, 0) <= 0 then
+		local plantedAt = finiteNumber(record.plantedAt, now)
+		local firstReadyAt = plantedAt + math.max(0, growthTime)
+		local fallback = if matureCount <= 0 then firstReadyAt else now + math.max(0, regrowTime)
+		record.nextFruitAt = fallback
+		changed = true
+	end
+
+	syncRepeatHarvestTime(record)
+	return changed
+end
+
+-- 根据植物开始成长时间、成长秒数和当前时间返回限制在 0 到 1 的成长比例。
 function PlantGrowthService.GetGrowthAlpha(plantedAt: number, growthTime: number, now: number): number
 	if growthTime <= 0 then
 		return 1
@@ -53,7 +157,7 @@ function PlantGrowthService.NextRepeatHarvest(now: number, regrowTime: number): 
 end
 
 -- 补齐重复结果植物记录中的果实槽字段，兼容旧存档仅有 nextHarvestAt 的记录。
-function PlantGrowthService.NormalizeRepeatRecord(record: any, growthTime: number)
+function PlantGrowthService.NormalizeRepeatRecord(record: any, growthTime: number, regrowTime: number?, slotCount: number?, now: number?)
 	local plantedAt = finiteNumber(record.plantedAt, os.time())
 	local firstReadyAt = plantedAt + math.max(0, growthTime)
 	record.fruitCount = normalizeCount(record.fruitCount)
@@ -61,6 +165,9 @@ function PlantGrowthService.NormalizeRepeatRecord(record: any, growthTime: numbe
 	record.nextHarvestAt = finiteNumber(record.nextHarvestAt, record.nextFruitAt)
 	if record.nextFruitAt < 0 then
 		record.nextFruitAt = 0
+	end
+	if slotCount then
+		ensureRepeatSlotState(record, growthTime, regrowTime or growthTime, slotCount, now or os.time())
 	end
 	syncRepeatHarvestTime(record)
 end
@@ -75,7 +182,9 @@ function PlantGrowthService.AdvanceRepeatRecord(
 ): boolean
 	local changed = false
 	local safeSlotCount = normalizeSlotCount(slotCount)
-	PlantGrowthService.NormalizeRepeatRecord(record, growthTime)
+	if ensureRepeatSlotState(record, growthTime, regrowTime, safeSlotCount, now) then
+		changed = true
+	end
 	if safeSlotCount <= 0 then
 		return false
 	end
@@ -91,16 +200,28 @@ function PlantGrowthService.AdvanceRepeatRecord(
 		syncRepeatHarvestTime(record)
 		return changed
 	end
-	if record.nextFruitAt <= 0 then
+	if finiteNumber(record.nextFruitAt, 0) <= 0 then
 		record.nextFruitAt = now + math.max(0, regrowTime)
 		changed = true
 	end
 	while record.fruitCount < safeSlotCount and now >= record.nextFruitAt do
+		local growingSlot = normalizeSlotIndex(record.fruitGrowingSlot, safeSlotCount)
+		if not growingSlot then
+			growingSlot = firstSlotByState(record.fruitSlots, safeSlotCount, false)
+			record.fruitGrowingSlot = growingSlot
+			changed = true
+		end
+		if not growingSlot then
+			break
+		end
+		record.fruitSlots[growingSlot] = true
 		record.fruitCount += 1
 		changed = true
 		if record.fruitCount >= safeSlotCount then
 			record.nextFruitAt = 0
+			record.fruitGrowingSlot = nil
 		else
+			record.fruitGrowingSlot = firstSlotByState(record.fruitSlots, safeSlotCount, false)
 			record.nextFruitAt += math.max(0, regrowTime)
 		end
 	end
@@ -114,6 +235,7 @@ function PlantGrowthService.ConsumeRepeatFruit(
 	growthTime: number,
 	regrowTime: number,
 	slotCount: number,
+	preferredSlot: number?,
 	now: number
 ): boolean
 	local safeSlotCount = normalizeSlotCount(slotCount)
@@ -121,9 +243,18 @@ function PlantGrowthService.ConsumeRepeatFruit(
 	if normalizeCount(record.fruitCount) <= 0 then
 		return false
 	end
+	local slotToConsume = normalizeSlotIndex(preferredSlot, safeSlotCount)
+	if not slotToConsume or record.fruitSlots[slotToConsume] ~= true then
+		slotToConsume = firstSlotByState(record.fruitSlots, safeSlotCount, true)
+	end
+	if not slotToConsume then
+		return false
+	end
+	record.fruitSlots[slotToConsume] = false
 	record.fruitCount -= 1
 	record.harvestCount = normalizeCount(record.harvestCount) + 1
 	if record.fruitCount < safeSlotCount and finiteNumber(record.nextFruitAt, 0) <= 0 then
+		record.fruitGrowingSlot = slotToConsume
 		record.nextFruitAt = now + math.max(0, regrowTime)
 	end
 	syncRepeatHarvestTime(record)
@@ -136,6 +267,8 @@ function PlantGrowthService.GetRepeatState(record: any, growthTime: number, regr
 	return {
 		FruitCount = normalizeCount(record.fruitCount),
 		NextFruitAt = finiteNumber(record.nextFruitAt, 0),
+		GrowingSlot = normalizeSlotIndex(record.fruitGrowingSlot, normalizeSlotCount(slotCount)),
+		MatureSlots = record.fruitSlots,
 		Harvestable = normalizeCount(record.fruitCount) > 0,
 	}
 end

@@ -17,6 +17,8 @@ type PlantRecord = {
 	harvestCount: number,
 	fruitCount: number?,
 	nextFruitAt: number?,
+	fruitSlots: { [number]: boolean }?,
+	fruitGrowingSlot: number?,
 }
 
 local PlantService = {}
@@ -84,6 +86,12 @@ local function prepareRuntimeParts(model: Model)
 	end
 end
 
+local function getInitialBodyScale(record: PlantRecord, definition: ItemConfig.ItemDefinition): number
+	local minimumScale = math.clamp(definition.MinimumVisualScale, 0.001, 1)
+	local progress = PlantGrowthService.GetGrowthAlpha(record.plantedAt, definition.GrowthTime, os.time())
+	return minimumScale + (1 - minimumScale) * progress
+end
+
 local function collectFruitSlots(bodyRoot: BasePart): { Attachment }
 	local slots = {}
 	for _, child in bodyRoot:GetChildren() do
@@ -97,7 +105,41 @@ local function collectFruitSlots(bodyRoot: BasePart): { Attachment }
 	return slots
 end
 
-local function addRuntimeFruits(model: Model, bodyRoot: BasePart, fruitTemplate: Model): (boolean, string?)
+local function ensureFruitPrompt(fruit: Model, player: Player, record: PlantRecord, definition: ItemConfig.ItemDefinition): ProximityPrompt?
+	local root = fruit.PrimaryPart or fruit:FindFirstChild("Root")
+	if not root or not root:IsA("BasePart") then
+		return nil
+	end
+	local prompt = root:FindFirstChild("HarvestPrompt")
+	if prompt and not prompt:IsA("ProximityPrompt") then
+		prompt:Destroy()
+		prompt = nil
+	end
+	if not prompt then
+		prompt = Instance.new("ProximityPrompt")
+		prompt.Name = "HarvestPrompt"
+		prompt.ActionText = "Harvest"
+		prompt.ObjectText = definition.DisplayName
+		prompt.HoldDuration = ItemConfig.Limits.PromptHoldDuration
+		prompt.MaxActivationDistance = ItemConfig.Limits.HarvestDistance
+		prompt.RequiresLineOfSight = false
+		prompt.Enabled = false
+		prompt.Parent = root
+	end
+	prompt:SetAttribute("PlantRecordId", record.recordId)
+	prompt:SetAttribute("OwnerUserId", player.UserId)
+	prompt:SetAttribute("FruitSlotIndex", fruit:GetAttribute("FruitSlotIndex"))
+	return prompt
+end
+
+local function addRuntimeFruits(
+	model: Model,
+	bodyRoot: BasePart,
+	fruitTemplate: Model,
+	player: Player,
+	record: PlantRecord,
+	definition: ItemConfig.ItemDefinition
+): (boolean, string?)
 	local slots = collectFruitSlots(bodyRoot)
 	if #slots == 0 then
 		return false, "FruitSlotsMissing"
@@ -129,6 +171,7 @@ local function addRuntimeFruits(model: Model, bodyRoot: BasePart, fruitTemplate:
 		end
 		fruit.Parent = container
 		fruit:PivotTo(slot.WorldCFrame)
+		ensureFruitPrompt(fruit, player, record, definition)
 	end
 	return true
 end
@@ -146,6 +189,21 @@ local function hasAvailableFruit(model: Model): boolean
 	return type(fruitCount) == "number" and fruitCount > 0
 end
 
+local function forEachRuntimeFruit(model: Model, callback: (Model, number) -> ())
+	local container = model:FindFirstChild("RuntimeFruits")
+	if not container or not container:IsA("Folder") then
+		return
+	end
+	for _, child in container:GetChildren() do
+		if child:IsA("Model") and child:GetAttribute("KLineFruitVisual") == true then
+			local slotIndex = child:GetAttribute("FruitSlotIndex")
+			if type(slotIndex) == "number" and slotIndex > 0 and slotIndex == math.floor(slotIndex) then
+				callback(child, slotIndex)
+			end
+		end
+	end
+end
+
 local function setRepeatAttributes(model: Model, record: PlantRecord, definition: ItemConfig.ItemDefinition, slotCount: number, now: number)
 	local regrowTime = definition.RegrowTime
 	if not regrowTime then
@@ -156,6 +214,19 @@ local function setRepeatAttributes(model: Model, record: PlantRecord, definition
 	model:SetAttribute("HarvestCount", record.harvestCount)
 	model:SetAttribute("FruitCount", state.FruitCount)
 	model:SetAttribute("FruitNextReadyAt", state.NextFruitAt)
+	model:SetAttribute("FruitGrowingSlot", state.GrowingSlot)
+	forEachRuntimeFruit(model, function(fruit, slotIndex)
+		local mature = type(state.MatureSlots) == "table" and state.MatureSlots[slotIndex] == true
+		local growing = state.GrowingSlot == slotIndex
+		fruit:SetAttribute("FruitMature", mature)
+		fruit:SetAttribute("FruitGrowing", growing)
+		fruit:SetAttribute("FruitNextReadyAt", if growing then state.NextFruitAt else 0)
+		local root = fruit.PrimaryPart
+		local prompt = root and root:FindFirstChild("HarvestPrompt")
+		if prompt and prompt:IsA("ProximityPrompt") then
+			prompt.Enabled = mature
+		end
+	end)
 end
 
 local function buildPrefab(player: Player, record: PlantRecord, worldPosition: Vector3): (Model?, string?)
@@ -232,8 +303,9 @@ local function buildPrefab(player: Player, record: PlantRecord, worldPosition: V
 	local body = model:FindFirstChild("Body") :: Model
 	local bodyRoot = body.PrimaryPart :: BasePart
 	body:SetAttribute("KLinePlantBody", true)
+	body:ScaleTo(getInitialBodyScale(record, definition))
 	if fruitTemplate then
-		local added, fruitReason = addRuntimeFruits(model, bodyRoot, fruitTemplate)
+		local added, fruitReason = addRuntimeFruits(model, bodyRoot, fruitTemplate, player, record, definition)
 		if not added then
 			model:Destroy()
 			return nil, fruitReason
@@ -255,7 +327,7 @@ local function buildPrefab(player: Player, record: PlantRecord, worldPosition: V
 	prompt.MaxActivationDistance = ItemConfig.Limits.HarvestDistance
 	prompt.RequiresLineOfSight = false
 	if definition.HarvestType == "Repeat" then
-		prompt.Enabled = hasAvailableFruit(model)
+		prompt.Enabled = false
 	else
 		prompt.Enabled = PlantGrowthService.IsHarvestable(record.nextHarvestAt, os.time())
 	end
@@ -364,7 +436,7 @@ function PlantService.UpdateRepeatRecord(record: PlantRecord)
 	local prompt = root and root:FindFirstChild("HarvestPrompt")
 	if prompt and prompt:IsA("ProximityPrompt") then
 		prompt.Enabled = if definition and definition.HarvestType == "Repeat"
-			then hasAvailableFruit(model)
+			then false
 			else PlantGrowthService.IsHarvestable(record.nextHarvestAt, os.time())
 	end
 end
@@ -438,7 +510,7 @@ function PlantService.Start()
 								warn(string.format("[PlantService] 重复结果推进失败 %s: %s", recordId, tostring(reason)))
 							end
 						end
-						prompt.Enabled = hasAvailableFruit(model)
+						prompt.Enabled = false
 					else
 						local nextHarvestAt = model:GetAttribute("NextHarvestAt")
 						if type(nextHarvestAt) == "number" then

@@ -13,7 +13,7 @@ export type ItemDefinition = {
 	DisplayName: string,
 	-- 决定收获后移除整株还是进入下一次结果周期。
 	HarvestType: HarvestType,
-	-- 从种下到首次可收获所需的秒数，服务端以时间戳进行权威判断。
+	-- 埋种等待结束后到首次可收获所需的秒数，服务端以 plantedAt/nextHarvestAt 时间戳进行权威判断。
 	GrowthTime: number,
 	-- 重复收获品种在有空果实槽时长出下一颗果实所需的秒数；单次收获品种必须为 nil，满槽时计时暂停。
 	RegrowTime: number?,
@@ -66,6 +66,10 @@ ItemConfig.Limits = {
 	CharacterLoadTimeout = 10,
 	-- 客户端预制植物视觉更新间隔，单位为秒；约 12Hz，降低逐帧缩放与挂点对齐开销，不参与服务端时间判断。
 	PlantVisualUpdateInterval = 1 / 12,
+	-- 播种成功后到植物真正开始成长之间的最短等待秒数；服务端会把新植物的 plantedAt 推迟到该等待结束，期间只显示播种特效和最小尺寸植株。
+	GerminationDelayMin = 5,
+	-- 播种成功后到植物真正开始成长之间的最长等待秒数；每次新种植会在最小值和最大值之间随机取整，必须大于等于 GerminationDelayMin。
+	GerminationDelayMax = 10,
 	-- 每品种竖直放置偏移允许的最大绝对值，单位为 stud；服务端拒绝非有限数值或超过此范围的配置，避免错误资源配置生成到异常高度。
 	MaximumPlacementOffsetY = 5,
 }

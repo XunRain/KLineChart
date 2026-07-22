@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块把权威库存物化为玩家目录和种子 Tool，并验证客户端提交的种子 Tool 所有权。
+-- 本模块把权威库存物化为玩家目录、种子 Tool 和产物 Tool，并验证客户端提交的 Tool 所有权。
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -9,6 +9,12 @@ local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 
 local InventoryService = {}
 local PlayerDataService: any
+local RemoteService: any
+
+local TOOL_TYPE_SEED = "Seed"
+local TOOL_TYPE_PRODUCE = "Produce"
+local HOTBAR_LAYOUT_MAX_SLOTS = 10
+local HOTBAR_LAYOUT_MAX_KEY_LENGTH = 128
 
 local function ensureFolder(parent: Instance, name: string): Folder
 	local existing = parent:FindFirstChild(name)
@@ -67,15 +73,51 @@ local function setIntValue(parent: Instance, name: string, amount: number)
 	value.Value = amount
 end
 
-local function findSeedTools(player: Player, seedId: string): { Tool }
+local function isSafeToolKey(value: string): boolean
+	return #value > 0
+		and #value <= HOTBAR_LAYOUT_MAX_KEY_LENGTH
+		and (
+			string.sub(value, 1, 5) == "Seed:"
+			or string.sub(value, 1, 6) == "Fruit:"
+			or string.sub(value, 1, 5) == "Name:"
+		)
+end
+
+local function normalizeHotbarLayout(layout: any): { [string]: string }
+	local result: { [string]: string } = {}
+	if type(layout) ~= "table" then
+		return result
+	end
+	for index = 1, HOTBAR_LAYOUT_MAX_SLOTS do
+		local value = layout[index] or layout[tostring(index)]
+		if type(value) == "string" and isSafeToolKey(value) then
+			result[tostring(index)] = value
+		end
+	end
+	return result
+end
+
+local function getHotbarLayoutSnapshot(player: Player): { [string]: string }
+	local data = PlayerDataService.GetSnapshot(player)
+	if not data or type(data.Inventory.HotbarLayout) ~= "table" then
+		return {}
+	end
+	return normalizeHotbarLayout(data.Inventory.HotbarLayout)
+end
+
+local function getToolContainers(player: Player): { Instance? }
+	return { player:FindFirstChildOfClass("Backpack"), player.Character }
+end
+
+local function findItemTools(player: Player, itemType: string, itemId: string): { Tool }
 	local tools: { Tool } = {}
-	local containers: { Instance? } = { player:FindFirstChildOfClass("Backpack"), player.Character }
-	for _, container in containers do
+	for _, container in getToolContainers(player) do
 		if container then
 			for _, child in container:GetChildren() do
 				if child:IsA("Tool")
-					and child:GetAttribute("KLineSeedTool") == true
-					and child:GetAttribute("SeedId") == seedId
+					and child:GetAttribute("KLineItemTool") == true
+					and child:GetAttribute("KLineItemType") == itemType
+					and child:GetAttribute("ItemId") == itemId
 				then
 					table.insert(tools, child)
 				end
@@ -83,6 +125,34 @@ local function findSeedTools(player: Player, seedId: string): { Tool }
 		end
 	end
 	return tools
+end
+
+local function findSeedTools(player: Player, seedId: string): { Tool }
+	local tools = findItemTools(player, TOOL_TYPE_SEED, seedId)
+	for _, container in getToolContainers(player) do
+		if container then
+			for _, child in container:GetChildren() do
+				if child:IsA("Tool")
+					and child:GetAttribute("KLineSeedTool") == true
+					and child:GetAttribute("SeedId") == seedId
+					and child:GetAttribute("KLineItemTool") ~= true
+				then
+					table.insert(tools, child)
+				end
+			end
+		end
+	end
+	return tools
+end
+
+local function prepareTool(tool: Tool, player: Player, itemType: string, itemId: string, amount: number)
+	tool.RequiresHandle = false
+	tool.CanBeDropped = false
+	tool:SetAttribute("KLineItemTool", true)
+	tool:SetAttribute("KLineItemType", itemType)
+	tool:SetAttribute("ItemId", itemId)
+	tool:SetAttribute("StackCount", amount)
+	tool:SetAttribute("OwnerUserId", player.UserId)
 end
 
 local function syncSeedTool(player: Player, seedId: string, amount: number)
@@ -103,21 +173,88 @@ local function syncSeedTool(player: Player, seedId: string, amount: number)
 	end
 	if not tool then
 		tool = Instance.new("Tool")
-		tool.RequiresHandle = false
-		tool.CanBeDropped = false
-		tool.ToolTip = "Equip and click your planting area"
+		prepareTool(tool, player, TOOL_TYPE_SEED, seedId, amount)
+		tool.ToolTip = "Equip and click your garden to plant."
+		tool.Name = string.format("%s Seed x%d", definition.DisplayName, amount)
 		tool:SetAttribute("KLineSeedTool", true)
 		tool:SetAttribute("SeedId", seedId)
-		tool:SetAttribute("OwnerUserId", player.UserId)
+		tool:SetAttribute("SeedCount", amount)
+		tool:SetAttribute("SeedTool", definition.DisplayName)
+		tool:SetAttribute("Count", amount)
+		tool:SetAttribute("MainCategory", "Seed")
+		tool:SetAttribute("PreviewAssetType", "Seed")
+		tool:SetAttribute("PreviewModelName", seedId)
 		local backpackInstance = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
 		if not backpackInstance or not backpackInstance:IsA("Backpack") then
 			tool:Destroy()
 			return
 		end
 		tool.Parent = backpackInstance
+		return
 	end
-	tool.Name = string.format("%s Seed [%d]", definition.DisplayName, amount)
+	prepareTool(tool, player, TOOL_TYPE_SEED, seedId, amount)
+	tool.ToolTip = "Equip and click your garden to plant."
+	tool.Name = string.format("%s Seed x%d", definition.DisplayName, amount)
+	tool:SetAttribute("KLineSeedTool", true)
+	tool:SetAttribute("SeedId", seedId)
 	tool:SetAttribute("SeedCount", amount)
+	tool:SetAttribute("SeedTool", definition.DisplayName)
+	tool:SetAttribute("Count", amount)
+	tool:SetAttribute("MainCategory", "Seed")
+	tool:SetAttribute("PreviewAssetType", "Seed")
+	tool:SetAttribute("PreviewModelName", seedId)
+end
+
+local function syncProduceTool(player: Player, itemId: string, amount: number)
+	local definition = ItemConfig.Get(itemId)
+	if not definition then
+		return
+	end
+	local tools = findItemTools(player, TOOL_TYPE_PRODUCE, itemId)
+	local tool = tools[1]
+	for index = 2, #tools do
+		tools[index]:Destroy()
+	end
+	if amount <= 0 then
+		if tool then
+			tool:Destroy()
+		end
+		return
+	end
+	if not tool then
+		tool = Instance.new("Tool")
+		prepareTool(tool, player, TOOL_TYPE_PRODUCE, itemId, amount)
+		tool.ToolTip = "Hold this produce to sell or check its price."
+		tool.Name = string.format("%s x%d", definition.DisplayName, amount)
+		tool:SetAttribute("KLineProduceTool", true)
+		tool:SetAttribute("ProduceId", itemId)
+		tool:SetAttribute("ProduceCount", amount)
+		tool:SetAttribute("HarvestedFruit", true)
+		tool:SetAttribute("Fruit", definition.DisplayName)
+		tool:SetAttribute("Count", amount)
+		tool:SetAttribute("MainCategory", "Fruit")
+		tool:SetAttribute("PreviewAssetType", "Fruit")
+		tool:SetAttribute("PreviewModelName", definition.FruitModelName or definition.PlantModelName)
+		local backpackInstance = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
+		if not backpackInstance or not backpackInstance:IsA("Backpack") then
+			tool:Destroy()
+			return
+		end
+		tool.Parent = backpackInstance
+		return
+	end
+	prepareTool(tool, player, TOOL_TYPE_PRODUCE, itemId, amount)
+	tool.ToolTip = "Hold this produce to sell or check its price."
+	tool.Name = string.format("%s x%d", definition.DisplayName, amount)
+	tool:SetAttribute("KLineProduceTool", true)
+	tool:SetAttribute("ProduceId", itemId)
+	tool:SetAttribute("ProduceCount", amount)
+	tool:SetAttribute("HarvestedFruit", true)
+	tool:SetAttribute("Fruit", definition.DisplayName)
+	tool:SetAttribute("Count", amount)
+	tool:SetAttribute("MainCategory", "Fruit")
+	tool:SetAttribute("PreviewAssetType", "Fruit")
+	tool:SetAttribute("PreviewModelName", definition.FruitModelName or definition.PlantModelName)
 end
 
 -- 验证传入实例是指定玩家当前持有且与 seedId 匹配的项目种子 Tool。
@@ -135,7 +272,28 @@ function InventoryService.IsOwnedSeedTool(player: Player, tool: any, seedId: str
 	return tool.Parent == player.Character or tool.Parent == backpack
 end
 
--- 从玩家数据快照刷新库存复制目录，并同步每种种子的唯一 Tool 与显示数量。
+-- 返回玩家当前装备的合法产物 Tool 品种，未持有产物时返回 nil。
+function InventoryService.GetHeldProduce(player: Player): (string?, Tool?)
+	local character = player.Character
+	if not character then
+		return nil, nil
+	end
+	for _, child in character:GetChildren() do
+		if child:IsA("Tool")
+			and child:GetAttribute("KLineProduceTool") == true
+			and child:GetAttribute("KLineItemType") == TOOL_TYPE_PRODUCE
+			and child:GetAttribute("OwnerUserId") == player.UserId
+		then
+			local itemId = child:GetAttribute("ProduceId")
+			if type(itemId) == "string" and ItemConfig.Get(itemId) then
+				return itemId, child
+			end
+		end
+	end
+	return nil, nil
+end
+
+-- 从玩家数据快照刷新库存复制目录，并同步每种种子与产物的唯一 Tool 和显示数量。
 function InventoryService.Sync(player: Player)
 	local data = PlayerDataService.GetSnapshot(player)
 	if not data then
@@ -147,12 +305,46 @@ function InventoryService.Sync(player: Player)
 	setValues(ensureFolder(inventory, "Produce"), data.Inventory.Produce)
 	for itemId in ItemConfig.Items do
 		syncSeedTool(player, itemId, data.Inventory.Seeds[itemId] or 0)
+		syncProduceTool(player, itemId, data.Inventory.Produce[itemId] or 0)
 	end
+	InventoryService.SendHotbarLayout(player)
+end
+
+-- 向客户端下发当前存档中的热栏布局偏好，客户端只用它重排已持有 Tool。
+function InventoryService.SendHotbarLayout(player: Player)
+	if not RemoteService then
+		return
+	end
+	RemoteService.GetEvent("HotbarLayoutChanged"):FireClient(player, getHotbarLayoutSnapshot(player))
+end
+
+local function bindHotbarLayoutRemotes()
+	if not RemoteService then
+		return
+	end
+	RemoteService.GetEvent("RequestHotbarLayout").OnServerEvent:Connect(function(player)
+		InventoryService.SendHotbarLayout(player)
+	end)
+	RemoteService.GetEvent("SaveHotbarLayout").OnServerEvent:Connect(function(player, layout)
+		local normalizedLayout = normalizeHotbarLayout(layout)
+		local ok, reason = PlayerDataService.Update(player, function(data)
+			data.Inventory.HotbarLayout = normalizedLayout
+			return true
+		end)
+		if not ok then
+			warn(string.format("[InventoryService] 保存热栏布局失败 %s：%s", player.Name, tostring(reason)))
+			return
+		end
+		PlayerDataService.RequestSave(player)
+		InventoryService.SendHotbarLayout(player)
+	end)
 end
 
 -- 注入权威玩家数据服务，供后续库存同步读取快照。
-function InventoryService.Init(dependencies: { PlayerDataService: any })
+function InventoryService.Init(dependencies: { PlayerDataService: any, RemoteService: any? })
 	PlayerDataService = dependencies.PlayerDataService
+	RemoteService = dependencies.RemoteService
+	bindHotbarLayoutRemotes()
 end
 
 return InventoryService
