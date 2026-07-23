@@ -115,21 +115,24 @@ local function ensureFruitPrompt(fruit: Model, player: Player, record: PlantReco
 		prompt:Destroy()
 		prompt = nil
 	end
-	if not prompt then
-		prompt = Instance.new("ProximityPrompt")
-		prompt.Name = "HarvestPrompt"
-		prompt.ActionText = "Harvest"
-		prompt.ObjectText = definition.DisplayName
-		prompt.HoldDuration = ItemConfig.Limits.PromptHoldDuration
-		prompt.MaxActivationDistance = ItemConfig.Limits.HarvestDistance
-		prompt.RequiresLineOfSight = false
-		prompt.Enabled = false
-		prompt.Parent = root
+	local promptInstance: ProximityPrompt
+	if prompt and prompt:IsA("ProximityPrompt") then
+		promptInstance = prompt
+	else
+		promptInstance = Instance.new("ProximityPrompt")
+		promptInstance.Name = "HarvestPrompt"
+		promptInstance.ActionText = "Harvest"
+		promptInstance.ObjectText = definition.DisplayName
+		promptInstance.HoldDuration = ItemConfig.Limits.PromptHoldDuration
+		promptInstance.MaxActivationDistance = ItemConfig.Limits.HarvestDistance
+		promptInstance.RequiresLineOfSight = false
+		promptInstance.Enabled = false
+		promptInstance.Parent = root
 	end
-	prompt:SetAttribute("PlantRecordId", record.recordId)
-	prompt:SetAttribute("OwnerUserId", player.UserId)
-	prompt:SetAttribute("FruitSlotIndex", fruit:GetAttribute("FruitSlotIndex"))
-	return prompt
+	promptInstance:SetAttribute("PlantRecordId", record.recordId)
+	promptInstance:SetAttribute("OwnerUserId", player.UserId)
+	promptInstance:SetAttribute("FruitSlotIndex", fruit:GetAttribute("FruitSlotIndex"))
+	return promptInstance
 end
 
 local function addRuntimeFruits(
@@ -382,7 +385,10 @@ function PlantService.SpawnRecord(player: Player, record: PlantRecord): (boolean
 			local advanced =
 				PlantGrowthService.AdvanceRepeatRecord(storedRecord, definition.GrowthTime, regrowTime, slotCount, os.time())
 			changedRecord = storedRecord
-			return advanced, nil
+			if not advanced then
+				return false, "NoFruitReady"
+			end
+			return true, ""
 		end)
 		if changed and changedRecord then
 			PlantService.UpdateRepeatRecord(changedRecord)
@@ -402,7 +408,7 @@ function PlantService.RestorePlayer(player: Player): (boolean, string?)
 		local ok, reason = PlantService.SpawnRecord(player, record)
 		if not ok then
 			PlantService.DestroyPlayer(player)
-			return false, reason
+			return false, reason or "PlantRestoreFailed"
 		end
 	end
 	return true, nil
@@ -450,7 +456,7 @@ function PlantService.DestroyPlayer(player: Player)
 		end
 	end
 	for _, recordId in toRemove do
-		PlantService.RemoveRecord(recordId)
+		PlantService.RemoveRecord(recordId :: string)
 	end
 end
 
@@ -501,7 +507,10 @@ function PlantService.Start()
 									now
 								)
 								changedRecord = record
-								return advanced, nil
+								if not advanced then
+									return false, "NoFruitReady"
+								end
+								return true, ""
 							end)
 							if changed and changedRecord then
 								PlantService.UpdateRepeatRecord(changedRecord)

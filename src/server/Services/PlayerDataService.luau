@@ -181,13 +181,14 @@ local function normalize(raw: any): PlayerData
 					normalizedRecord.fruitCount = math.max(0, math.floor(finiteNumber(record.fruitCount, 0)))
 					normalizedRecord.nextFruitAt = math.max(0, math.floor(finiteNumber(record.nextFruitAt, normalizedRecord.nextHarvestAt)))
 					if type(record.fruitSlots) == "table" then
-						normalizedRecord.fruitSlots = {}
+						local fruitSlots: { [number]: boolean } = {}
+						normalizedRecord.fruitSlots = fruitSlots
 						for index, mature in record.fruitSlots do
 							local numericIndex = if type(index) == "number" then index
 								elseif type(index) == "string" then tonumber(index)
 								else nil
 							if numericIndex and numericIndex > 0 and numericIndex == math.floor(numericIndex) then
-								normalizedRecord.fruitSlots[numericIndex] = mature == true
+								fruitSlots[numericIndex] = mature == true
 							end
 						end
 					end

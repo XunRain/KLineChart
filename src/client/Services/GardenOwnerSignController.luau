@@ -27,7 +27,7 @@ local function disconnectPlot(plot: Model)
 		connection:Disconnect()
 	end
 	watchedPlots[plot] = nil
-	local billboard = billboardByPlot[plot]
+	local billboard: BillboardGui? = billboardByPlot[plot]
 	if billboard then
 		billboard:Destroy()
 		billboardByPlot[plot] = nil
@@ -157,7 +157,7 @@ local function createOverheadBillboard(plot: Model): BillboardGui?
 end
 
 local function getOrCreateOverheadBillboard(plot: Model): BillboardGui?
-	local billboard = billboardByPlot[plot]
+	local billboard: BillboardGui? = billboardByPlot[plot]
 	if billboard and billboard.Parent then
 		return billboard
 	end
@@ -172,7 +172,7 @@ local function updateOverheadBillboard(plot: Model)
 	local ownerName = plot:GetAttribute("Owner")
 	local ownerUserId = plot:GetAttribute("OwnerUserId")
 	if type(ownerUserId) ~= "number" then
-		local billboard = billboardByPlot[plot]
+		local billboard: BillboardGui? = billboardByPlot[plot]
 		if billboard then
 			billboard.Enabled = false
 		end

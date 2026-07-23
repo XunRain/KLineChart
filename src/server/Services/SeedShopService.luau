@@ -214,7 +214,7 @@ local function handleRequest(player: Player, itemId: any)
 		end
 		data.Sheckles = balance - definition.SeedBuyPrice
 		data.Inventory.Seeds[itemId] = seedCount + amount
-		return true, nil
+		return true, ""
 	end)
 	if not changed then
 		local message = if reason == "InsufficientSheckles"

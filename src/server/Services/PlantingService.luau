@@ -120,7 +120,7 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 		end
 		seeds[seedId] -= 1
 		data.Plants[recordId] = record
-		return true, nil
+		return true, ""
 	end)
 
 	if not changed then
@@ -141,7 +141,7 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 				data.Plants[recordId] = nil
 				data.Inventory.Seeds[seedId] = (data.Inventory.Seeds[seedId] or 0) + 1
 			end
-			return true, nil
+			return true, ""
 		end)
 		InventoryService.Sync(player)
 		reject(player, "Plant model could not be created; your seed was returned.")

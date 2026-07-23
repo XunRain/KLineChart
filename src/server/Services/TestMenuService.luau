@@ -47,7 +47,7 @@ local function grantSeed(player: Player, action: TestMenuConfig.TestAction): (bo
 			return false, "SeedInventoryLimit"
 		end
 		data.Inventory.Seeds[seedId] = current + amount
-		return true, nil
+		return true, ""
 	end)
 end
 
@@ -62,7 +62,7 @@ local function grantCurrency(player: Player, action: TestMenuConfig.TestAction):
 			return false, "CurrencyLimit"
 		end
 		data.Sheckles = current + amount
-		return true, nil
+		return true, ""
 	end)
 end
 
@@ -88,9 +88,13 @@ local function handleRequest(player: Player, actionId: any)
 		return
 	end
 
-	local changed, reason = if action.Kind == "GrantCurrency"
-		then grantCurrency(player, action)
-		else grantSeed(player, action)
+	local changed: boolean
+	local reason: string?
+	if action.Kind == "GrantCurrency" then
+		changed, reason = grantCurrency(player, action)
+	else
+		changed, reason = grantSeed(player, action)
+	end
 	if not changed then
 		RemoteService.Notify(player, string.format("测试奖励发放失败：%s", tostring(reason)), "Warning")
 		return

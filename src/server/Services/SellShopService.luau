@@ -144,7 +144,7 @@ local function handleRequest(player: Player, actionId: any)
 		end
 		if soldCount <= 0 then return false, "NoProduce" end
 		data.Sheckles += payout
-		return true, nil
+		return true, ""
 	end)
 	if not changed then
 		failRequest(

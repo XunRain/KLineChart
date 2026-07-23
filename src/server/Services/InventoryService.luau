@@ -172,37 +172,38 @@ local function syncSeedTool(player: Player, seedId: string, amount: number)
 		return
 	end
 	if not tool then
-		tool = Instance.new("Tool")
-		prepareTool(tool, player, TOOL_TYPE_SEED, seedId, amount)
-		tool.ToolTip = "Equip and click your garden to plant."
-		tool.Name = string.format("%s Seed x%d", definition.DisplayName, amount)
-		tool:SetAttribute("KLineSeedTool", true)
-		tool:SetAttribute("SeedId", seedId)
-		tool:SetAttribute("SeedCount", amount)
-		tool:SetAttribute("SeedTool", definition.DisplayName)
-		tool:SetAttribute("Count", amount)
-		tool:SetAttribute("MainCategory", "Seed")
-		tool:SetAttribute("PreviewAssetType", "Seed")
-		tool:SetAttribute("PreviewModelName", seedId)
+		local createdTool = Instance.new("Tool")
+		prepareTool(createdTool, player, TOOL_TYPE_SEED, seedId, amount)
+		createdTool.ToolTip = "Equip and click your garden to plant."
+		createdTool.Name = string.format("%s Seed x%d", definition.DisplayName, amount)
+		createdTool:SetAttribute("KLineSeedTool", true)
+		createdTool:SetAttribute("SeedId", seedId)
+		createdTool:SetAttribute("SeedCount", amount)
+		createdTool:SetAttribute("SeedTool", definition.DisplayName)
+		createdTool:SetAttribute("Count", amount)
+		createdTool:SetAttribute("MainCategory", "Seed")
+		createdTool:SetAttribute("PreviewAssetType", "Seed")
+		createdTool:SetAttribute("PreviewModelName", seedId)
 		local backpackInstance = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
 		if not backpackInstance or not backpackInstance:IsA("Backpack") then
-			tool:Destroy()
+			createdTool:Destroy()
 			return
 		end
-		tool.Parent = backpackInstance
+		createdTool.Parent = backpackInstance
 		return
 	end
-	prepareTool(tool, player, TOOL_TYPE_SEED, seedId, amount)
-	tool.ToolTip = "Equip and click your garden to plant."
-	tool.Name = string.format("%s Seed x%d", definition.DisplayName, amount)
-	tool:SetAttribute("KLineSeedTool", true)
-	tool:SetAttribute("SeedId", seedId)
-	tool:SetAttribute("SeedCount", amount)
-	tool:SetAttribute("SeedTool", definition.DisplayName)
-	tool:SetAttribute("Count", amount)
-	tool:SetAttribute("MainCategory", "Seed")
-	tool:SetAttribute("PreviewAssetType", "Seed")
-	tool:SetAttribute("PreviewModelName", seedId)
+	local existingTool = tool :: Tool
+	prepareTool(existingTool, player, TOOL_TYPE_SEED, seedId, amount)
+	existingTool.ToolTip = "Equip and click your garden to plant."
+	existingTool.Name = string.format("%s Seed x%d", definition.DisplayName, amount)
+	existingTool:SetAttribute("KLineSeedTool", true)
+	existingTool:SetAttribute("SeedId", seedId)
+	existingTool:SetAttribute("SeedCount", amount)
+	existingTool:SetAttribute("SeedTool", definition.DisplayName)
+	existingTool:SetAttribute("Count", amount)
+	existingTool:SetAttribute("MainCategory", "Seed")
+	existingTool:SetAttribute("PreviewAssetType", "Seed")
+	existingTool:SetAttribute("PreviewModelName", seedId)
 end
 
 local function syncProduceTool(player: Player, itemId: string, amount: number)
@@ -222,39 +223,40 @@ local function syncProduceTool(player: Player, itemId: string, amount: number)
 		return
 	end
 	if not tool then
-		tool = Instance.new("Tool")
-		prepareTool(tool, player, TOOL_TYPE_PRODUCE, itemId, amount)
-		tool.ToolTip = "Hold this produce to sell or check its price."
-		tool.Name = string.format("%s x%d", definition.DisplayName, amount)
-		tool:SetAttribute("KLineProduceTool", true)
-		tool:SetAttribute("ProduceId", itemId)
-		tool:SetAttribute("ProduceCount", amount)
-		tool:SetAttribute("HarvestedFruit", true)
-		tool:SetAttribute("Fruit", definition.DisplayName)
-		tool:SetAttribute("Count", amount)
-		tool:SetAttribute("MainCategory", "Fruit")
-		tool:SetAttribute("PreviewAssetType", "Fruit")
-		tool:SetAttribute("PreviewModelName", definition.FruitModelName or definition.PlantModelName)
+		local createdTool = Instance.new("Tool")
+		prepareTool(createdTool, player, TOOL_TYPE_PRODUCE, itemId, amount)
+		createdTool.ToolTip = "Hold this produce to sell or check its price."
+		createdTool.Name = string.format("%s x%d", definition.DisplayName, amount)
+		createdTool:SetAttribute("KLineProduceTool", true)
+		createdTool:SetAttribute("ProduceId", itemId)
+		createdTool:SetAttribute("ProduceCount", amount)
+		createdTool:SetAttribute("HarvestedFruit", true)
+		createdTool:SetAttribute("Fruit", definition.DisplayName)
+		createdTool:SetAttribute("Count", amount)
+		createdTool:SetAttribute("MainCategory", "Fruit")
+		createdTool:SetAttribute("PreviewAssetType", "Fruit")
+		createdTool:SetAttribute("PreviewModelName", definition.FruitModelName or definition.PlantModelName)
 		local backpackInstance = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
 		if not backpackInstance or not backpackInstance:IsA("Backpack") then
-			tool:Destroy()
+			createdTool:Destroy()
 			return
 		end
-		tool.Parent = backpackInstance
+		createdTool.Parent = backpackInstance
 		return
 	end
-	prepareTool(tool, player, TOOL_TYPE_PRODUCE, itemId, amount)
-	tool.ToolTip = "Hold this produce to sell or check its price."
-	tool.Name = string.format("%s x%d", definition.DisplayName, amount)
-	tool:SetAttribute("KLineProduceTool", true)
-	tool:SetAttribute("ProduceId", itemId)
-	tool:SetAttribute("ProduceCount", amount)
-	tool:SetAttribute("HarvestedFruit", true)
-	tool:SetAttribute("Fruit", definition.DisplayName)
-	tool:SetAttribute("Count", amount)
-	tool:SetAttribute("MainCategory", "Fruit")
-	tool:SetAttribute("PreviewAssetType", "Fruit")
-	tool:SetAttribute("PreviewModelName", definition.FruitModelName or definition.PlantModelName)
+	local existingTool = tool :: Tool
+	prepareTool(existingTool, player, TOOL_TYPE_PRODUCE, itemId, amount)
+	existingTool.ToolTip = "Hold this produce to sell or check its price."
+	existingTool.Name = string.format("%s x%d", definition.DisplayName, amount)
+	existingTool:SetAttribute("KLineProduceTool", true)
+	existingTool:SetAttribute("ProduceId", itemId)
+	existingTool:SetAttribute("ProduceCount", amount)
+	existingTool:SetAttribute("HarvestedFruit", true)
+	existingTool:SetAttribute("Fruit", definition.DisplayName)
+	existingTool:SetAttribute("Count", amount)
+	existingTool:SetAttribute("MainCategory", "Fruit")
+	existingTool:SetAttribute("PreviewAssetType", "Fruit")
+	existingTool:SetAttribute("PreviewModelName", definition.FruitModelName or definition.PlantModelName)
 end
 
 -- 验证传入实例是指定玩家当前持有且与 seedId 匹配的项目种子 Tool。

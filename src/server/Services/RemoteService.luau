@@ -36,12 +36,15 @@ function RemoteService.Init()
 				end
 			end
 		end
-		if not remote then
-			remote = Instance.new("RemoteEvent")
-			remote.Name = remoteName
-			remote.Parent = folder
+		local remoteInstance: RemoteEvent
+		if remote then
+			remoteInstance = remote
+		else
+			remoteInstance = Instance.new("RemoteEvent")
+			remoteInstance.Name = remoteName
+			remoteInstance.Parent = folder
 		end
-		events[eventKey] = remote :: RemoteEvent
+		events[eventKey] = remoteInstance
 	end
 end
 

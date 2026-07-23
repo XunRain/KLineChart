@@ -91,7 +91,7 @@ local function handlePrompt(prompt: ProximityPrompt, player: Player)
 			data.Inventory.Produce[record.plantId] = (data.Inventory.Produce[record.plantId] or 0) + definition.YieldAmount
 			updatedRecord = record
 		end
-		return true, nil
+		return true, ""
 	end)
 
 	if not changed then

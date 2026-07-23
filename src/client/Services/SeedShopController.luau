@@ -199,7 +199,7 @@ local function clearViewport(viewport: ViewportFrame)
 			child:Destroy()
 		end
 	end
-	viewport.CurrentCamera = nil
+	(viewport :: any).CurrentCamera = nil
 	debugSeedPreview(string.format("清空 %s，移除 %d 个旧子对象", getInstancePath(viewport), removed))
 end
 
