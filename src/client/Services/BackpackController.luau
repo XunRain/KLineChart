@@ -9,6 +9,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
+local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 
 local BackpackController = {}
 
@@ -279,13 +280,7 @@ local function formatCount(count: number?): string
 	if not count or count <= 1 then
 		return ""
 	end
-	if count >= 1000000 then
-		return string.format("%.1fm", count / 1000000)
-	end
-	if count >= 1000 then
-		return string.format("%.1fk", count / 1000)
-	end
-	return "x" .. tostring(count)
+	return "x" .. NumberFormatter.Abbreviate(count, 2)
 end
 
 local function getPreviewTemplate(tool: Tool): Instance?

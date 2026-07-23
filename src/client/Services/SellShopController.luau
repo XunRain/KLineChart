@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
+local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
 local NpcPromptVisualController = require(script.Parent.NpcPromptVisualController)
 
@@ -332,7 +333,7 @@ local function waitForChoice(
 end
 
 local function formatCoins(amount: number): string
-	return tostring(math.floor(amount)) .. "¢"
+	return NumberFormatter.FormatWithSuffix(math.floor(amount), "¢", 2)
 end
 
 local function requestSellAndWait(requestSell: RemoteEvent, resultEvent: RemoteEvent, expectedActionId: string, token: number): any?

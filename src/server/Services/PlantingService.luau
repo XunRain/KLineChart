@@ -85,6 +85,9 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 	local recordId = HttpService:GenerateGUID(false)
 	local now = os.time()
 	local growthStartAt = now + getGerminationDelay()
+	local firstFruitAt = if definition.HarvestType == "Repeat"
+		then growthStartAt + definition.GrowthTime + math.max(0, definition.RegrowTime or 0)
+		else nil
 	local record = {
 		recordId = recordId,
 		plantId = seedId,
@@ -94,7 +97,7 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 		nextHarvestAt = growthStartAt + definition.GrowthTime,
 		harvestCount = 0,
 		fruitCount = if definition.HarvestType == "Repeat" then 0 else nil,
-		nextFruitAt = if definition.HarvestType == "Repeat" then growthStartAt + definition.GrowthTime else nil,
+		nextFruitAt = firstFruitAt,
 	}
 
 	local changed, reason = PlayerDataService.Update(player, function(data)

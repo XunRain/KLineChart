@@ -61,6 +61,11 @@ local function syncRepeatHarvestTime(record: any)
 	end
 end
 
+local function getFirstFruitReadyAt(record: any, growthTime: number, regrowTime: number, now: number): number
+	local plantedAt = finiteNumber(record.plantedAt, now)
+	return plantedAt + math.max(0, growthTime) + math.max(0, regrowTime)
+end
+
 local function ensureRepeatSlotState(
 	record: any,
 	growthTime: number,
@@ -99,6 +104,12 @@ local function ensureRepeatSlotState(
 		record.fruitCount = matureCount
 		changed = true
 	end
+	local firstFruitReadyAt = getFirstFruitReadyAt(record, growthTime, regrowTime, now)
+	local currentNextFruitAt = finiteNumber(record.nextFruitAt, 0)
+	if matureCount <= 0 and currentNextFruitAt > 0 and currentNextFruitAt < firstFruitReadyAt then
+		record.nextFruitAt = firstFruitReadyAt
+		changed = true
+	end
 
 	local growingSlot = normalizeSlotIndex(record.fruitGrowingSlot, safeSlotCount)
 	if growingSlot and slots[growingSlot] == true then
@@ -127,9 +138,7 @@ local function ensureRepeatSlotState(
 		end
 	end
 	if growingSlot and finiteNumber(record.nextFruitAt, 0) <= 0 then
-		local plantedAt = finiteNumber(record.plantedAt, now)
-		local firstReadyAt = plantedAt + math.max(0, growthTime)
-		local fallback = if matureCount <= 0 then firstReadyAt else now + math.max(0, regrowTime)
+		local fallback = if matureCount <= 0 then firstFruitReadyAt else now + math.max(0, regrowTime)
 		record.nextFruitAt = fallback
 		changed = true
 	end
@@ -159,7 +168,8 @@ end
 -- 补齐重复结果植物记录中的果实槽字段，兼容旧存档仅有 nextHarvestAt 的记录。
 function PlantGrowthService.NormalizeRepeatRecord(record: any, growthTime: number, regrowTime: number?, slotCount: number?, now: number?)
 	local plantedAt = finiteNumber(record.plantedAt, os.time())
-	local firstReadyAt = plantedAt + math.max(0, growthTime)
+	local safeRegrowTime = regrowTime or growthTime
+	local firstReadyAt = plantedAt + math.max(0, growthTime) + math.max(0, safeRegrowTime)
 	record.fruitCount = normalizeCount(record.fruitCount)
 	record.nextFruitAt = finiteNumber(record.nextFruitAt, finiteNumber(record.nextHarvestAt, firstReadyAt))
 	record.nextHarvestAt = finiteNumber(record.nextHarvestAt, record.nextFruitAt)
@@ -167,7 +177,7 @@ function PlantGrowthService.NormalizeRepeatRecord(record: any, growthTime: numbe
 		record.nextFruitAt = 0
 	end
 	if slotCount then
-		ensureRepeatSlotState(record, growthTime, regrowTime or growthTime, slotCount, now or os.time())
+		ensureRepeatSlotState(record, growthTime, safeRegrowTime, slotCount, now or os.time())
 	end
 	syncRepeatHarvestTime(record)
 end

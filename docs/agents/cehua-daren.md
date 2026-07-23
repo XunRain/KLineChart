@@ -16,7 +16,7 @@
 - 已实现原生 DataStore 存档、版本字段、会话锁、自动保存和 Studio 内存降级；存档保存库存与地块相对坐标植物记录。
 - 已接入 Studio 自有的 Carrot、Strawberry 植株预制体及 Strawberry 果实预制体；草莓采用“成熟果实槽 + 单个空槽生长”规则：已有成熟果实会保留显示，只要存在空位就继续逐颗生长，但同一时间只推进一个空位，满槽后暂停，种子图标、音效和定制 UI 仍是待补资源。
 - 已实现仅 UserId `10972923838` 可见的代码测试菜单，可按服务端配置分别增加 5 个胡萝卜或草莓种子；它只用于开发验证，不属于正式玩家功能或正式 UI。
-- 已实现首版 Sheckles 与种子商店刷新：新旧缺字段档案默认 20，Carrot 种子 10、Strawberry 种子 50，每次购买 1 个；服务端按 5 分钟一轮刷新个人库存，当前 Carrot 每轮 20、Strawberry 每轮 15，客户端按 Studio `SeedShop` 的 `ItemTemplate` 克隆模板商品行并展示真实库存和 Restock 倒计时，并将 `KLineInventory.Sheckles` 同步到 HUD 金币父子两层 TextLabel。
+- 已实现首版 Sheckles 与种子商店刷新：新旧缺字段档案默认 20，种子价格来自 `ItemConfig`，个人刷新库存来自 `SeedShopConfig`；合并商店支持按选中数量购买或购买当前可买最大数量，服务端按库存、余额、背包上限和 Sam 距离权威校验，并将 `KLineInventory.Sheckles` 同步到 HUD 金币父子两层 TextLabel。
 - 已实现首版固定基础价出售代码：Carrot 20、Strawberry 15 Sheckles/个，服务端支持 SellAll 与单品种出售；当前 Steven UI 按“种植花园2模板”的 NPC 对话样式展示 `Sell Inventory!`、`Sell This!`、`How much is this worth?`、`Bargain!`、`Nevermind`，其中只有 `Sell Inventory!` 接入全部产物出售，手持产物出售、估价和议价仍是待实现目标。
 - Sam 与 Steven 的 Custom Prompt 由服务器统一恢复为 Roblox 默认可见样式，客户端在对象流送后幂等兜底；Steven 对话所需 `ReplicatedStorage.Assets.NpcUIs` 三个模板当前已补齐并只读验证，出售结果由 `SellProduceResult` 返回后用于 NPC 对话展示，未来缺失时仍会保留可见 Prompt 并安全禁用出售 UI。
 - 已针对 `Workspace.StreamingEnabled=true` 修复商店 Prompt：服务器统一把 Sam/Steven 现有 Prompt 配置为默认样式，客户端按实际流送并触发的 NPC Prompt 打开界面，不再要求 NPC 在启动时已加载；仍待 Studio Play 验收流入、流出与 NPC 替换。

@@ -23,6 +23,7 @@ local visualStateByVisual: { [Instance]: VisualState } = {}
 local plotConnections: { [Model]: { RBXScriptConnection } } = {}
 local renderQueued: { [Model]: boolean } = {}
 local warnedMissingPlotAssets = false
+local warnedMissingGround = false
 
 local visualConfig = PlotExpansionConfig.Visual
 local TEMPLATE_FRONT_OPENING_WIDTH = tonumber(visualConfig.FrontOpeningWidth) or 18
@@ -65,14 +66,18 @@ local function getPlotAssets(): Folder?
 	return nil
 end
 
-local function getGroundY(plotReference: BasePart): number
+local function getGroundY(): number?
 	local baseplate = Workspace:FindFirstChild("Baseplate")
 	local topLayer = baseplate and baseplate:FindFirstChild("TopLayer")
 	if topLayer and topLayer:IsA("BasePart") then
 		-- 模板原逻辑使用 Size.X 计算顶面高度；当前模板资产照搬时必须沿用这个轴向约定。
 		return topLayer.Position.Y + topLayer.Size.X * 0.5
 	end
-	return plotReference.Position.Y
+	if not warnedMissingGround then
+		warn("[GardenVisualController] Missing Workspace.Baseplate.TopLayer; waiting to rebuild garden visuals after ground streams in.")
+		warnedMissingGround = true
+	end
+	return nil
 end
 
 local function getPlotAssetModel(plotAssets: Folder, name: string): Model?
@@ -224,7 +229,10 @@ local function updatePlotVisual(plotSizeReference: BasePart, visual: Instance, f
 	end
 
 	local frontOpeningCount = math.ceil(TEMPLATE_FRONT_OPENING_WIDTH / fenceStep)
-	local groundY = getGroundY(plotSizeReference)
+	local groundY = getGroundY()
+	if not groundY then
+		return
+	end
 
 	local bedCount = math.max(1, math.floor((plotSizeReference.Size.Z - frontBedSize.X) / normalBedSize.X) + 1)
 	local totalBedLength = frontBedSize.X + (bedCount - 1) * normalBedSize.X
@@ -370,6 +378,18 @@ local function clearPlot(plot: Model)
 	end
 end
 
+local function renderAllPlots()
+	local gardens = Workspace:FindFirstChild("Gardens")
+	if not gardens then
+		return
+	end
+	for _, plot in gardens:GetChildren() do
+		if plot:IsA("Model") and string.match(plot.Name, "^Plot%d+$") then
+			renderPlot(plot)
+		end
+	end
+end
+
 local function setupPlot(plot: Instance)
 	if not plot:IsA("Model") or not string.match(plot.Name, "^Plot%d+$") or plotConnections[plot] then
 		return
@@ -413,11 +433,44 @@ local function watchGardens(gardens: Instance)
 end
 
 -- 初始化地块视觉控制器，监听 Gardens 下 Plot 的扩展等级、尺寸和栅栏皮肤变化。
+local function bindGroundReference(topLayer: BasePart)
+	warnedMissingGround = false
+	topLayer:GetPropertyChangedSignal("Position"):Connect(renderAllPlots)
+	topLayer:GetPropertyChangedSignal("Size"):Connect(renderAllPlots)
+	topLayer:GetPropertyChangedSignal("CFrame"):Connect(renderAllPlots)
+	renderAllPlots()
+end
+
+local function watchGroundReference()
+	local function bindBaseplate(baseplate: Instance)
+		local topLayer = baseplate:FindFirstChild("TopLayer")
+		if topLayer and topLayer:IsA("BasePart") then
+			bindGroundReference(topLayer)
+		end
+		baseplate.ChildAdded:Connect(function(child)
+			if child.Name == "TopLayer" and child:IsA("BasePart") then
+				bindGroundReference(child)
+			end
+		end)
+	end
+
+	local baseplate = Workspace:FindFirstChild("Baseplate")
+	if baseplate then
+		bindBaseplate(baseplate)
+	end
+	Workspace.ChildAdded:Connect(function(child)
+		if child.Name == "Baseplate" then
+			bindBaseplate(child)
+		end
+	end)
+end
+
 function GardenVisualController.Init()
 	if initialized then
 		return
 	end
 	initialized = true
+	watchGroundReference()
 
 	local gardens = Workspace:FindFirstChild("Gardens")
 	if gardens then

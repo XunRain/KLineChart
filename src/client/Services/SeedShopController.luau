@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
+local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
 local NpcPromptVisualController = require(script.Parent.NpcPromptVisualController)
 
@@ -380,7 +381,7 @@ local function updateItemRow(itemId: string)
 	local stock = math.max(0, math.floor(stockByItem[itemId] or 0))
 	setLabelText(mainFrame:FindFirstChild("Stock_Text"), string.format("x%d in Stock", stock))
 	if stock > 0 then
-		setLabelText(mainFrame:FindFirstChild("Cost_Text"), string.format("%d¢", definition.SeedBuyPrice))
+		setLabelText(mainFrame:FindFirstChild("Cost_Text"), NumberFormatter.FormatWithSuffix(definition.SeedBuyPrice, "¢", 2))
 	else
 		setLabelText(mainFrame:FindFirstChild("Cost_Text"), "NO STOCK")
 	end
@@ -514,7 +515,7 @@ local function bindTemplateItems(normalShop: ScrollingFrame, itemTemplate: Frame
 		end
 
 		setLabelText(mainFrame:FindFirstChild("Seed_Text"), definition.DisplayName)
-		setLabelText(mainFrame:FindFirstChild("Cost_Text"), string.format("%d¢", definition.SeedBuyPrice))
+		setLabelText(mainFrame:FindFirstChild("Cost_Text"), NumberFormatter.FormatWithSuffix(definition.SeedBuyPrice, "¢", 2))
 		setLabelText(mainFrame:FindFirstChild("Stock_Text"), "x0 in Stock")
 
 		local rarity = mainFrame:FindFirstChild("Rarity")

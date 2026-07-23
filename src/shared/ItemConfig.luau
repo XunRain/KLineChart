@@ -33,7 +33,7 @@ export type ItemDefinition = {
 	FruitModelName: string?,
 	-- 植株与果实视觉成长的最小相对缩放，合法范围为 (0, 1]；仅由客户端表现使用，不参与服务端成熟、距离或奖励判断。
 	MinimumVisualScale: number,
-	-- 首次成长进度达到该比例后才显示并放大重复结果果实，合法范围为 [0, 1]；仅影响客户端视觉时机，不改变 GrowthTime 或 nextHarvestAt。
+	-- 兼容保留的旧版首次果实提前显示阈值，合法范围为 [0, 1]；当前规则不再使用它提前长果，重复结果品种会先完成植株 GrowthTime，再按 RegrowTime 逐颗长果。
 	FruitGrowthStartAlpha: number,
 	-- 预制体 Root 相对服务端权威种植面基准的竖直偏移，单位为 stud；负值下沉、正值抬高，影响新生成与恢复但不写入存档坐标，修改会改变该品种整体落地高度。
 	PlacementOffsetY: number,
@@ -109,7 +109,7 @@ ItemConfig.Items = {
 		PlantModelName = "Strawberry",
 		FruitModelName = "Strawberry",
 		MinimumVisualScale = 0.05,
-		FruitGrowthStartAlpha = 0.55,
+		FruitGrowthStartAlpha = 1,
 		PlacementOffsetY = -0.4,
 		MinSpacing = 4.5,
 	},

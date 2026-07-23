@@ -1,11 +1,11 @@
 --!strict
 
--- 本模块集中定义首版种子商店开关、购买数量、服务端交互限制与模板对象稳定名称。
+-- 本模块集中定义首版种子商店开关、默认购买数量、服务端交互限制与模板对象稳定名称。
 
 return {
 	-- 种子商店总开关；客户端据此绑定界面，服务端仍独立检查，关闭后所有购买请求均拒绝。
 	Enabled = true,
-	-- 每次成功购买增加的种子整数数量；首版固定为 1，客户端不得提交或覆盖该值。
+	-- 旧版购买请求未提交数量时使用的默认整数数量；新版 FarmShop 可提交数量，但服务端仍会重新校验库存、余额和背包上限。
 	PurchaseAmount = 1,
 	-- 同一玩家两次购买请求之间的最短间隔，单位为秒；服务端用于限制高频点击和 Remote 滥用。
 	PurchaseCooldown = 0.35,
@@ -61,7 +61,7 @@ return {
 	-- 模板当前使用的回退 Prompt 名称；同优先级出现多个时会警告并按 Studio 子级顺序选择首个。
 	FallbackPromptName = "ProximityPrompt",
 	-- Roblox 默认 Prompt 上显示的本地化动作文本，由服务器统一设置并由客户端幂等兜底。
-	PromptActionText = "购买种子",
+	PromptActionText = "Buy Seeds",
 	-- Roblox 默认 Prompt 上显示的 NPC 对象文本，不参与购买权限或服务端距离判断。
 	PromptObjectText = "Sam",
 }

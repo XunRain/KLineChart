@@ -27,6 +27,7 @@ TestMenuConfig.Enabled = true
 -- 获准使用测试奖励的 UserId 集合；键必须是正整数，客户端副本可被篡改，因此服务端必须再次查询此表。
 TestMenuConfig.Whitelist = {
 	[10972923838] = true,
+	[10882791026] = true,
 } :: { [number]: boolean }
 
 -- 同一白名单玩家两次服务端请求之间的最短间隔，单位为秒；必须大于等于 0，用于限制重复点击与 Remote 滥用。

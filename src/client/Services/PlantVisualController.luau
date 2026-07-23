@@ -1,22 +1,43 @@
 --!strict
 
--- 本模块按服务端时间戳驱动预制植株成长与多果实槽顺序生长，仅改变本地视觉。
+-- 本模块按服务端时间戳驱动预制植株与果实的分阶段生长表现，客户端只负责本地视觉。
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 
+type DecorationBinding = {
+	Instance: Instance,
+	BaseTransparency: number,
+}
+
+type GrowthPartBinding = {
+	Part: BasePart,
+	MaxSize: Vector3,
+	Offset: CFrame,
+	Stage: number,
+	BaseTransparency: number,
+	Decorations: { DecorationBinding },
+}
+
 type FruitBinding = {
 	Model: Model,
+	Visual: Model?,
 	Slot: Attachment,
 	Index: number,
 	LastScale: number?,
 	Visible: boolean?,
+	GrowthParts: { GrowthPartBinding },
+	MaxStage: number,
+	UseStagedGrowth: boolean,
 }
 
 type VisualState = {
 	Body: Model,
+	BodyGrowthParts: { GrowthPartBinding },
+	BodyMaxStage: number,
+	UseBodyStages: boolean,
 	Fruits: { FruitBinding },
 	MinimumScale: number,
 	FruitStartAlpha: number,
@@ -34,17 +55,126 @@ local PlantVisualController = {}
 local tracked: { [Model]: VisualState } = {}
 local warnedInvalidPlants: { [Model]: boolean } = {}
 
-local function setFruitVisible(binding: FruitBinding, visible: boolean)
+local function getFiniteNumber(value: any): number?
+	return if type(value) == "number" and value == value and math.abs(value) < math.huge then value else nil
+end
+
+local function getBaseTransparency(part: BasePart): number
+	local stored = part:GetAttribute("KLineBaseTransparency")
+	if type(stored) == "number" then
+		return math.clamp(stored, 0, 1)
+	end
+	part:SetAttribute("KLineBaseTransparency", part.Transparency)
+	return math.clamp(part.Transparency, 0, 1)
+end
+
+local function collectDecorations(part: BasePart): { DecorationBinding }
+	local decorations: { DecorationBinding } = {}
+	for _, descendant in part:GetDescendants() do
+		if descendant:IsA("Decal") then
+			table.insert(decorations, {
+				Instance = descendant,
+				BaseTransparency = math.clamp(descendant.Transparency, 0, 1),
+			})
+			descendant.Transparency = 1
+		elseif descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
+			table.insert(decorations, {
+				Instance = descendant,
+				BaseTransparency = math.clamp(descendant.ImageTransparency, 0, 1),
+			})
+			descendant.ImageTransparency = 1
+		end
+	end
+	return decorations
+end
+
+local function setDecorationVisible(decoration: DecorationBinding, visible: boolean)
+	local targetTransparency = if visible then decoration.BaseTransparency else 1
+	if decoration.Instance:IsA("Decal") then
+		decoration.Instance.Transparency = targetTransparency
+	elseif decoration.Instance:IsA("ImageLabel") or decoration.Instance:IsA("ImageButton") then
+		decoration.Instance.ImageTransparency = targetTransparency
+	end
+end
+
+local function collectGrowthParts(container: Model, root: BasePart): ({ GrowthPartBinding }, number)
+	local growthParts: { GrowthPartBinding } = {}
+	local maxStage = 0
+	for _, descendant in container:GetDescendants() do
+		if descendant:IsA("BasePart") and descendant ~= root then
+			local stage = getFiniteNumber(tonumber(descendant.Name))
+			if stage and stage > 0 then
+				local stageIndex = math.max(1, math.floor(stage))
+				maxStage = math.max(maxStage, stageIndex)
+				table.insert(growthParts, {
+					Part = descendant,
+					MaxSize = descendant.Size,
+					Offset = root.CFrame:ToObjectSpace(descendant.CFrame),
+					Stage = stageIndex,
+					BaseTransparency = getBaseTransparency(descendant),
+					Decorations = collectDecorations(descendant),
+				})
+				descendant.Transparency = 1
+				descendant.LocalTransparencyModifier = 1
+				descendant.CanCollide = false
+			end
+		end
+	end
+	return growthParts, maxStage
+end
+
+local function getStageProgress(overallProgress: number, stage: number, maxStage: number): number
+	if maxStage <= 1 then
+		return overallProgress
+	end
+	return math.clamp(overallProgress * maxStage - (stage - 1), 0, 1)
+end
+
+local function applyGrowthParts(
+	root: BasePart,
+	growthParts: { GrowthPartBinding },
+	maxStage: number,
+	overallProgress: number,
+	growUniformly: boolean
+)
+	for _, binding in growthParts do
+		local partProgress = getStageProgress(overallProgress, binding.Stage, maxStage)
+		local visible = partProgress > 0
+		if visible then
+			local size = if growUniformly
+				then binding.MaxSize * partProgress
+				else Vector3.new(binding.MaxSize.X, binding.MaxSize.Y * partProgress, binding.MaxSize.Z)
+			binding.Part.Size = size
+			if growUniformly then
+				binding.Part.CFrame = root.CFrame
+					* (binding.Offset * CFrame.new(0, -((binding.MaxSize.Y - size.Y) / 2), 0))
+			else
+				binding.Part.CFrame = root.CFrame
+					* binding.Offset
+					* CFrame.new(0, (size.Y - binding.MaxSize.Y) / 2, 0)
+			end
+			binding.Part.Transparency = binding.BaseTransparency
+			binding.Part.LocalTransparencyModifier = 0
+		else
+			binding.Part.Transparency = 1
+			binding.Part.LocalTransparencyModifier = 1
+		end
+		binding.Part.CanCollide = false
+		for _, decoration in binding.Decorations do
+			setDecorationVisible(decoration, partProgress >= 1)
+		end
+	end
+end
+
+local function setFruitRawVisible(binding: FruitBinding, visible: boolean)
 	if binding.Visible == visible then
 		return
 	end
 	binding.Visible = visible
 	for _, descendant in binding.Model:GetDescendants() do
 		if descendant:IsA("BasePart") then
-			local baseTransparency = descendant:GetAttribute("KLineBaseTransparency")
-			descendant.Transparency = if visible and type(baseTransparency) == "number"
-				then math.clamp(baseTransparency, 0, 1)
-				else 1
+			local baseTransparency = getBaseTransparency(descendant)
+			descendant.Transparency = if visible then baseTransparency else 1
 			descendant.LocalTransparencyModifier = if visible then 0 else 1
 		end
 	end
@@ -65,15 +195,13 @@ local function disconnectState(model: Model)
 	end
 end
 
-local function hideRawFruit(model: Model, minimumScale: number)
+local function hideRawFruit(model: Model, _minimumScale: number)
 	for _, descendant in model:GetDescendants() do
 		if descendant:IsA("BasePart") then
+			getBaseTransparency(descendant)
 			descendant.Transparency = 1
 			descendant.LocalTransparencyModifier = 1
 		end
-	end
-	if model.PrimaryPart then
-		model:ScaleTo(minimumScale)
 	end
 end
 
@@ -138,15 +266,30 @@ local function collectFruitBindings(
 				and not usedIndexes[slotIndex]
 			local fruitRoot = resolveModelPrimaryPart(child, "Root")
 			if indexIsValid and slot and slot:IsA("Attachment") and slot:GetAttribute("FruitSlot") == true and fruitRoot then
+				local visual = child:FindFirstChild("Visual")
+				local visualModel = if visual and visual:IsA("Model") then visual else nil
+				local visualRoot = if visualModel then resolveModelPrimaryPart(visualModel, "VisualRoot") else nil
+				if visualModel and visualRoot then
+					visualModel:ScaleTo(1)
+				end
+				local growthParts: { GrowthPartBinding } = {}
+				local maxStage = 0
+				if visualModel and visualRoot then
+					growthParts, maxStage = collectGrowthParts(visualModel, visualRoot)
+				end
 				local index = slotIndex :: number
 				local slotAttachment = slot :: Attachment
 				usedIndexes[index] = true
 				table.insert(bindings, {
 					Model = child,
+					Visual = visualModel,
 					Slot = slotAttachment,
 					Index = index,
 					LastScale = minimumScale,
 					Visible = false,
+					GrowthParts = growthParts,
+					MaxStage = maxStage,
+					UseStagedGrowth = maxStage > 0,
 				})
 				child:PivotTo(slotAttachment.WorldCFrame)
 			else
@@ -191,8 +334,17 @@ local function refreshFruits(model: Model, state: VisualState)
 			if state.BindingWatchers[instance] then
 				return
 			end
-			state.BindingWatchers[instance] = instance.AttributeChanged:Connect(function()
-				refreshFruits(model, state)
+			state.BindingWatchers[instance] = instance.AttributeChanged:Connect(function(attributeName)
+				if instance:IsA("Model") and instance:GetAttribute("KLineFruitVisual") == true then
+					if attributeName == "FruitSlotName" or attributeName == "FruitSlotIndex" then
+						refreshFruits(model, state)
+					else
+						state.Dirty = true
+						state.Done = false
+					end
+				else
+					refreshFruits(model, state)
+				end
 			end)
 		end
 		for _, child in bodyRoot:GetChildren() do
@@ -245,9 +397,14 @@ local function track(instance: Instance)
 		return
 	end
 
+	body:ScaleTo(1)
+	local bodyGrowthParts, bodyMaxStage = collectGrowthParts(body, bodyRoot)
 	local expectsFruits = definition.HarvestType == "Repeat"
 	local state: VisualState = {
 		Body = body,
+		BodyGrowthParts = bodyGrowthParts,
+		BodyMaxStage = bodyMaxStage,
+		UseBodyStages = bodyMaxStage > 0,
 		Fruits = {},
 		MinimumScale = math.clamp(definition.MinimumVisualScale, 0.001, 1),
 		FruitStartAlpha = math.clamp(definition.FruitGrowthStartAlpha, 0, 1),
@@ -271,6 +428,7 @@ local function track(instance: Instance)
 	table.insert(state.Connections, instance:GetAttributeChangedSignal("HarvestCount"):Connect(markDirty))
 	table.insert(state.Connections, instance:GetAttributeChangedSignal("FruitCount"):Connect(markDirty))
 	table.insert(state.Connections, instance:GetAttributeChangedSignal("FruitNextReadyAt"):Connect(markDirty))
+	table.insert(state.Connections, instance:GetAttributeChangedSignal("FruitGrowingSlot"):Connect(markDirty))
 	table.insert(state.Connections, instance:GetAttributeChangedSignal("FruitSlotCount"):Connect(function()
 		refreshFruits(instance, state)
 	end))
@@ -305,9 +463,18 @@ local function updateModel(model: Model, state: VisualState, now: number)
 	end
 
 	local bodyProgress = if growthTime <= 0 then 1 else math.clamp((now - plantedAt) / growthTime, 0, 1)
-	local bodyScale = state.MinimumScale + (1 - state.MinimumScale) * bodyProgress
-	state.LastBodyScale = scaleModel(state.Body, bodyScale, state.LastBodyScale)
+	if state.UseBodyStages then
+		state.Body:ScaleTo(1)
+		local bodyRoot = state.Body.PrimaryPart
+		if bodyRoot then
+			applyGrowthParts(bodyRoot, state.BodyGrowthParts, state.BodyMaxStage, bodyProgress, false)
+		end
+	else
+		local bodyScale = state.MinimumScale + (1 - state.MinimumScale) * bodyProgress
+		state.LastBodyScale = scaleModel(state.Body, bodyScale, state.LastBodyScale)
+	end
 
+	local bodyReadyAt = plantedAt + math.max(0, growthTime)
 	local fallbackMatureFruitCount = 0
 	local fallbackGrowingIndex: number? = nil
 	local fallbackGrowingProgress = 0
@@ -320,16 +487,13 @@ local function updateModel(model: Model, state: VisualState, now: number)
 		fallbackMatureFruitCount = math.clamp(normalizedFruitCount, 0, slotCount)
 		if slotCount > 0 and fallbackMatureFruitCount < slotCount then
 			fallbackGrowingIndex = fallbackMatureFruitCount + 1
-			if fallbackMatureFruitCount <= 0 and bodyProgress < 1 then
-				local startAlpha = state.FruitStartAlpha
-				fallbackGrowingVisible = bodyProgress >= startAlpha
-				fallbackGrowingProgress = if startAlpha >= 1
-					then (if bodyProgress >= 1 then 1 else 0)
-					else math.clamp((bodyProgress - startAlpha) / (1 - startAlpha), 0, 1)
-			else
+			if bodyProgress >= 1 then
 				local regrowTime = state.RegrowTime
 				local nextReadyAt = if type(fruitNextReadyAt) == "number" then fruitNextReadyAt else nextHarvestAt
 				if nextReadyAt > 0 then
+					if fallbackMatureFruitCount <= 0 and regrowTime and regrowTime > 0 then
+						nextReadyAt = math.max(nextReadyAt, bodyReadyAt + regrowTime)
+					end
 					fallbackGrowingProgress = if regrowTime and regrowTime > 0
 						then math.clamp(1 - (nextReadyAt - now) / regrowTime, 0, 1)
 						else 1
@@ -339,7 +503,6 @@ local function updateModel(model: Model, state: VisualState, now: number)
 		end
 	end
 
-	local matureFruitCount = 0
 	local allFruitSlotsMature = state.FruitBindingsReady
 	for _, binding in state.Fruits do
 		local matureAttribute = binding.Model:GetAttribute("FruitMature")
@@ -354,13 +517,7 @@ local function updateModel(model: Model, state: VisualState, now: number)
 		local growingProgress = fallbackGrowingProgress
 		local growingVisible = fallbackGrowingVisible
 		if hasSlotState and isGrowing then
-			if fallbackMatureFruitCount <= 0 and bodyProgress < 1 then
-				local startAlpha = state.FruitStartAlpha
-				growingVisible = bodyProgress >= startAlpha
-				growingProgress = if startAlpha >= 1
-					then (if bodyProgress >= 1 then 1 else 0)
-					else math.clamp((bodyProgress - startAlpha) / (1 - startAlpha), 0, 1)
-			else
+			if bodyProgress >= 1 then
 				local regrowTime = state.RegrowTime
 				local slotNextReadyAt = binding.Model:GetAttribute("FruitNextReadyAt")
 				local nextReadyAt = if type(slotNextReadyAt) == "number" and slotNextReadyAt > 0
@@ -368,6 +525,9 @@ local function updateModel(model: Model, state: VisualState, now: number)
 					elseif type(fruitNextReadyAt) == "number" then fruitNextReadyAt
 					else nextHarvestAt
 				if nextReadyAt > 0 then
+					if fallbackMatureFruitCount <= 0 and regrowTime and regrowTime > 0 then
+						nextReadyAt = math.max(nextReadyAt, bodyReadyAt + regrowTime)
+					end
 					growingProgress = if regrowTime and regrowTime > 0
 						then math.clamp(1 - (nextReadyAt - now) / regrowTime, 0, 1)
 						else 1
@@ -376,21 +536,34 @@ local function updateModel(model: Model, state: VisualState, now: number)
 					growingProgress = 0
 					growingVisible = false
 				end
+			else
+				growingProgress = 0
+				growingVisible = false
 			end
 		end
-		local targetScale = state.MinimumScale
-		if isMature then
-			targetScale = 1
-			matureFruitCount += 1
-		elseif isGrowing then
-			targetScale = state.MinimumScale + (1 - state.MinimumScale) * growingProgress
-		end
+
 		if not isMature then
 			allFruitSlotsMature = false
 		end
-		setFruitVisible(binding, isMature or (isGrowing and growingVisible))
-		binding.LastScale = scaleModel(binding.Model, targetScale, binding.LastScale)
-		-- Body 缩放会移动 Attachment，果实每次缩放后重新对齐当前世界挂点。
+
+		local fruitVisible = isMature or (isGrowing and growingVisible)
+		if binding.UseStagedGrowth then
+			setFruitRawVisible(binding, fruitVisible)
+			binding.Model:ScaleTo(1)
+			local visualRoot = binding.Visual and binding.Visual.PrimaryPart
+			if visualRoot then
+				local stagedProgress = if isMature then 1 elseif isGrowing then math.clamp(growingProgress, 0, 1) else 0
+				applyGrowthParts(visualRoot, binding.GrowthParts, binding.MaxStage, stagedProgress, true)
+			end
+		else
+			local targetScale = if isMature
+				then 1
+				elseif isGrowing then state.MinimumScale + (1 - state.MinimumScale) * growingProgress
+				else state.MinimumScale
+			setFruitRawVisible(binding, fruitVisible)
+			binding.LastScale = scaleModel(binding.Model, targetScale, binding.LastScale)
+		end
+		-- Body 缩放或挂点变化会移动 Attachment，果实每次刷新后重新对齐当前世界挂点。
 		binding.Model:PivotTo(binding.Slot.WorldCFrame)
 	end
 

@@ -41,7 +41,7 @@ KLineChart 已实现第一版种植与存档基础：
 - `RequestPlant` 的客户端参数为世界命中点、`seedId` 和种子 Tool；三者均由服务端重新验证，客户端不能提交库存、成长或收获结果。
 - 收获使用服务端创建的 `ProximityPrompt`；服务端重新验证所有权、距离、记录、成熟时间，并用 per-plant lock 防止重复收获。
 - `RequestTestAction` 只接受稳定 `ActionId`；服务端重新检查功能开关、白名单、数据加载、冷却、动作配置及库存上限，不接受客户端数量、SeedId 或目标库存。
-- `RequestBuySeed` 只接受稳定 `itemId`；服务端从 `ItemConfig` 读取价格、从 `SeedShopConfig` 读取每次数量和本轮库存，并重新检查数据、冷却、Sam 距离、余额、商店库存和背包库存上限。
+- `RequestBuySeed` 兼容旧版稳定 `itemId` 和新版 `{ ItemId = string, Amount = number }`；服务端从 `ItemConfig` 读取价格、从 `SeedShopConfig` 读取默认数量和本轮库存，并重新检查数据、冷却、Sam 距离、余额、商店库存、购买数量和背包库存上限。
 - `RequestSeedShopState` 无参数请求当前玩家个人商店库存；`SeedShopStateChanged` 只用于服务端向客户端展示当前库存、下次刷新 Unix 秒和倒计时，不承载权威结算结果。
 - `RequestTeleport` 只接受 `Seeds`、`Garden` 或 `Sell` 稳定标识；服务端不接受坐标或 Instance，固定目标仅从 `Workspace.Teleports` 读取 BasePart/Model，Garden 仅使用当前玩家已分配地块的 SpawnPoint。
 - `KLineInventory.Sheckles` 只是权威存档的复制 `IntValue`，客户端可用它展示 HUD 余额，但不得通过修改它影响购买或出售结果。

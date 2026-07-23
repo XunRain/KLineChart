@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
+local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local PlotExpansionConfig = require(ReplicatedStorage.Shared.PlotExpansionConfig)
 
 local PlotExpansionController = {}
@@ -105,25 +106,6 @@ local function getNextExpansion(ownedExpansions: number): { [string]: number }?
 	return PlotExpansionConfig.Levels[ownedExpansions + 1]
 end
 
-local function formatPrice(value: number): string
-	local absValue = math.abs(value)
-	local suffix = ""
-	local display = value
-	if absValue >= 1_000_000_000 then
-		display = value / 1_000_000_000
-		suffix = "B"
-	elseif absValue >= 1_000_000 then
-		display = value / 1_000_000
-		suffix = "M"
-	elseif absValue >= 1_000 then
-		display = value / 1_000
-		suffix = "K"
-	end
-	local text = if suffix == "" then tostring(math.floor(display)) else string.format("%.1f%s", display, suffix)
-	local cleaned = string.gsub(text, "%.0([KMB])$", "%1")
-	return cleaned
-end
-
 local function getShecklesValue(): IntValue?
 	local inventory = player:FindFirstChild("KLineInventory")
 	local value = inventory and inventory:FindFirstChild(EconomyConfig.CurrencyName)
@@ -186,7 +168,7 @@ local function updateSignUi()
 	button.BackgroundColor3 = if sheckles >= price
 		then PlotExpansionConfig.Display.AffordableColor
 		else PlotExpansionConfig.Display.UnaffordableColor
-	label.Text = formatPrice(price) .. PlotExpansionConfig.Display.PriceSuffix
+	label.Text = NumberFormatter.FormatWithSuffix(price, PlotExpansionConfig.Display.PriceSuffix, 2)
 end
 
 local function bindSignGui(gui: Instance, core: BasePart)

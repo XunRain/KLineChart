@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local HudConfig = require(ReplicatedStorage.Shared.HudConfig)
+local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 
 local HudCurrencyController = {}
 local initialized = false
@@ -25,7 +26,7 @@ local function disconnectAll()
 end
 
 local function formatAmount(amount: number): string
-	return tostring(math.max(0, math.floor(amount)))
+	return NumberFormatter.Abbreviate(math.max(0, math.floor(amount)), 2)
 end
 
 local function setNumberValue(parent: Instance?, name: string, amount: number)

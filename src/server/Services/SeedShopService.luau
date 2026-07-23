@@ -145,6 +145,20 @@ local function fireState(player: Player)
 	RemoteService.GetEvent("SeedShopStateChanged"):FireClient(player, makeStateForPlayer(player))
 end
 
+local function getPurchasePayload(payload: any): (string?, number?)
+	if type(payload) == "string" then
+		return payload, SeedShopConfig.PurchaseAmount
+	end
+	if type(payload) == "table" then
+		local itemId = payload.ItemId
+		local amount = payload.Amount
+		if type(itemId) == "string" then
+			return itemId, if type(amount) == "number" then amount else nil
+		end
+	end
+	return nil, nil
+end
+
 local function broadcastState()
 	for _, player in Players:GetPlayers() do
 		fireState(player)
@@ -159,44 +173,51 @@ local function isPlayerNearShop(player: Player): boolean
 		and (shopRoot.Position - characterRoot.Position).Magnitude <= SeedShopConfig.MaximumInteractionDistance
 end
 
-local function handleRequest(player: Player, itemId: any)
+local function handleRequest(player: Player, payload: any)
 	if not SeedShopConfig.Enabled then
 		return
 	end
 	local now = os.clock()
 	local previous = lastRequestAt[player]
 	if previous and now - previous < math.max(0, SeedShopConfig.PurchaseCooldown) then
-		RemoteService.Notify(player, "购买操作过快，请稍后重试。", "Warning")
+		RemoteService.Notify(player, "You are buying too fast. Please try again soon.", "Warning")
 		return
 	end
 	lastRequestAt[player] = now
 
 	if not PlayerDataService.IsLoaded(player) then
-		RemoteService.Notify(player, "玩家数据尚未加载，无法购买。", "Warning")
+		RemoteService.Notify(player, "Player data is still loading. You cannot buy yet.", "Warning")
 		return
 	end
+	local itemId, requestedAmount = getPurchasePayload(payload)
 	if type(itemId) ~= "string" then
-		RemoteService.Notify(player, "无效的种子商品。", "Warning")
+		RemoteService.Notify(player, "Invalid seed item.", "Warning")
 		return
 	end
 	local definition = ItemConfig.Get(itemId)
-	local amount = SeedShopConfig.PurchaseAmount
+	local amount = tonumber(requestedAmount) or 0
 	if not definition
 		or not isSafePositiveInteger(definition.SeedBuyPrice, EconomyConfig.MaximumSheckles)
 		or not isSafePositiveInteger(amount, EconomyConfig.MaximumSeedInventory)
 	then
-		RemoteService.Notify(player, "种子商品配置无效。", "Warning")
+		RemoteService.Notify(player, "Seed item config is invalid.", "Warning")
 		return
 	end
+	amount = math.floor(amount)
 	if not isPlayerNearShop(player) then
-		RemoteService.Notify(player, "请靠近 Sam 后再购买。", "Warning")
+		RemoteService.Notify(player, "Please stand closer to Sam.", "Warning")
 		return
 	end
 	local stock = getPlayerStock(player)
 	local currentStock = stock[itemId]
 	if type(currentStock) ~= "number" or currentStock < amount then
-		RemoteService.Notify(player, "该种子已售罄，请等待商店刷新。", "Warning")
+		RemoteService.Notify(player, "This seed is sold out. Please wait for restock.", "Warning")
 		fireState(player)
+		return
+	end
+	local totalPrice = definition.SeedBuyPrice * amount
+	if not isSafePositiveInteger(totalPrice, EconomyConfig.MaximumSheckles) then
+		RemoteService.Notify(player, "Seed purchase total is invalid.", "Warning")
 		return
 	end
 
@@ -206,20 +227,20 @@ local function handleRequest(player: Player, itemId: any)
 		if type(balance) ~= "number" or type(seedCount) ~= "number" then
 			return false, "InvalidEconomyData"
 		end
-		if balance < definition.SeedBuyPrice then
+		if balance < totalPrice then
 			return false, "InsufficientSheckles"
 		end
 		if seedCount + amount > EconomyConfig.MaximumSeedInventory then
 			return false, "SeedInventoryLimit"
 		end
-		data.Sheckles = balance - definition.SeedBuyPrice
+		data.Sheckles = balance - totalPrice
 		data.Inventory.Seeds[itemId] = seedCount + amount
 		return true, ""
 	end)
 	if not changed then
 		local message = if reason == "InsufficientSheckles"
-			then string.format("%s 余额不足。", EconomyConfig.CurrencyName)
-			else "购买失败，请稍后重试。"
+			then string.format("Not enough %s.", EconomyConfig.CurrencyName)
+			else "Purchase failed. Please try again."
 		RemoteService.Notify(player, message, "Warning")
 		return
 	end
@@ -230,7 +251,7 @@ local function handleRequest(player: Player, itemId: any)
 	fireState(player)
 	RemoteService.Notify(
 		player,
-		string.format("购买了 %d 个 %s 种子。", amount, definition.DisplayName),
+		string.format("Bought %d %s Seed for %d %s.", amount, definition.DisplayName, totalPrice, EconomyConfig.CurrencyName),
 		"Success"
 	)
 end
@@ -245,9 +266,9 @@ function SeedShopService.Init(dependencies: {
 	InventoryService = dependencies.InventoryService
 	RemoteService = dependencies.RemoteService
 
-	RemoteService.GetEvent("RequestBuySeed").OnServerEvent:Connect(function(player, itemId)
+	RemoteService.GetEvent("RequestBuySeed").OnServerEvent:Connect(function(player, payload)
 		local ok, err = pcall(function()
-			handleRequest(player, itemId)
+			handleRequest(player, payload)
 			return true
 		end)
 		if not ok then

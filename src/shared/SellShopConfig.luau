@@ -18,7 +18,7 @@ return {
 	-- 当前 Studio 模板 Prompt 名称，仅在专用名称不存在时使用。
 	FallbackPromptName = "ProximityPrompt",
 	-- Roblox 默认 Prompt 上显示的本地化动作文本，由服务器统一设置并由客户端幂等兜底。
-	PromptActionText = "出售产物",
+	PromptActionText = "Sell Produce",
 	-- Roblox 默认 Prompt 上显示的 NPC 对象文本，不参与出售权限或服务端距离判断。
 	PromptObjectText = "Steven",
 	-- 服务端允许出售的最大角色距离，单位为 stud；客户端 Prompt 和界面距离不能替代该校验。
@@ -57,6 +57,8 @@ return {
 	NevermindOptionText = "Nevermind",
 	-- 出售全部品种时客户端唯一允许提交的稳定动作标识。
 	SellAllActionId = "SellAll",
+	-- 出售 UI 按数量出售选中产物时提交的稳定动作标识；服务端仍会重新校验 ItemId、Amount、库存和价格。
+	SellAmountActionId = "SellProduceAmount",
 	-- 出售当前手持产物 1 个时客户端提交的稳定动作标识；服务端不接受客户端传品种或数量。
 	SellHeldOneActionId = "SellHeldOne",
 	-- 询问当前手持产物单个价值时客户端提交的稳定动作标识；服务端不接受客户端传价格。
