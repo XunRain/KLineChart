@@ -10,6 +10,7 @@ local UserInputService = game:GetService("UserInputService")
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
+local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
 
 local BackpackController = {}
 
@@ -35,7 +36,7 @@ local INVENTORY_HEADER_SIZE = 40
 local TOPBAR_RIGHT_PADDING_FULL = 220
 local TOPBAR_RIGHT_PADDING_MINI = 206
 local TOPBAR_BUTTON_Y = 3
-local CATEGORY_ORDER = { "All", "Seeds", "Fruits" }
+local CATEGORY_ORDER = { "All", "Seeds", "Fruits", "Tools" }
 local KEY_TO_SLOT = {
 	[Enum.KeyCode.One] = 1,
 	[Enum.KeyCode.Two] = 2,
@@ -67,6 +68,7 @@ local savedHotbarLayoutReady = false
 local savedHotbarLayoutApplied = false
 local hotbarLayoutSaveScheduled = false
 local hotbarLayoutSaveInFlight = false
+local EMPTY_HOTBAR_SLOT_KEY = "__EMPTY__"
 
 local function getViewportSize(): Vector2
 	local camera = workspace.CurrentCamera
@@ -174,6 +176,16 @@ local function isTrackedTool(instance: Instance): boolean
 end
 
 local function getToolKey(tool: Tool): string
+	if tool:GetAttribute("KLineUtilityTool") == true or tool:GetAttribute("KLineItemType") == "Utility" then
+		local utilityTool = tool:GetAttribute("UtilityTool")
+		if type(utilityTool) == "string" and utilityTool ~= "" then
+			return "Utility:" .. utilityTool
+		end
+		local itemId = tool:GetAttribute("ItemId")
+		if type(itemId) == "string" and itemId ~= "" then
+			return "Utility:" .. itemId
+		end
+	end
 	local seedTool = tool:GetAttribute("SeedTool")
 	if type(seedTool) == "string" then
 		return "Seed:" .. seedTool
@@ -210,10 +222,13 @@ end
 
 local function getCurrentHotbarLayout(): { [number]: string }
 	local layout: { [number]: string } = {}
+	local slotCount = getHotbarSlotCount()
 	for index = 1, HOTBAR_SLOTS_FULL do
-		local tool = hotbarTools[index]
-		if tool then
-			layout[index] = getToolKey(tool)
+		if index <= slotCount then
+			local tool = hotbarTools[index]
+			layout[index] = if tool then getToolKey(tool) else EMPTY_HOTBAR_SLOT_KEY
+		else
+			layout[index] = savedHotbarLayout[index] or EMPTY_HOTBAR_SLOT_KEY
 		end
 	end
 	return layout
@@ -239,10 +254,22 @@ local function toolMatchesFilter(tool: Tool, category: string): boolean
 	if category == "Fruits" then
 		return mainCategory == "Fruit" or tool:GetAttribute("Fruit") ~= nil
 	end
+	if category == "Tools" then
+		return mainCategory == "Tool" or tool:GetAttribute("KLineUtilityTool") == true
+	end
 	return true
 end
 
 local function getDisplayName(tool: Tool): string
+	if tool:GetAttribute("KLineUtilityTool") == true or tool:GetAttribute("KLineItemType") == "Utility" then
+		local utilityTool = tool:GetAttribute("UtilityTool")
+		if utilityTool == ShovelConfig.ToolId then
+			return ShovelConfig.DisplayName
+		end
+		if type(utilityTool) == "string" and utilityTool ~= "" then
+			return utilityTool
+		end
+	end
 	local seedTool = tool:GetAttribute("SeedTool")
 	if type(seedTool) == "string" then
 		if string.lower(string.sub(seedTool, -5)) == " seed" then
@@ -291,10 +318,6 @@ local function getPreviewTemplate(tool: Tool): Instance?
 	if type(itemId) ~= "string" or type(itemType) ~= "string" then
 		return nil
 	end
-	local definition = ItemConfig.Get(itemId)
-	if not definition then
-		return nil
-	end
 	local assets = ReplicatedStorage:FindFirstChild("Assets")
 	if not assets then
 		return nil
@@ -305,6 +328,19 @@ local function getPreviewTemplate(tool: Tool): Instance?
 		if template then
 			return template
 		end
+		if previewAssetType == "Tool" then
+			local directTemplate = assets:FindFirstChild(previewModelName)
+			if directTemplate then
+				return directTemplate
+			end
+		end
+	end
+	if itemType == "Utility" then
+		return nil
+	end
+	local definition = ItemConfig.Get(itemId)
+	if not definition then
+		return nil
 	end
 	if itemType == "Seed" then
 		local seeds = assets:FindFirstChild("Seeds")
@@ -541,20 +577,45 @@ local function hasAssignedTool(tool: Tool): boolean
 	return false
 end
 
-local function firstEmptyHotbarSlot(slotCount: number): number?
+local function firstEmptyHotbarSlot(slotCount: number, reservedEmptySlots: { [number]: boolean }?): number?
 	for index = 1, slotCount do
-		if not hotbarTools[index] then
+		if not hotbarTools[index] and not (reservedEmptySlots and reservedEmptySlots[index]) then
 			return index
 		end
 	end
 	return nil
 end
 
+local function buildSavedHotbarReservations(slotCount: number): { [number]: boolean }
+	local reservedSlots: { [number]: boolean } = {}
+	if not savedHotbarLayoutReady then
+		return reservedSlots
+	end
+	for index = 1, slotCount do
+		if savedHotbarLayout[index] ~= nil then
+			reservedSlots[index] = true
+		end
+	end
+	return reservedSlots
+end
+
 local function assignNewTools(tools: { Tool })
 	local slotCount = getHotbarSlotCount()
+	local reservedSlots = buildSavedHotbarReservations(slotCount)
+
 	for _, tool in tools do
 		if not hasAssignedTool(tool) then
-			local emptySlot = firstEmptyHotbarSlot(slotCount)
+			local toolKey = getToolKey(tool)
+			local emptySlot: number? = nil
+			if savedHotbarLayoutReady then
+				for index = 1, slotCount do
+					if savedHotbarLayout[index] == toolKey and not hotbarTools[index] then
+						emptySlot = index
+						break
+					end
+				end
+			end
+			emptySlot = emptySlot or firstEmptyHotbarSlot(slotCount, reservedSlots)
 			if emptySlot then
 				hotbarTools[emptySlot] = tool
 			else
@@ -569,10 +630,14 @@ local function applySavedHotbarLayout(tools: { Tool })
 	table.clear(inventoryTools)
 
 	local used: { [Tool]: boolean } = {}
+	local reservedSlots: { [number]: boolean } = {}
 	local slotCount = getHotbarSlotCount()
 	for index = 1, slotCount do
 		local expectedKey = savedHotbarLayout[index]
-		if expectedKey then
+		if expectedKey == EMPTY_HOTBAR_SLOT_KEY then
+			reservedSlots[index] = true
+		elseif expectedKey then
+			reservedSlots[index] = true
 			for _, tool in tools do
 				if not used[tool] and getToolKey(tool) == expectedKey then
 					hotbarTools[index] = tool
@@ -585,7 +650,7 @@ local function applySavedHotbarLayout(tools: { Tool })
 
 	for _, tool in tools do
 		if not used[tool] then
-			local emptySlot = firstEmptyHotbarSlot(slotCount)
+			local emptySlot = firstEmptyHotbarSlot(slotCount, reservedSlots)
 			if emptySlot then
 				hotbarTools[emptySlot] = tool
 			else
@@ -942,6 +1007,9 @@ local function requestRefresh()
 end
 
 requestSaveHotbarLayout = function()
+	if not savedHotbarLayoutReady then
+		return
+	end
 	if hotbarLayoutSaveScheduled then
 		return
 	end

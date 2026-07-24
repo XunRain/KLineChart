@@ -15,6 +15,7 @@ local SellShopService = {}
 local PlayerDataService: any
 local InventoryService: any
 local RemoteService: any
+local MarketService: any
 local lastRequestAt: { [Player]: number } = {}
 
 local function sendSellResult(player: Player, payload: { [string]: any })
@@ -35,6 +36,12 @@ end
 
 local function safeInteger(value: any, minimum: number, maximum: number): boolean
 	return type(value) == "number" and value == math.floor(value) and value >= minimum and value <= maximum
+end
+
+local function getCurrentUnitPrice(itemId: string, definition: ItemConfig.ItemDefinition): number?
+	local marketPrice = if MarketService then MarketService.GetCurrentPrice(itemId) else nil
+	local unitPrice = if type(marketPrice) == "number" then marketPrice else definition.BaseSellPrice
+	return if safeInteger(unitPrice, 1, EconomyConfig.MaximumSheckles) then unitPrice else nil
 end
 
 local function getRoot(parent: Instance?, name: string): BasePart?
@@ -93,7 +100,12 @@ local function quoteHeldProduce(player: Player, actionId: string)
 		return
 	end
 	local definition = ItemConfig.Get(itemId)
-	if not definition or not safeInteger(definition.BaseSellPrice, 1, EconomyConfig.MaximumSheckles) then
+	if not definition then
+		failRequest(player, actionId, "InvalidProduceData", "Price check failed. Please try again.", "Warning")
+		return
+	end
+	local unitPrice = getCurrentUnitPrice(itemId, definition)
+	if not unitPrice then
 		failRequest(player, actionId, "InvalidProduceData", "Price check failed. Please try again.", "Warning")
 		return
 	end
@@ -102,7 +114,8 @@ local function quoteHeldProduce(player: Player, actionId: string)
 		Success = true,
 		ItemId = itemId,
 		ItemName = definition.DisplayName,
-		UnitPrice = definition.BaseSellPrice,
+		UnitPrice = unitPrice,
+		BaseSellPrice = definition.BaseSellPrice,
 	})
 end
 
@@ -159,27 +172,41 @@ local function handleRequest(player: Player, payload: any)
 	local soldCount = 0
 	local payout = 0
 	local soldItemId: string? = nil
+	local soldUnitPrice: number? = nil
 	local remainingCount: number? = nil
+	local soldItems = {}
 	local changed, reason = PlayerDataService.Update(player, function(data)
 		if not safeInteger(data.Sheckles, 0, EconomyConfig.MaximumSheckles) then return false, "InvalidBalance" end
 		for itemId, definition in ItemConfig.Items do
 			if sellAll or itemId == actionId or itemId == heldItemId or itemId == requestedItemId then
 				local count = data.Inventory.Produce[itemId] or 0
-				if not safeInteger(count, 0, EconomyConfig.MaximumSeedInventory)
-					or not safeInteger(definition.BaseSellPrice, 1, EconomyConfig.MaximumSheckles)
-				then return false, "InvalidProduceData" end
+				local unitPrice = getCurrentUnitPrice(itemId, definition)
+				if not safeInteger(count, 0, EconomyConfig.MaximumSeedInventory) or not unitPrice then
+					return false, "InvalidProduceData"
+				end
 				if count > 0 then
 					local amount = if sellHeldOne then 1 elseif requestedItemId == itemId then requestedAmount :: number else count
 					if amount > count then return false, "NotEnoughProduce" end
 					local remaining = EconomyConfig.MaximumSheckles - data.Sheckles - payout
-					if amount > math.floor(remaining / definition.BaseSellPrice) then return false, "CurrencyOverflow" end
-					payout += amount * definition.BaseSellPrice
+					if amount > math.floor(remaining / unitPrice) then return false, "CurrencyOverflow" end
+					local itemPayout = amount * unitPrice
+					payout += itemPayout
 					soldCount += amount
 					soldItemId = itemId
+					soldUnitPrice = unitPrice
 					data.Inventory.Produce[itemId] = count - amount
 					if requestedItemId == itemId or itemId == actionId or itemId == heldItemId then
 						remainingCount = data.Inventory.Produce[itemId]
 					end
+					table.insert(soldItems, {
+						ItemId = itemId,
+						ItemName = definition.DisplayName,
+						SoldCount = amount,
+						Payout = itemPayout,
+						UnitPrice = unitPrice,
+						BaseSellPrice = definition.BaseSellPrice,
+						RemainingCount = data.Inventory.Produce[itemId],
+					})
 				end
 			end
 		end
@@ -209,17 +236,20 @@ local function handleRequest(player: Player, payload: any)
 		Payout = payout,
 		ItemId = soldItemId,
 		ItemName = if soldDefinition then soldDefinition.DisplayName else nil,
-		UnitPrice = if soldDefinition then soldDefinition.BaseSellPrice else nil,
+		UnitPrice = soldUnitPrice,
+		BaseSellPrice = if soldDefinition then soldDefinition.BaseSellPrice else nil,
 		RemainingCount = remainingCount,
+		SoldItems = soldItems,
 	})
 	RemoteService.Notify(player, string.format("Sold %d produce for %d Sheckles.", soldCount, payout), "Success")
 end
 
 -- 注入数据、库存与 Remote 服务，并注册出售请求及玩家离开冷却清理。
-function SellShopService.Init(dependencies: { PlayerDataService: any, InventoryService: any, RemoteService: any })
+function SellShopService.Init(dependencies: { PlayerDataService: any, InventoryService: any, RemoteService: any, MarketService: any? })
 	PlayerDataService = dependencies.PlayerDataService
 	InventoryService = dependencies.InventoryService
 	RemoteService = dependencies.RemoteService
+	MarketService = dependencies.MarketService
 	RemoteService.GetEvent("RequestSellProduce").OnServerEvent:Connect(function(player, actionId)
 		local ok, err = pcall(function()
 			handleRequest(player, actionId)

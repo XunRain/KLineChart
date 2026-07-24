@@ -21,6 +21,7 @@ local bedSectionSize: Vector3? = nil
 local frontBedSectionSize: Vector3? = nil
 local visualStateByVisual: { [Instance]: VisualState } = {}
 local plotConnections: { [Model]: { RBXScriptConnection } } = {}
+local plotSizeReferenceByPlot: { [Model]: BasePart } = {}
 local renderQueued: { [Model]: boolean } = {}
 local warnedMissingPlotAssets = false
 local warnedMissingGround = false
@@ -145,17 +146,31 @@ end
 
 local function clearVisualState(state: VisualState)
 	for _, pole in state.Poles do
-		pole:Destroy()
+		if pole.Parent then
+			pole:Destroy()
+		end
 	end
 	for _, connector in state.Connectors do
-		connector:Destroy()
+		if connector.Parent then
+			connector:Destroy()
+		end
 	end
 	for _, bed in state.Beds do
-		bed:Destroy()
+		if bed.Parent then
+			bed:Destroy()
+		end
 	end
 	table.clear(state.Poles)
 	table.clear(state.Connectors)
 	table.clear(state.Beds)
+end
+
+local function clearRuntimeOwnedChildren(visual: Instance)
+	for _, child in visual:GetChildren() do
+		if PlotExpansionConfig.Visual.RuntimeOwnedNames[child.Name] == true then
+			child:Destroy()
+		end
+	end
 end
 
 local function getOrCreateVisualState(visual: Instance): VisualState
@@ -164,11 +179,7 @@ local function getOrCreateVisualState(visual: Instance): VisualState
 		return state
 	end
 
-	for _, child in visual:GetChildren() do
-		if PlotExpansionConfig.Visual.RuntimeOwnedNames[child.Name] == true then
-			child:Destroy()
-		end
-	end
+	clearRuntimeOwnedChildren(visual)
 
 	state = {
 		FenceSkin = "Default",
@@ -206,17 +217,9 @@ local function updatePlotVisual(plotSizeReference: BasePart, visual: Instance, f
 	end
 
 	local state = getOrCreateVisualState(visual)
-	if state.FenceSkin ~= resolvedFenceSkin then
-		for _, pole in state.Poles do
-			pole:Destroy()
-		end
-		for _, connector in state.Connectors do
-			connector:Destroy()
-		end
-		state.Poles = {}
-		state.Connectors = {}
-		state.FenceSkin = resolvedFenceSkin
-	end
+	clearVisualState(state)
+	clearRuntimeOwnedChildren(visual)
+	state.FenceSkin = resolvedFenceSkin
 
 	local normalBedSize = bedSectionSize :: Vector3
 	local frontBedSize = frontBedSectionSize :: Vector3
@@ -367,6 +370,7 @@ local function clearPlot(plot: Model)
 		end
 		plotConnections[plot] = nil
 	end
+	plotSizeReferenceByPlot[plot] = nil
 
 	local visual = plot:FindFirstChild("Visual")
 	if visual then
@@ -390,6 +394,20 @@ local function renderAllPlots()
 	end
 end
 
+local function bindPlotSizeReference(plotModel: Model, plotSizeReference: BasePart, connections: { RBXScriptConnection })
+	if plotSizeReferenceByPlot[plotModel] == plotSizeReference then
+		return
+	end
+	plotSizeReferenceByPlot[plotModel] = plotSizeReference
+	table.insert(connections, plotSizeReference:GetPropertyChangedSignal("Size"):Connect(function()
+		renderPlot(plotModel)
+	end))
+	table.insert(connections, plotSizeReference:GetPropertyChangedSignal("CFrame"):Connect(function()
+		renderPlot(plotModel)
+	end))
+	renderPlot(plotModel)
+end
+
 local function setupPlot(plot: Instance)
 	if not plot:IsA("Model") or not string.match(plot.Name, "^Plot%d+$") or plotConnections[plot] then
 		return
@@ -408,13 +426,15 @@ local function setupPlot(plot: Instance)
 
 	local plotSizeReference = plotModel:FindFirstChild("PlotSizeReference")
 	if plotSizeReference and plotSizeReference:IsA("BasePart") then
-		table.insert(connections, plotSizeReference:GetPropertyChangedSignal("Size"):Connect(function()
-			renderPlot(plotModel)
-		end))
-		table.insert(connections, plotSizeReference:GetPropertyChangedSignal("CFrame"):Connect(function()
-			renderPlot(plotModel)
-		end))
+		bindPlotSizeReference(plotModel, plotSizeReference, connections)
 	end
+	table.insert(connections, plotModel.ChildAdded:Connect(function(child)
+		if child.Name == "PlotSizeReference" and child:IsA("BasePart") then
+			bindPlotSizeReference(plotModel, child, connections)
+		elseif child.Name == "Visual" then
+			renderPlot(plotModel)
+		end
+	end))
 
 	table.insert(connections, plotModel.AncestryChanged:Connect(function(_, parent)
 		if not parent then

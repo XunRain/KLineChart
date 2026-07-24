@@ -49,7 +49,7 @@ return {
 	SellInventoryOptionText = "Sell Inventory!",
 	-- 模板同款选项：出售当前手持产物 Tool 对应品种的 1 个产物；服务端重新读取当前装备 Tool 与权威库存。
 	SellThisOptionText = "Sell This!",
-	-- 模板同款选项：询问当前手持产物 Tool 的单个基础价值；未来动态市场上线后改为当前行情单价。
+	-- 模板同款选项：询问当前手持产物 Tool 的单个当前行情单价；服务端不接受客户端传入价格。
 	PriceCheckOptionText = "How much is this worth?",
 	-- 模板同款选项：议价；动态市场与议价尚未实现，客户端只给 NPC 不可用反馈。
 	BargainOptionText = "Bargain!",

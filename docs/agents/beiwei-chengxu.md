@@ -12,19 +12,20 @@
 
 KLineChart 已实现第一版种植与存档基础：
 
-- `src/shared/ItemConfig.luau` 是植物成长、收获类型、初始种子、预制模型名称、视觉成长参数和交互限制的单一来源；当前有 Carrot 与 Strawberry。
+- `src/shared/ItemConfig.luau` 是植物成长、收获类型、初始种子、预制模型名称、视觉成长参数和交互限制的单一来源；当前有 Carrot、Strawberry 与 Blueberry。
 - `PlayerDataService` 使用原生 `UpdateAsync`、`Version = 2`、会话锁、深度补全、自动保存与保存防抖；v1 或缺失 `Sheckles` 的档案安全补 20，Live DataStore 失败时拒绝加载，Studio 才允许内存降级。
 - `PlotService` 适配 `Workspace.Gardens.Plot1..Plot8`，优先使用 `Visual.PlantAreaColumn1/2`，以 `SpawnPoint` 保存植物局部坐标。
 - `PlantingService`、`HarvestService`、`InventoryService` 和 `PlantService` 分别拥有请求校验、收获事务、库存物化和运行时植物模型职责。
 - 客户端 `PlantInteractionController` 只提交种植命中点，`PlantVisualController` 以约 12Hz 驱动预制植株与挂点果实的时间戳成长；最终库存与成熟判断均由服务端决定。
-- `PlantService` 从 `ReplicatedStorage.Assets.Plants` 严格验证并克隆 Carrot、Strawberry，并按品种 `PlacementOffsetY` 调整运行时 Root 高度；重复收获品种从 `Assets.Fruits` 按 `BodyRoot` 的 `FruitSlot=true` Attachment 创建视觉果实，缺资源时种植失败并退种，不生成几何降级。
-- 无 Handle 种子 Tool 仍是代码侧交互载体。固定基础价出售代码已实现；动态市场、天气、事件和价格曲线仍未实现。
+- `PlantService` 从 `ReplicatedStorage.Assets.Plants` 严格验证并克隆 Carrot、Strawberry、Blueberry，并按品种 `PlacementOffsetY` 调整运行时 Root 高度；重复收获品种从 `Assets.Fruits` 按 `BodyRoot` 的 `FruitSlot=true` Attachment 创建视觉果实，缺资源时种植失败并退种，不生成几何降级。
+- 无 Handle 种子 Tool 仍是代码侧交互载体。动态市场首版已实现；FarmShop 的 `PriceCurveGraph` 使用服务端最近 10 次价格历史绘制走势并显示 Guide 最高/中间/最低价；天气和事件仍未实现。
 - `TestMenuService` 与 `TestMenuController` 已提供仅白名单 UserId `10972923838` 可用的代码测试菜单；客户端只提交 `ActionId`，服务端从 `TestMenuConfig` 权威读取种子类型和固定数量。
-- `SeedShopService` 参考模板思路实现 5 分钟一轮的个人库存刷新，当前 Carrot 每轮 20、Strawberry 每轮 15；购买时在靠近 `Workspace.NPCS.Sam.HumanoidRootPart` 后按配置完成“扣 Sheckles + 扣个人库存 + 加 1 种子”的权威事务，`SeedShopController` 克隆 Studio `SeedShop.Frame.NormalShop.ItemTemplate` 模板商品行，填充名称、价格、真实库存、稀有度、Restock 倒计时，并强制从 `ReplicatedStorage.Assets.Seeds.<ItemId>` 渲染种子预览，缺资源时留空告警而不显示模板占位块。
+- `SeedShopService` 参考模板思路实现 5 分钟一轮的个人库存刷新，当前 Carrot、Strawberry、Blueberry 均按 `SeedShopConfig.StockRules` 刷新个人库存；购买时在靠近 `Workspace.NPCS.Sam.HumanoidRootPart` 后按配置完成“扣 Sheckles + 扣个人库存 + 加种子”的权威事务，`SeedShopController` 克隆 Studio `SeedShop.Frame.NormalShop.ItemTemplate` 模板商品行，填充名称、价格、真实库存、稀有度、Restock 倒计时，并强制从 `ReplicatedStorage.Assets.Seeds.<ItemId>` 渲染种子预览，缺资源时留空告警而不显示模板占位块。
 - `HudCurrencyController` 从服务端物化的 `KLineInventory.Sheckles` 只读同步 HUD 金币显示，当前会同时写入 `PlayerGui.HUD.Currencies.CoinsCounter.TextLabel` 描边底字和其子级 `TextLabel` 前景数字，并同步模板 `Target`/`Goal` NumberValue，避免显示 Studio 假值或父子文字重影。
 - `InterfaceVisualController` 用 owner 集合统一管理多个界面的 Blur=20 与当前真实 FOV-10，最后一个界面关闭后恢复；SeedShop 与测试菜单共用该模块。
 - `TeleportController` 只绑定 `PlayerGui.TeleportButtons.TeleportButtons` 的三个现有按钮并提交稳定目的地标识；`TeleportService` 校验白名单、冷却和存活角色后，权威解析固定目标或玩家自己的地块 SpawnPoint，当前仍待 Studio Play 验收。
-- `SellShopService` 以 Carrot=20、Strawberry=15 的服务端基础价完成单品种全部出售或 SellAll 原子事务，并通过 `SellProduceResult` 把出售数量、收益和失败原因回传给触发玩家用于 Steven 对话展示；客户端只提交稳定动作，动态行情尚未实现且待 Studio Play 验收。
+- `MarketService` 在单个服务器内维护 Carrot 10 秒、Strawberry 20 秒、Blueberry 30 秒的产物当前价刷新和最近 10 次价格历史，并通过 `RequestMarketState`/`MarketStateChanged` 同步给客户端；状态不进 DataStore、不跨服务器同步。
+- `SellShopService` 已改为从 `MarketService.GetCurrentPrice` 读取服务端当前市场价完成单品种出售、按数量出售、手持出售或 SellAll 原子事务，并通过 `SellProduceResult` 把出售数量、收益、动态单价、基础价和失败原因回传给触发玩家；客户端只提交稳定动作，动态市场仍待 Studio Play 验收。
 - `NpcPromptVisualController` 严格识别已流送的 Sam/Steven Prompt 并幂等恢复默认样式；`SellShopController` 只使用当前已补齐并验证的 `Assets.NpcUIs` 资源契约，克隆 Talk_UI/Response_UI/Option_UI 副本并防御性剥离 BaseScript，按“种植花园2模板”的 NPC 对话样式在本地生成 `Billboard_UI.Objects` 承载选项；当前 `Option_UI.Frame.Frame.Text_Element` 为选项文案节点，控制器递归查找以兼容该嵌套层级，未来缺失时安全禁用出售 UI。
 - `NpcPromptService` 在服务器完整 Workspace 中统一配置 Sam/Steven 现有 Prompt；客户端商店控制器通过 `ProximityPromptService.PromptShown/PromptTriggered` 严格匹配 NPC 路径，兼容 StreamingEnabled 下 NPC 延迟流送、流出和替换，当前待 Studio Play 验收。
 
@@ -52,9 +53,9 @@ KLineChart 已实现第一版种植与存档基础：
 后续目标系统包括：
 
 - 服务端维护种植生命周期、收获结果、玩家持有物和出售结算。
-- 服务端维护单服务器共享的植物当前价格、天气和事件状态。
-- 服务端生成带时间戳、按时间有序的近期价格历史，供价格曲线图读取。
-- 共享配置作为植物基础数值、价格规则、天气和事件规则的单一来源，具体模块和字段在实施时确定。
+- 服务端已维护单服务器共享的植物当前价格和带时间戳的近期价格历史；天气和事件状态仍待实现。
+- 服务端已生成带时间戳、按时间有序、长度限制为 10 的近期价格历史，供价格曲线图读取。
+- 共享配置作为植物基础数值与价格刷新规则的单一来源；天气和事件规则待后续实施时补充。
 - 客户端负责交互、提示、天气和事件表现以及价格曲线图展示，不拥有最终经济结果。
 - 首版曲线数据是单一价格随时间变化的时间序列，不实现金融蜡烛图或 OHLC 数据。
 

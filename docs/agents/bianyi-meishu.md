@@ -10,7 +10,7 @@
 
 ## 当前状态与目标方向
 
-KLineChart 已验证并接入 `ReplicatedStorage.Assets.Plants.Carrot`、`Plants.Strawberry` 与 `Assets.Fruits.Strawberry`。植株预制体由外层 `Root` 定位、`Body/BodyRoot` 承担成长缩放；草莓运行时下沉 0.4 stud，并在 `BodyRoot` 的四个 `FruitSlot=true` Attachment 中按顺序保留已成熟果实、只让第一个空槽继续生长，满槽后暂停。种子图标、成长动画、收获反馈、天气资源、事件资源、市场面板和价格曲线 UI 仍为“待补资源”。
+KLineChart 已验证并接入 `ReplicatedStorage.Assets.Plants.Carrot`、`Plants.Strawberry`、`Plants.Blueberry` 与 `Assets.Fruits.Strawberry`、`Assets.Fruits.Blueberry`。植株预制体由外层 `Root` 定位、`Body/BodyRoot` 承担成长缩放；Strawberry 与 Blueberry 在 `BodyRoot` 的四个 `FruitSlot=true` Attachment 中按顺序保留已成熟果实、只让第一个空槽继续生长，满槽后暂停。Blueberry 当前由模板代码生成逻辑转化为 KLine 规范示例，使用 `Part + SpecialMesh.Sphere` 替代模板 MeshId，后续可由美术替换为原创授权模型。FarmShop 价格曲线已接入服务端历史和 Guide 价格文字，但种子图标、成长动画、收获反馈、天气资源、事件资源和市场面板精修仍为“待补资源”。
 
 新增植物资源时必须保持 `ItemConfig` 的稳定植物 ID，并沿用 `Root`、`Body/BodyRoot` 契约；重复收获植物还需提供果实预制体和至少一个稳定、唯一命名的 FruitSlot。挂点索引只决定成熟果实的显示顺序和下一个空槽的位置，不能被当作单次收获产量。当前不要求工具人在 Studio 修改资源，除非收到单独编辑器任务单。
 

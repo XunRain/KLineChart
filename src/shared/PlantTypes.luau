@@ -33,7 +33,7 @@ export type PlantRecord = {
 export type InventoryData = {
 	Seeds: { [string]: number },
 	Produce: { [string]: number },
-	-- 玩家热栏布局偏好，键为槽位字符串 "1".."10"，值为客户端与服务端共同认可的稳定 ToolKey；不承载库存数量。
+	-- 玩家热栏布局偏好，键为槽位字符串 "1".."10"，值为稳定 ToolKey 或空槽标记；不承载库存数量。
 	HotbarLayout: { [string]: string },
 }
 

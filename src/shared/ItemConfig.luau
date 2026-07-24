@@ -23,7 +23,7 @@ export type ItemDefinition = {
 	YieldAmount: number,
 	-- 种子商店购买一颗该品种种子的服务端权威价格，单位为 Sheckles；必须为安全正整数，客户端显示值不参与结算。
 	SeedBuyPrice: number,
-	-- 每个产物的服务端权威基础售价，单位为 Sheckles；未来动态市场以此为基线，客户端展示值绝不参与结算。
+	-- 每个产物的服务端权威基础售价，单位为 Sheckles；动态市场以此为基线刷新当前售价，客户端展示值绝不参与结算。
 	BaseSellPrice: number,
 	-- 该品种在种子商店中的升序排列值；仅影响客户端商品顺序，不改变价格、库存或购买权限。
 	ShopSortOrder: number,
@@ -99,12 +99,12 @@ ItemConfig.Items = {
 		Id = "Strawberry",
 		DisplayName = "Strawberry",
 		HarvestType = "Repeat",
-		GrowthTime = 30,
-		RegrowTime = 15,
+		GrowthTime = 20,
+		RegrowTime = 10,
 		StartingSeeds = 3,
 		YieldAmount = 1,
 		SeedBuyPrice = 50,
-		BaseSellPrice = 15,
+		BaseSellPrice = 100,
 		ShopSortOrder = 20,
 		PlantModelName = "Strawberry",
 		FruitModelName = "Strawberry",
@@ -112,6 +112,25 @@ ItemConfig.Items = {
 		FruitGrowthStartAlpha = 1,
 		PlacementOffsetY = -0.4,
 		MinSpacing = 4.5,
+	},
+	-- 蓝莓用于扩展重复收获品种：灌木保留，四个果实槽按 RegrowTime 逐颗补果。
+	Blueberry = {
+		Id = "Blueberry",
+		DisplayName = "Blueberry",
+		HarvestType = "Repeat",
+		GrowthTime = 20,
+		RegrowTime = 10,
+		StartingSeeds = 0,
+		YieldAmount = 1,
+		SeedBuyPrice = 80,
+		BaseSellPrice = 160,
+		ShopSortOrder = 30,
+		PlantModelName = "Blueberry",
+		FruitModelName = "Blueberry",
+		MinimumVisualScale = 0.05,
+		FruitGrowthStartAlpha = 1,
+		PlacementOffsetY = 0,
+		MinSpacing = 5,
 	},
 } :: { [string]: ItemDefinition }
 

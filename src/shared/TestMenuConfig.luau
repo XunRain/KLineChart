@@ -61,25 +61,33 @@ TestMenuConfig.Actions = {
 		SortOrder = 20,
 	},
 	{
+		ActionId = "GrantBlueberrySeeds5",
+		DisplayText = "蓝莓种子 ×5",
+		Kind = "GrantSeed",
+		SeedId = "Blueberry",
+		Amount = 5,
+		SortOrder = 30,
+	},
+	{
 		ActionId = "GrantSheckles1K",
 		DisplayText = "+1K 金币",
 		Kind = "GrantCurrency",
 		CurrencyAmount = 1_000,
-		SortOrder = 30,
+		SortOrder = 40,
 	},
 	{
 		ActionId = "GrantSheckles1M",
 		DisplayText = "+1M 金币",
 		Kind = "GrantCurrency",
 		CurrencyAmount = 1_000_000,
-		SortOrder = 40,
+		SortOrder = 50,
 	},
 	{
 		ActionId = "GrantSheckles1B",
 		DisplayText = "+1B 金币",
 		Kind = "GrantCurrency",
 		CurrencyAmount = 1_000_000_000,
-		SortOrder = 50,
+		SortOrder = 60,
 	},
 } :: { TestAction }
 

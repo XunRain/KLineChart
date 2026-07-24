@@ -15,6 +15,7 @@ local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
 local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
 local NpcPromptVisualController = require(script.Parent.NpcPromptVisualController)
+local PriceCurveGraph = require(script.Parent.Parent.Components.PriceCurveGraph)
 
 type ShopMode = "Seeds" | "Sell"
 type ShopItem = {
@@ -25,6 +26,23 @@ type SeedShopState = {
 	RefreshAt: number?,
 	RefreshRemainingSeconds: number?,
 	Items: { { ItemId: string?, Stock: number? } }?,
+}
+type MarketHistoryPoint = {
+	Time: number?,
+	Price: number?,
+}
+type MarketItemState = {
+	ItemId: string?,
+	CurrentPrice: number?,
+	BaseSellPrice: number?,
+	MinPrice: number?,
+	MaxPrice: number?,
+	NextRefreshAt: number?,
+	RefreshInterval: number?,
+	History: { MarketHistoryPoint }?,
+}
+type MarketSnapshot = {
+	Items: { MarketItemState }?,
 }
 
 local FarmShopController = {}
@@ -44,11 +62,13 @@ local closeButton: GuiButton? = nil
 local requestBuyRemote: RemoteEvent? = nil
 local requestSeedStateRemote: RemoteEvent? = nil
 local requestSellRemote: RemoteEvent? = nil
+local requestMarketStateRemote: RemoteEvent? = nil
 local selectedMode: ShopMode = "Seeds"
 local selectedItemId: string? = nil
 local selectedAmount = FarmShopConfig.MinimumAmount
 local currentRefreshAt = 0
 local seedStockByItem: { [string]: number } = {}
+local marketByItem: { [string]: MarketItemState } = {}
 local rowByItem: { [string]: Frame } = {}
 local rowConnections: { RBXScriptConnection } = {}
 local activeConnections: { RBXScriptConnection } = {}
@@ -172,6 +192,67 @@ local function formatPriceNumber(amount: number): string
 	return NumberFormatter.Abbreviate(math.max(0, math.floor(amount)), 2)
 end
 
+local function getTrendPercent(values: { number }): number
+	local last = values[#values] or 0
+	local previous = values[math.max(1, #values - 1)] or last
+	if previous <= 0 then
+		return 0
+	end
+	return ((last - previous) / previous) * 100
+end
+
+local function getMarketState(itemId: string): MarketItemState?
+	return marketByItem[itemId]
+end
+
+local function getProduceMarketPrice(itemId: string, definition: ItemConfig.ItemDefinition): number
+	local itemState = getMarketState(itemId)
+	local price = itemState and itemState.CurrentPrice
+	return if type(price) == "number" and price == price and price > 0 then math.floor(price) else definition.BaseSellPrice
+end
+
+local function getProducePriceHistory(itemId: string, fallbackPrice: number): { number }
+	local itemState = getMarketState(itemId)
+	local values = {}
+	if itemState and type(itemState.History) == "table" then
+		for _, point in itemState.History do
+			local price = point.Price
+			if type(price) == "number" and price == price and price >= 0 and math.abs(price) < math.huge then
+				table.insert(values, math.floor(price))
+			end
+		end
+	end
+	if #values == 0 then
+		return { fallbackPrice, fallbackPrice }
+	elseif #values == 1 then
+		return { values[1], values[1] }
+	end
+	return values
+end
+
+local function renderPriceCurve(values: { number })
+	local chartArea = getDetailChild("ChartArea")
+	if not chartArea or not chartArea:IsA("Frame") then
+		return
+	end
+
+	local theme = {
+		GridColor = Color3.fromRGB(204, 166, 105),
+		GridTransparency = 0.52,
+		LineColor = Color3.fromRGB(52, 160, 212),
+		RisingLineColor = Color3.fromRGB(65, 184, 88),
+		FallingLineColor = Color3.fromRGB(220, 86, 72),
+		DotColor = Color3.fromRGB(86, 194, 83),
+		DotStrokeColor = Color3.fromRGB(149, 96, 49),
+	}
+	PriceCurveGraph.Render(chartArea, values, theme)
+	task.defer(function()
+		if chartArea.Parent then
+			PriceCurveGraph.Render(chartArea, values, theme)
+		end
+	end)
+end
+
 local function formatRemaining(seconds: number): string
 	local wholeSeconds = math.max(0, math.floor(seconds))
 	local minutes = math.floor(wholeSeconds / 60)
@@ -286,19 +367,6 @@ local function getRowPreviewViewport(main: Frame): ViewportFrame?
 	return if viewport and viewport:IsA("ViewportFrame") then viewport else nil
 end
 
-local function getTemplateNumberAttribute(template: Instance?, attributeName: string, fallback: number): number
-	local value = template and template:GetAttribute(attributeName)
-	return if typeof(value) == "number" and value > 0 then value else fallback
-end
-
-local function getCollapsedRowHeight(): number
-	return getTemplateNumberAttribute(itemTemplate, "CollapsedRowHeightScale", FarmShopConfig.DefaultCollapsedRowHeightScale)
-end
-
-local function getExpansionHeight(): number
-	return getTemplateNumberAttribute(expansionTemplate, "ExpansionRowHeightScale", FarmShopConfig.DefaultExpansionRowHeightScale)
-end
-
 local function setRowSelected(row: Frame, selected: boolean)
 	local main = row:FindFirstChild("Main_Frame")
 	local stroke = main and main:FindFirstChild("UIStroke")
@@ -374,22 +442,16 @@ local function updateDetail()
 	local referencePrice = getLabel(rightDetail, "ReferencePriceValue")
 	local currentPriceLabel = getLabel(rightDetail, "CurrentPriceLabel")
 	local referencePriceLabel = getLabel(rightDetail, "ReferencePriceLabel")
-	local ownedText = getLabel(rightDetail, "OwnedText")
 	local quantityFrame = getDetailChild("Quantity")
 	local amountText = getDetailChild("AmountText")
 	local primaryButton = getButton(rightDetail, "PrimaryButton")
 	local sellAllButton = getButton(rightDetail, "SellAllButton")
-	local statusText = getLabel(rightDetail, "StatusText")
-	local weatherText = getLabel(rightDetail, "WeatherText")
 	local trendTitle = getLabel(rightDetail, "TrendTitle")
 	local trendStatus = getLabel(rightDetail, "TrendStatusText")
 	local trendPercent = getLabel(rightDetail, "TrendPercentText")
 	local estimateTitle = getLabel(rightDetail, "EstimateTitle")
 	local estimateValue = getLabel(rightDetail, "EstimateValue")
 
-	if weatherText then
-		weatherText.Text = FarmShopConfig.TrendPlaceholderText
-	end
 	if trendTitle then
 		trendTitle.Text = FarmShopConfig.TrendTitleText
 	end
@@ -402,18 +464,17 @@ local function updateDetail()
 
 	if not itemId or not definition then
 		if viewport then clearViewport(viewport) end
+		renderPriceCurve({ 0, 0 })
 		if itemName then itemName.Text = if selectedMode == "Seeds" then "No seed selected" else "No produce selected" end
 		if currentPrice then currentPrice.Text = "--" end
 		if referencePrice then referencePrice.Text = "--" end
 		if currentPriceLabel then currentPriceLabel.Text = "Current Price" end
 		if referencePriceLabel then referencePriceLabel.Text = if selectedMode == "Seeds" then "Seed Price" else "Reference Price" end
-		if ownedText then ownedText.Text = "" end
 		if amountText then setLabelText(amountText, tostring(FarmShopConfig.MinimumAmount)) end
 		if quantityFrame and quantityFrame:IsA("GuiObject") then quantityFrame.Visible = false end
 		if estimateTitle then estimateTitle.Text = if selectedMode == "Seeds" then "Estimated Cost" else "Estimated Revenue" end
 		if estimateValue then estimateValue.Text = "0" end
 		if primaryButton and primaryButton:IsA("TextButton") then
-			primaryButton.Text = if selectedMode == "Seeds" then "Buy Selected" else "Sell Selected"
 			primaryButton.Active = false
 			primaryButton.AutoButtonColor = false
 		end
@@ -423,11 +484,7 @@ local function updateDetail()
 				sellAllButton.Active = false
 				sellAllButton.AutoButtonColor = false
 			end
-			if sellAllButton:IsA("TextButton") then
-				sellAllButton.Text = if selectedMode == "Seeds" then "Buy All" else "Sell All"
-			end
 		end
-		if statusText then statusText.Text = "" end
 		return
 	end
 
@@ -435,23 +492,35 @@ local function updateDetail()
 	if itemName then
 		itemName.Text = if selectedMode == "Seeds" then definition.DisplayName .. " Seed" else definition.DisplayName
 	end
-	local unitPrice = if selectedMode == "Seeds" then definition.SeedBuyPrice else definition.BaseSellPrice
+	local marketPrice = getProduceMarketPrice(itemId, definition)
+	local tradeUnitPrice = if selectedMode == "Seeds" then definition.SeedBuyPrice else marketPrice
+	local referenceUnitPrice = if selectedMode == "Seeds" then definition.SeedBuyPrice else definition.BaseSellPrice
 	local maxAmount = getMaxSelectedAmount(itemId, definition)
-	local total = unitPrice * selectedAmount
-	if currentPrice then currentPrice.Text = formatPriceNumber(unitPrice) end
-	if referencePrice then referencePrice.Text = formatPriceNumber(unitPrice) end
+	local total = tradeUnitPrice * selectedAmount
+	local priceHistory = getProducePriceHistory(itemId, marketPrice)
+	local trendPercentValue = getTrendPercent(priceHistory)
+	renderPriceCurve(priceHistory)
+	if currentPrice then currentPrice.Text = formatPriceNumber(marketPrice) end
+	if referencePrice then referencePrice.Text = formatPriceNumber(referenceUnitPrice) end
 	if currentPriceLabel then currentPriceLabel.Text = "Current Price" end
 	if referencePriceLabel then referencePriceLabel.Text = if selectedMode == "Seeds" then "Seed Price" else "Reference Price" end
 	if amountText then setLabelText(amountText, tostring(selectedAmount)) end
 	if quantityFrame and quantityFrame:IsA("GuiObject") then quantityFrame.Visible = true end
 	if estimateTitle then estimateTitle.Text = if selectedMode == "Seeds" then "Estimated Cost" else "Estimated Revenue" end
 	if estimateValue then estimateValue.Text = formatPriceNumber(total) end
+	if trendStatus then
+		trendStatus.Text = if trendPercentValue >= 0 then "Rising" else "Falling"
+		trendStatus.TextColor3 = if trendPercentValue >= 0 then Color3.fromRGB(35, 165, 89) else Color3.fromRGB(210, 79, 69)
+	end
+	if trendPercent then
+		local arrow = if trendPercentValue >= 0 then "↑" else "↓"
+		trendPercent.Text = string.format("%+.0f%% %s", trendPercentValue, arrow)
+		trendPercent.TextColor3 = if trendPercentValue >= 0 then Color3.fromRGB(35, 165, 89) else Color3.fromRGB(210, 79, 69)
+	end
 
 	if selectedMode == "Seeds" then
 		local stock = getSeedStock(itemId)
-		if ownedText then ownedText.Text = string.format("x%d in stock", stock) end
 		if primaryButton and primaryButton:IsA("TextButton") then
-			primaryButton.Text = "Buy Selected"
 			primaryButton.Active = maxAmount > 0
 			primaryButton.AutoButtonColor = maxAmount > 0
 		end
@@ -461,14 +530,10 @@ local function updateDetail()
 				sellAllButton.Active = maxAmount > 0
 				sellAllButton.AutoButtonColor = maxAmount > 0
 			end
-			if sellAllButton:IsA("TextButton") then sellAllButton.Text = "Buy All" end
 		end
-		if statusText then statusText.Text = if stock > 0 then "Choose an amount to buy." else "Out of stock." end
 	else
 		local owned = getInventoryCount("Produce", itemId)
-		if ownedText then ownedText.Text = string.format("Owned %d", owned) end
 		if primaryButton and primaryButton:IsA("TextButton") then
-			primaryButton.Text = "Sell Selected"
 			primaryButton.Active = owned > 0
 			primaryButton.AutoButtonColor = owned > 0
 		end
@@ -478,9 +543,7 @@ local function updateDetail()
 				sellAllButton.Active = owned > 0
 				sellAllButton.AutoButtonColor = owned > 0
 			end
-			if sellAllButton:IsA("TextButton") then sellAllButton.Text = "Sell All" end
 		end
-		if statusText then statusText.Text = if owned > 0 then "Choose an amount to sell." else "You do not own this produce." end
 	end
 end
 
@@ -492,10 +555,8 @@ local function clearRows()
 		return
 	end
 	for _, child in list:GetChildren() do
-		if child.Name ~= FarmShopConfig.ItemTemplateName
-			and child.Name ~= FarmShopConfig.ExpansionTemplateName
-			and not child:IsA("UIListLayout")
-			and not child:IsA("UIPadding")
+		if string.sub(child.Name, 1, 13) == "FarmShopItem_"
+			or string.sub(child.Name, 1, 18) == "FarmShopExpansion_"
 		then
 			child:Destroy()
 		end
@@ -547,7 +608,7 @@ local function configureExpansion(expansion: Frame, itemId: string, definition: 
 	expansion.LayoutOrder = order
 	expansion.Visible = true
 	removeRuntimeScripts(expansion)
-	local price = if selectedMode == "Seeds" then definition.SeedBuyPrice else definition.BaseSellPrice
+	local price = if selectedMode == "Seeds" then definition.SeedBuyPrice else getProduceMarketPrice(itemId, definition)
 	setLabelText(expansion:FindFirstChild("MarketTag", true), FarmShopConfig.MarketPrimaryTagText)
 	setLabelText(expansion:FindFirstChild("MarketTrend", true), FarmShopConfig.MarketSecondaryTagText)
 	setLabelText(
@@ -556,10 +617,10 @@ local function configureExpansion(expansion: Frame, itemId: string, definition: 
 	)
 	setLabelText(expansion:FindFirstChild("MarketPriceValue", true), formatPriceNumber(price))
 
-	local targetHeight = getExpansionHeight()
-	expansion.Size = UDim2.new(expansion.Size.X.Scale, expansion.Size.X.Offset, 0, 0)
+	local targetSize = expansion.Size
+	expansion.Size = UDim2.new(targetSize.X.Scale, targetSize.X.Offset, 0, 0)
 	TweenService:Create(expansion, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = UDim2.new(expansion.Size.X.Scale, expansion.Size.X.Offset, targetHeight, 0),
+		Size = targetSize,
 	}):Play()
 end
 
@@ -597,7 +658,6 @@ rebuildRows = function()
 	for index, item in visibleItems do
 		local row = template:Clone()
 		configureRow(row, item.ItemId, item.Definition, index * 2)
-		row.Size = UDim2.new(row.Size.X.Scale, row.Size.X.Offset, getCollapsedRowHeight(), 0)
 		row.Parent = list
 		if expTemplate and item.ItemId == selectedItemId then
 			local expansion = expTemplate:Clone()
@@ -646,6 +706,26 @@ local function applySeedState(state: SeedShopState)
 	end
 end
 
+local function applyMarketState(snapshot: MarketSnapshot)
+	if type(snapshot) ~= "table" then
+		return
+	end
+	table.clear(marketByItem)
+	if type(snapshot.Items) == "table" then
+		for _, itemState in snapshot.Items do
+			local itemId = itemState.ItemId
+			if type(itemId) == "string" and ItemConfig.Get(itemId) then
+				marketByItem[itemId] = itemState
+			end
+		end
+	end
+	if screenGui and screenGui.Enabled then
+		queueRefreshRows()
+	else
+		updateDetail()
+	end
+end
+
 local function closeShop()
 	disconnect(activeConnections)
 	activeRoot = nil
@@ -672,6 +752,9 @@ local function openShop(mode: ShopMode, root: BasePart)
 	if requestSeedStateRemote then
 		requestSeedStateRemote:FireServer()
 	end
+	if requestMarketStateRemote then
+		requestMarketStateRemote:FireServer()
+	end
 	rebuildRows()
 	table.insert(activeConnections, player.CharacterAdded:Connect(closeShop))
 end
@@ -693,8 +776,6 @@ local function submitPrimaryAction()
 				ItemId = itemId,
 				Amount = math.clamp(selectedAmount, FarmShopConfig.MinimumAmount, maxAmount),
 			})
-			local statusText = getLabel(rightDetail, "StatusText")
-			if statusText then statusText.Text = "Purchase request sent." end
 		end
 		return
 	end
@@ -706,8 +787,6 @@ local function submitPrimaryAction()
 			ItemId = itemId,
 			Amount = math.clamp(selectedAmount, FarmShopConfig.MinimumAmount, owned),
 		})
-		local statusText = getLabel(rightDetail, "StatusText")
-		if statusText then statusText.Text = "Selling..." end
 	end
 end
 
@@ -730,8 +809,6 @@ local function submitSellAll()
 				ItemId = itemId,
 				Amount = maxAmount,
 			})
-			local statusText = getLabel(rightDetail, "StatusText")
-			if statusText then statusText.Text = "Buying all selected seeds..." end
 		end
 	else
 		local remote = requestSellRemote
@@ -741,8 +818,6 @@ local function submitSellAll()
 				ItemId = itemId,
 				Amount = maxAmount,
 			})
-			local statusText = getLabel(rightDetail, "StatusText")
-			if statusText then statusText.Text = "Selling all selected produce..." end
 		end
 	end
 end
@@ -829,6 +904,7 @@ local function bindGui(): boolean
 	screenGui = screen
 	screen.Enabled = false
 	screen.ResetOnSpawn = false
+	removeRuntimeScripts(screen)
 
 	local frame = screen:FindFirstChild(FarmShopConfig.MainFrameName)
 	local body = frame and frame:FindFirstChild("Body")
@@ -871,6 +947,7 @@ local function bindGuiActions()
 			selectedMode = "Seeds"
 			selectedItemId = nil
 			if requestSeedStateRemote then requestSeedStateRemote:FireServer() end
+			if requestMarketStateRemote then requestMarketStateRemote:FireServer() end
 			rebuildRows()
 		end)
 	end
@@ -878,6 +955,7 @@ local function bindGuiActions()
 		sellTabButton.Activated:Connect(function()
 			selectedMode = "Sell"
 			selectedItemId = nil
+			if requestMarketStateRemote then requestMarketStateRemote:FireServer() end
 			rebuildRows()
 		end)
 	end
@@ -974,9 +1052,12 @@ local function bindRemotes()
 	requestBuyRemote = folder:WaitForChild(NetworkConfig.Events.RequestBuySeed) :: RemoteEvent
 	requestSeedStateRemote = folder:WaitForChild(NetworkConfig.Events.RequestSeedShopState) :: RemoteEvent
 	requestSellRemote = folder:WaitForChild(NetworkConfig.Events.RequestSellProduce) :: RemoteEvent
+	requestMarketStateRemote = folder:WaitForChild(NetworkConfig.Events.RequestMarketState) :: RemoteEvent
 	local seedStateChanged = folder:WaitForChild(NetworkConfig.Events.SeedShopStateChanged) :: RemoteEvent
 	local sellResult = folder:WaitForChild(NetworkConfig.Events.SellProduceResult) :: RemoteEvent
+	local marketStateChanged = folder:WaitForChild(NetworkConfig.Events.MarketStateChanged) :: RemoteEvent
 	seedStateChanged.OnClientEvent:Connect(applySeedState)
+	marketStateChanged.OnClientEvent:Connect(applyMarketState)
 	sellResult.OnClientEvent:Connect(function(payload)
 		if type(payload) ~= "table" then
 			return
@@ -984,14 +1065,6 @@ local function bindRemotes()
 		local actionId = payload.ActionId
 		if actionId ~= SellShopConfig.SellAmountActionId and actionId ~= SellShopConfig.SellAllActionId then
 			return
-		end
-		local statusText = getLabel(rightDetail, "StatusText")
-		if statusText then
-			if payload.Success == true then
-				statusText.Text = string.format("Sold %d for %s.", tonumber(payload.SoldCount) or 0, formatCoins(tonumber(payload.Payout) or 0))
-			else
-				statusText.Text = if type(payload.Message) == "string" and payload.Message ~= "" then payload.Message else "Sell failed."
-			end
 		end
 		queueRefreshRows()
 	end)
@@ -1016,6 +1089,9 @@ function FarmShopController.Init(dependencies: { InterfaceVisualController: any 
 	bindPrompts()
 	if requestSeedStateRemote then
 		requestSeedStateRemote:FireServer()
+	end
+	if requestMarketStateRemote then
+		requestMarketStateRemote:FireServer()
 	end
 	task.spawn(function()
 		while screenGui and screenGui.Parent do

@@ -8,6 +8,8 @@ return {
 	Events = {
 		-- 客户端到服务端：参数依次为世界命中点 Vector3、seedId 字符串和种子 Tool；服务端不信任任何参数并重新验证位置、所有权、库存、间距与频率。
 		RequestPlant = "RequestPlant",
+		-- 客户端到服务端：唯一参数为植物 recordId 字符串；服务端重新校验铲子、所有权、距离、冷却和存档记录后才删除整株植物。
+		RequestShovelPlant = "RequestShovelPlant",
 		-- 服务端到全部客户端：参数依次为权威种植面位置 Vector3、plantId 字符串和植物记录 recordId；仅用于播放本地播种特效，不参与成长或库存结算。
 		PlantingFx = "PlantingFx",
 		-- 白名单客户端到服务端：唯一参数为稳定 ActionId 字符串；服务端重新检查开关、UserId、冷却与动作配置，绝不接受客户端数量、SeedId 或目标库存。
@@ -22,9 +24,13 @@ return {
 		RequestSellProduce = "RequestSellProduce",
 		-- 服务端到单个客户端：参数为出售结果表，只用于 Steven 对话展示最终数量、金额和失败原因；客户端不得据此反推或确认经济状态。
 		SellProduceResult = "SellProduceResult",
+		-- 客户端到服务端：无参数请求当前服务器共享市场快照；服务端只返回权威展示数据，不接受客户端提交价格或历史。
+		RequestMarketState = "RequestMarketState",
+		-- 服务端到客户端：参数为当前服务器共享市场快照，包含每个产物当前价、基础价、下次刷新时间和最近价格历史。
+		MarketStateChanged = "MarketStateChanged",
 		-- 客户端到服务端：唯一参数为 Seeds、Garden 或 Sell 稳定标识；服务端按白名单自行解析目标，不接受坐标或 Instance。
 		RequestTeleport = "RequestTeleport",
-		-- 客户端到服务端：参数为 1..10 热栏槽位到稳定 ToolKey 的表；服务端只保存布局偏好，不据此增减库存或装备物品。
+		-- 客户端到服务端：参数为 1..10 热栏槽位到稳定 ToolKey 或空槽标记的表；服务端只保存布局偏好，不据此增减库存或装备物品。
 		SaveHotbarLayout = "SaveHotbarLayout",
 		-- 客户端到服务端：无参数请求当前玩家已保存的热栏布局；服务端只返回该玩家存档中的偏好快照。
 		RequestHotbarLayout = "RequestHotbarLayout",

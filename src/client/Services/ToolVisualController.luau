@@ -46,10 +46,6 @@ local function getTemplate(tool: Tool): Instance?
 	if type(itemId) ~= "string" or type(itemType) ~= "string" then
 		return nil
 	end
-	local definition = ItemConfig.Get(itemId)
-	if not definition then
-		return nil
-	end
 	local assets = ReplicatedStorage:FindFirstChild("Assets")
 	if not assets then
 		return nil
@@ -60,6 +56,19 @@ local function getTemplate(tool: Tool): Instance?
 		if template then
 			return template
 		end
+		if previewAssetType == "Tool" then
+			local directTemplate = assets:FindFirstChild(previewModelName)
+			if directTemplate then
+				return directTemplate
+			end
+		end
+	end
+	if itemType == "Utility" then
+		return nil
+	end
+	local definition = ItemConfig.Get(itemId)
+	if not definition then
+		return nil
 	end
 	if itemType == "Seed" then
 		local seeds = assets:FindFirstChild("Seeds")

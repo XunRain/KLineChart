@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
 
 local InventoryService = {}
 local PlayerDataService: any
@@ -13,8 +14,10 @@ local RemoteService: any
 
 local TOOL_TYPE_SEED = "Seed"
 local TOOL_TYPE_PRODUCE = "Produce"
+local TOOL_TYPE_UTILITY = "Utility"
 local HOTBAR_LAYOUT_MAX_SLOTS = 10
 local HOTBAR_LAYOUT_MAX_KEY_LENGTH = 128
+local EMPTY_HOTBAR_SLOT_KEY = "__EMPTY__"
 
 local function ensureFolder(parent: Instance, name: string): Folder
 	local existing = parent:FindFirstChild(name)
@@ -77,8 +80,10 @@ local function isSafeToolKey(value: string): boolean
 	return #value > 0
 		and #value <= HOTBAR_LAYOUT_MAX_KEY_LENGTH
 		and (
-			string.sub(value, 1, 5) == "Seed:"
+			value == EMPTY_HOTBAR_SLOT_KEY
+			or string.sub(value, 1, 5) == "Seed:"
 			or string.sub(value, 1, 6) == "Fruit:"
+			or string.sub(value, 1, 8) == "Utility:"
 			or string.sub(value, 1, 5) == "Name:"
 		)
 end
@@ -145,6 +150,34 @@ local function findSeedTools(player: Player, seedId: string): { Tool }
 	return tools
 end
 
+local function findUtilityTools(player: Player, utilityId: string): { Tool }
+	local tools: { Tool } = {}
+	for _, container in getToolContainers(player) do
+		if container then
+			for _, child in container:GetChildren() do
+				if child:IsA("Tool")
+					and child:GetAttribute("KLineItemTool") == true
+					and child:GetAttribute("KLineUtilityTool") == true
+					and child:GetAttribute("KLineItemType") == TOOL_TYPE_UTILITY
+					and child:GetAttribute("ItemId") == utilityId
+				then
+					table.insert(tools, child)
+				end
+			end
+		end
+	end
+	table.sort(tools, function(left, right)
+		if left.Parent == player.Character and right.Parent ~= player.Character then
+			return true
+		end
+		if right.Parent == player.Character and left.Parent ~= player.Character then
+			return false
+		end
+		return left.Name < right.Name
+	end)
+	return tools
+end
+
 local function prepareTool(tool: Tool, player: Player, itemType: string, itemId: string, amount: number)
 	tool.RequiresHandle = false
 	tool.CanBeDropped = false
@@ -153,6 +186,40 @@ local function prepareTool(tool: Tool, player: Player, itemType: string, itemId:
 	tool:SetAttribute("ItemId", itemId)
 	tool:SetAttribute("StackCount", amount)
 	tool:SetAttribute("OwnerUserId", player.UserId)
+end
+
+local function prepareShovelTool(tool: Tool, player: Player)
+	prepareTool(tool, player, TOOL_TYPE_UTILITY, ShovelConfig.ToolId, 1)
+	tool.Name = ShovelConfig.DisplayName
+	tool.ToolTip = ShovelConfig.ToolTip
+	tool.RequiresHandle = false
+	tool.CanBeDropped = false
+	tool:SetAttribute("KLineUtilityTool", true)
+	tool:SetAttribute("UtilityTool", ShovelConfig.ToolId)
+	tool:SetAttribute("MainCategory", "Tool")
+	tool:SetAttribute("PreviewAssetType", ShovelConfig.PreviewAssetType)
+	tool:SetAttribute("PreviewModelName", ShovelConfig.PreviewModelName)
+	tool:SetAttribute("Count", 1)
+end
+
+local function syncShovelTool(player: Player)
+	local tools = findUtilityTools(player, ShovelConfig.ToolId)
+	local tool = tools[1]
+	for index = 2, #tools do
+		tools[index]:Destroy()
+	end
+	if not tool then
+		tool = Instance.new("Tool")
+		prepareShovelTool(tool, player)
+		local backpackInstance = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
+		if not backpackInstance or not backpackInstance:IsA("Backpack") then
+			tool:Destroy()
+			return
+		end
+		tool.Parent = backpackInstance
+		return
+	end
+	prepareShovelTool(tool, player)
 end
 
 local function syncSeedTool(player: Player, seedId: string, amount: number)
@@ -295,7 +362,27 @@ function InventoryService.GetHeldProduce(player: Player): (string?, Tool?)
 	return nil, nil
 end
 
--- 从玩家数据快照刷新库存复制目录，并同步每种种子与产物的唯一 Tool 和显示数量。
+-- 返回玩家当前是否正装备项目默认铲子，供服务端铲除流程做权威校验。
+function InventoryService.IsHoldingShovel(player: Player): boolean
+	local character = player.Character
+	if not character then
+		return false
+	end
+	for _, child in character:GetChildren() do
+		if child:IsA("Tool")
+			and child:GetAttribute("KLineItemTool") == true
+			and child:GetAttribute("KLineUtilityTool") == true
+			and child:GetAttribute("KLineItemType") == TOOL_TYPE_UTILITY
+			and child:GetAttribute("ItemId") == ShovelConfig.ToolId
+			and child:GetAttribute("OwnerUserId") == player.UserId
+		then
+			return true
+		end
+	end
+	return false
+end
+
+-- 从玩家数据快照刷新库存复制目录，并同步每种种子、产物与默认工具的唯一 Tool 和显示数量。
 function InventoryService.Sync(player: Player)
 	local data = PlayerDataService.GetSnapshot(player)
 	if not data then
@@ -309,6 +396,7 @@ function InventoryService.Sync(player: Player)
 		syncSeedTool(player, itemId, data.Inventory.Seeds[itemId] or 0)
 		syncProduceTool(player, itemId, data.Inventory.Produce[itemId] or 0)
 	end
+	syncShovelTool(player)
 	InventoryService.SendHotbarLayout(player)
 end
 

@@ -31,6 +31,11 @@ return {
 			MinStock = 1,
 			MaxStock = 10,
 		},
+		Blueberry = {
+			Chance = 1,
+			MinStock = 1,
+			MaxStock = 8,
+		},
 	},
 	-- 仅用于模板商店视觉兼容的种子稀有度文案；当前不参与解锁、权重、售价、库存或服务端购买校验。
 	VisualRarityText = "Common",

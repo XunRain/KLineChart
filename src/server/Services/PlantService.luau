@@ -80,7 +80,7 @@ local function prepareRuntimeParts(model: Model)
 		if descendant:IsA("BasePart") then
 			descendant.Anchored = true
 			descendant.CanCollide = false
-			descendant.CanQuery = false
+			descendant.CanQuery = true
 			descendant.CanTouch = false
 		end
 	end

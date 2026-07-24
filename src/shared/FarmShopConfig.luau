@@ -24,10 +24,6 @@ return {
 	SellTabName = "SellTab",
 	-- 右侧数量输入的最小值；购买和出售都会按当前选中物品重新夹取到合法范围。
 	MinimumAmount = 1,
-	-- 左侧商品行未选中时的默认高度比例；优先使用 Studio ItemTemplate 属性 CollapsedRowHeightScale，本值只是缺属性时的安全降级。
-	DefaultCollapsedRowHeightScale = 0.18,
-	-- 左侧商品展开区默认高度比例；优先使用 Studio ExpansionTemplate 属性 ExpansionRowHeightScale，本值只是缺属性时的安全降级。
-	DefaultExpansionRowHeightScale = 0.13,
 	-- 左侧商品行展开时显示的第一个市场属性占位标签；真实天气/事件尚未实现，后续改为服务端同步的市场标签。
 	MarketPrimaryTagText = "Rain Demand",
 	-- 左侧商品行展开时显示的第二个市场属性占位标签；只提示价格会波动，不参与真实定价或结算。
@@ -42,6 +38,4 @@ return {
 	TrendStatusText = "Rising",
 	-- 右侧价格曲线图涨跌幅占位；暂不参与出售结算或真实价格判断。
 	TrendPercentText = "+30% ↑",
-	-- 右侧价格曲线图说明占位；动态天气/事件尚未实现，后续改为真实市场提示。
-	TrendPlaceholderText = "Market curve preview. Dynamic prices are not enabled yet.",
 }

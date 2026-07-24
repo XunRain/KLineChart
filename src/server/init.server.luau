@@ -11,7 +11,9 @@ local InventoryService = require(Services.InventoryService)
 local PlantService = require(Services.PlantService)
 local PlantingService = require(Services.PlantingService)
 local HarvestService = require(Services.HarvestService)
+local ShovelService = require(Services.ShovelService)
 local SeedShopService = require(Services.SeedShopService)
+local MarketService = require(Services.MarketService)
 local SellShopService = require(Services.SellShopService)
 local TeleportService = require(Services.TeleportService)
 local TestMenuService = require(Services.TestMenuService)
@@ -20,6 +22,9 @@ local PlayerLifecycleService = require(Services.PlayerLifecycleService)
 
 RemoteService.Init()
 PlayerDataService.Init()
+MarketService.Init({
+	RemoteService = RemoteService,
+})
 PlotService.Init()
 InventoryService.Init({ PlayerDataService = PlayerDataService, RemoteService = RemoteService })
 PlantService.Init({
@@ -40,6 +45,13 @@ HarvestService.Init({
 	PlantService = PlantService,
 	RemoteService = RemoteService,
 })
+ShovelService.Init({
+	PlayerDataService = PlayerDataService,
+	PlotService = PlotService,
+	InventoryService = InventoryService,
+	PlantService = PlantService,
+	RemoteService = RemoteService,
+})
 SeedShopService.Init({
 	PlayerDataService = PlayerDataService,
 	InventoryService = InventoryService,
@@ -49,6 +61,7 @@ SellShopService.Init({
 	PlayerDataService = PlayerDataService,
 	InventoryService = InventoryService,
 	RemoteService = RemoteService,
+	MarketService = MarketService,
 })
 TeleportService.Init({
 	PlotService = PlotService,

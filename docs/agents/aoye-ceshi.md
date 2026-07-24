@@ -22,23 +22,23 @@
 
 KLineChart 已实现首版种植与存档代码，但尚未完成 Studio Play 验收：
 
-- 当前应测试 Carrot 单次收获、Strawberry 重复收获、时间戳成长、离线成长、种子扣除、产物增加和重新加入恢复。
+- 当前应测试 Carrot 单次收获，以及 Strawberry、Blueberry 重复收获、时间戳成长、离线成长、种子扣除、产物增加和重新加入恢复。
 - 应验证 `Workspace.Gardens.Plot1..Plot8` 分配、两个 `PlantAreaColumn` 范围、相对 `SpawnPoint` 的恢复位置以及玩家离开后的清理。
 - 应验证种植 Remote 的非法 Tool、错误植物 ID、越界、超距、过密、超容量、无库存和高频请求拒绝。
 - 应验证收获 Prompt 的所有权、距离、成熟时间和重复触发锁，以及多人互相尝试收获时的数据安全。
 - 应分别验证可用 DataStore、Studio API 不可用时的内存降级、会话锁、自动保存和退出释放；没有实际证据时不得写成持久化已通过。
-- 已接入 Carrot、Strawberry 植株预制体和 Strawberry 果实预制体；应验收草莓 Root 下沉 0.4 stud、成熟果实保留显示、只有第一个空 FruitSlot 处于生长中、玩家不收获时也会逐颗补满、满槽后暂停、收获一颗后只消耗一颗产物并从空位重新计时、恢复阶段、资源缺失退种和客户端中途加入表现。定制 UI 仍未接入。
-- 已实现白名单代码测试菜单；应验证非白名单完全不创建 UI 且伪造 Remote 无奖励，UserId `10972923838` 的两个动作每次只增加配置指定的 5 个种子，并覆盖冷却、未知动作、重生去重和移动端布局。
+- 已接入 Carrot、Strawberry、Blueberry 植株预制体和 Strawberry、Blueberry 果实预制体；应验收 Strawberry/Blueberry 的成熟果实保留显示、只有第一个空 FruitSlot 处于生长中、玩家不收获时也会逐颗补满、满槽后暂停、收获一颗后只消耗一颗产物并从空位重新计时、恢复阶段、资源缺失退种和客户端中途加入表现。定制 UI 仍未接入。
+- 已实现白名单代码测试菜单；应验证非白名单完全不创建 UI 且伪造 Remote 无奖励，UserId `10972923838` 的种子动作每次只增加配置指定的 5 个种子，并覆盖冷却、未知动作、重生去重和移动端布局。
 - 已实现 Schema v2 的 Sheckles 和首版种子商店刷新；客户端克隆 `SeedShop.Frame.NormalShop.ItemTemplate`/合并商店模板行，应验证 v1/缺字段档案补 20 且原植物库存保留，库存数量以 `SeedShopConfig` 当前规则为准、5 分钟 Restock 倒计时、按数量购买后库存按数量减少、售罄后不能继续购买，以及余额不足、远距、未知 itemId、高频和伪造价格/数量/库存请求完全不变更数据。
 - 应验证 `PlayerGui.HUD.Currencies.CoinsCounter.TextLabel` 及其子级 `TextLabel` 启动后都不再停留在 Studio 模板假值，会同步显示 `KLineInventory.Sheckles`；购买种子、出售产物、重生和 HUD 重新克隆后都应实时更新，客户端手改 HUD 文本或 `KLineInventory.Sheckles` 不得影响服务端结算。
-- 应验证种子商店 `ViewportFrame` 预览强制使用 `ReplicatedStorage.Assets.Seeds.Carrot` 与 `ReplicatedStorage.Assets.Seeds.Strawberry`，缺资源时留空告警，不得继续显示模板红色占位块。
+- 应验证种子商店 `ViewportFrame` 预览强制使用 `ReplicatedStorage.Assets.Seeds.Carrot`、`Seeds.Strawberry` 与 `Seeds.Blueberry`，缺资源时留空告警，不得继续显示模板红色占位块。
 - 应验证 SeedShop 与测试面板重叠时 Blur/FOV 只开启一次，最后一个 owner 关闭才恢复；覆盖 CurrentCamera 切换、重生、owner 销毁和缺 UI/Prompt 安全降级。
 - `StarterGui.SeedShop` 与 Sam Prompt 遗留模板脚本必须由工具人删除；测试时应确认控制器会 warn，运行时克隆的商品行会剥离脚本，正式购买逻辑不依赖这些脚本。
 - 已实现首版服务端权威传送但尚未完成 Studio Play 验收；应验证 Seeds/Sell 固定点兼容 BasePart 与 Model、Garden 只能到自己的 SpawnPoint，并覆盖非法标识、连点冷却、死亡或未加载角色、未分配地块、缺 UI/按钮/目标、重生后重新绑定及客户端伪造坐标或 Instance。
-- 已实现固定基础价出售代码但尚未完成 Studio Play 验收；应验证 Carrot=20、Strawberry=15，`Sell Inventory!` 触发 SellAll 原子结算，并覆盖远距、死亡、冷却、未知动作、伪造数量/价格/总额、零库存及货币溢出；单品种服务端入口仍保留但当前 Steven UI 不再展示按品种出售行。
+- 已实现单服务器共享动态市场但尚未完成 Studio Play 验收；应验证 Carrot 每 10 秒、Strawberry 每 20 秒、Blueberry 每 30 秒刷新当前价，价格范围分别为 10~40、8~30、13~50，`Sell Inventory!` 与 FarmShop 按数量出售均使用服务端当前价原子结算，并覆盖远距、死亡、冷却、未知动作、伪造数量/价格/总额、零库存及货币溢出。
 - 应验证 Sam/Steven Prompt 从 Custom 恢复为 Default 后可见；当前 Studio 已补齐且只读验证 `Assets.NpcUIs` 的 Talk_UI/Response_UI/Option_UI 均无 BaseScript，`Option_UI.Frame.Frame.Text_Element` 为选项文案节点且应能被控制器递归识别；出售对话应本地生成 `Billboard_UI.Objects` 并展示模板式选项，仍需验证运行时克隆、距离关闭、重生、Blur/FOV 清理、`SellProduceResult` 对话反馈及未来资源缺失时安全禁用。
 - 应在 `StreamingEnabled=true` 下从远离 NPC 的出生位置进入，验证启动时客户端未流送 Sam/Steven 不再永久失效；覆盖靠近后流入、远离流出、再次流入、NPC 替换和重生，且 HarvestPrompt、Exit_Detection 与其他 NPC 不得误开商店。
-- 动态价格、天气、事件和价格曲线仍未实现，只能继续作为后续目标测试范围。
+- 动态价格和真实服务端价格历史已进入首版验收范围；天气和事件仍未实现，只能继续作为后续目标测试范围。当前 FarmShop 的价格曲线应按服务端历史验收显示、缩放、Guide 价格标签和安全降级。
 
 后续目标测试范围包括：
 
