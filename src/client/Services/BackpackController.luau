@@ -33,6 +33,11 @@ local VIEWPORT_MODEL_SCALE = 1.5
 local INVENTORY_ROWS_FULL = 4
 local INVENTORY_ROWS_MINI = 2
 local INVENTORY_HEADER_SIZE = 40
+local HOTBAR_Z_INDEX = 2
+local HOTBAR_SLOT_Z_INDEX = 5
+local INVENTORY_Z_INDEX = 20
+local INVENTORY_SLOT_Z_INDEX = 30
+local DRAG_Z_INDEX = 100
 local TOPBAR_RIGHT_PADDING_FULL = 220
 local TOPBAR_RIGHT_PADDING_MINI = 206
 local TOPBAR_BUTTON_Y = 3
@@ -62,7 +67,6 @@ local dragState: any = nil
 local refreshLayout = function() end
 local requestSaveHotbarLayout = function() end
 local saveHotbarLayoutEvent: RemoteEvent? = nil
-local requestHotbarLayoutEvent: RemoteEvent? = nil
 local savedHotbarLayout: { [number]: string } = {}
 local savedHotbarLayoutReady = false
 local savedHotbarLayoutApplied = false
@@ -106,13 +110,36 @@ local function getHotbarBottomMargin(): number
 	return if math.max(viewport.X, viewport.Y) >= 1000 then 18 else 0
 end
 
+local function getTemplateHotbarPixelSize(slotCount: number): Vector2
+	return Vector2.new(SLOT_GAP + slotCount * (SLOT_SIZE + SLOT_GAP), SLOT_GAP + SLOT_SIZE + SLOT_GAP)
+end
+
 local function getTemplateHotbarSize(slotCount: number): UDim2
-	return UDim2.new(0, SLOT_GAP + slotCount * (SLOT_SIZE + SLOT_GAP), 0, SLOT_GAP + SLOT_SIZE + SLOT_GAP)
+	local pixelSize = getTemplateHotbarPixelSize(slotCount)
+	return scaleSize(pixelSize.X, pixelSize.Y)
+end
+
+local function getTemplateInventoryPixelSize(slotCount: number): Vector2
+	local hotbarSize = getTemplateHotbarPixelSize(slotCount)
+	return Vector2.new(hotbarSize.X, hotbarSize.Y * getInventoryRowCount() + INVENTORY_HEADER_SIZE)
 end
 
 local function getTemplateInventorySize(slotCount: number): UDim2
-	local hotbarSize = getTemplateHotbarSize(slotCount)
-	return UDim2.new(0, hotbarSize.X.Offset, 0, hotbarSize.Y.Offset * getInventoryRowCount() + INVENTORY_HEADER_SIZE)
+	local pixelSize = getTemplateInventoryPixelSize(slotCount)
+	return scaleSize(pixelSize.X, pixelSize.Y)
+end
+
+local function getBottomAnchoredPosition(heightPx: number): UDim2
+	local viewport = getViewportSize()
+	return UDim2.fromScale(0.5, 1 - (heightPx + getHotbarBottomMargin()) / math.max(1, viewport.Y))
+end
+
+local function getHotbarPosition(): UDim2
+	return getBottomAnchoredPosition(0)
+end
+
+local function getInventoryPosition(slotCount: number): UDim2
+	return getBottomAnchoredPosition(getTemplateHotbarPixelSize(slotCount).Y)
 end
 
 local function inputPosition(input: InputObject): Vector2
@@ -169,6 +196,19 @@ end
 local function getCharacter(): Model?
 	local character = player.Character
 	return if character and character:IsDescendantOf(workspace) then character else nil
+end
+
+local function getToolContainers(): { Instance }
+	local containers: { Instance } = {}
+	local backpack = getBackpack()
+	if backpack then
+		table.insert(containers, backpack)
+	end
+	local character = getCharacter()
+	if character then
+		table.insert(containers, character)
+	end
+	return containers
 end
 
 local function isTrackedTool(instance: Instance): boolean
@@ -463,7 +503,7 @@ local function makeSlot(
 	button.BorderSizePixel = 0
 	button.Size = if parentWidthPx or parentHeightPx
 		then UDim2.fromScale(SLOT_SIZE / slotParentWidth, SLOT_SIZE / slotParentHeight)
-		else UDim2.fromOffset(SLOT_SIZE, SLOT_SIZE)
+		else scaleSize(SLOT_SIZE, SLOT_SIZE)
 	button.Text = ""
 	button.Parent = parent
 
@@ -481,8 +521,8 @@ local function makeSlot(
 	viewport.Name = "Icon"
 	viewport.BackgroundTransparency = 1
 	viewport.BorderSizePixel = 0
-	viewport.Size = UDim2.new(0.78, 0, 0.78, 0)
-	viewport.Position = UDim2.new(0.11, 0, 0.06, 0)
+	viewport.Size = UDim2.fromScale(0.78, 0.78)
+	viewport.Position = UDim2.fromScale(0.11, 0.06)
 	viewport.Ambient = Color3.fromRGB(180, 180, 180)
 	viewport.LightColor = Color3.fromRGB(255, 255, 255)
 	viewport.LightDirection = Vector3.new(-1, -1, -1)
@@ -526,15 +566,13 @@ local function clearLayout(parent: Instance?)
 end
 
 local function collectCurrentTools(): { Tool }
-	local tools = {}
+	local tools: { Tool } = {}
 	local seen: { [Tool]: boolean } = {}
-	for _, container in { getBackpack(), getCharacter() } do
-		if container then
-			for _, child in container:GetChildren() do
-				if child:IsA("Tool") and isTrackedTool(child) and not seen[child] then
-					seen[child] = true
-					table.insert(tools, child)
-				end
+	for _, container in getToolContainers() do
+		for _, child in container:GetChildren() do
+			if child:IsA("Tool") and isTrackedTool(child) and not seen[child] then
+				seen[child] = true
+				table.insert(tools, child)
 			end
 		end
 	end
@@ -798,6 +836,31 @@ local function setZIndexRecursive(root: Instance, zIndex: number)
 	end
 end
 
+local function updateInventoryStaticLayout(panel: Frame, panelPixelSize: Vector2)
+	local header = panel:FindFirstChild("Header")
+	if header and header:IsA("GuiObject") then
+		header.Position = UDim2.fromScale(0, 0)
+		header.Size = UDim2.fromScale(1, INVENTORY_HEADER_SIZE / math.max(1, panelPixelSize.Y))
+
+		local title = header:FindFirstChild("Title")
+		if title and title:IsA("GuiObject") then
+			title.Position = UDim2.fromScale(8 / math.max(1, panelPixelSize.X), 0)
+			title.Size = UDim2.fromScale(0.36, 1)
+		end
+	end
+	local search = searchBox
+	if search then
+		search.Position = UDim2.fromScale(1 - 195 / math.max(1, panelPixelSize.X), 5 / INVENTORY_HEADER_SIZE)
+		search.Size = UDim2.fromScale(190 / math.max(1, panelPixelSize.X), (INVENTORY_HEADER_SIZE - 10) / INVENTORY_HEADER_SIZE)
+	end
+	local sideBar = panel:FindFirstChild("SideBar")
+	if sideBar and sideBar:IsA("GuiObject") then
+		sideBar.Position = UDim2.fromScale(-10 / math.max(1, panelPixelSize.X), 0.5)
+		sideBar.Size = UDim2.fromScale(87 / math.max(1, panelPixelSize.X), 1)
+		sideBar.Visible = not isMiniLayout()
+	end
+end
+
 local function canUseInputForSlot(input: InputObject): boolean
 	return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
 end
@@ -818,7 +881,7 @@ local function updateDragGhost(point: Vector2)
 	if not dragState or not dragState.GhostSlot then
 		return
 	end
-	dragState.GhostSlot.Frame.Position = UDim2.fromOffset(point.X - SLOT_SIZE / 2, point.Y - SLOT_SIZE / 2)
+	dragState.GhostSlot.Frame.Position = scalePosition(point.X - SLOT_SIZE / 2, point.Y - SLOT_SIZE / 2)
 end
 
 local function startDrag(candidate: any, point: Vector2)
@@ -831,7 +894,7 @@ local function startDrag(candidate: any, point: Vector2)
 	ghostSlot.Frame.AnchorPoint = Vector2.new(0, 0)
 	ghostSlot.Frame.BackgroundTransparency = 0.04
 	ghostSlot.Frame.Active = false
-	setZIndexRecursive(ghostSlot.Frame, 100)
+	setZIndexRecursive(ghostSlot.Frame, DRAG_Z_INDEX)
 	dragState = {
 		Tool = candidate.Tool,
 		SourceHotbar = candidate.SourceHotbar,
@@ -910,23 +973,25 @@ local function renderHotbar()
 			end
 		end
 	end
-	local hotbarSize = getTemplateHotbarSize(math.max(visibleSlots, 1))
+	local visibleSlotCount = math.max(visibleSlots, 1)
+	local hotbarPixelSize = getTemplateHotbarPixelSize(visibleSlotCount)
+	local hotbarSize = getTemplateHotbarSize(visibleSlotCount)
 	parent.Size = hotbarSize
-	parent.Position = UDim2.new(0.5, 0, 1, -getHotbarBottomMargin())
+	parent.Position = getHotbarPosition()
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Horizontal
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	layout.VerticalAlignment = Enum.VerticalAlignment.Center
-	layout.Padding = UDim.new(0, SLOT_GAP)
+	layout.Padding = UDim.new(SLOT_GAP / math.max(1, hotbarPixelSize.X), 0)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = parent
 
 	for index = 1, slotCount do
 		local tool = hotbarTools[index]
 		if inventoryOpen or tool then
-			local slot = makeSlot(parent, "HotbarSlot" .. index, true, index)
+			local slot = makeSlot(parent, "HotbarSlot" .. index, true, index, hotbarPixelSize.X, hotbarPixelSize.Y)
 			slot.Frame.LayoutOrder = index
-			setZIndexRecursive(slot.Frame, 30)
+			setZIndexRecursive(slot.Frame, HOTBAR_SLOT_Z_INDEX)
 			updateSlot(slot, tool)
 			table.insert(activeHotbarSlots, slot)
 			connectSlotInput(slot)
@@ -941,41 +1006,40 @@ local function renderInventory()
 	end
 	clearLayout(parent)
 	local slotCount = getHotbarSlotCount()
+	local panelPixelSize = getTemplateInventoryPixelSize(slotCount)
 	local panelSize = getTemplateInventorySize(slotCount)
-	parent.CanvasSize = UDim2.new(0, 0, 0, 0)
+	local gridHeightPx = math.max(1, panelPixelSize.Y - INVENTORY_HEADER_SIZE)
+	parent.CanvasSize = UDim2.fromScale(0, 0)
 
 	local layout = Instance.new("UIGridLayout")
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.CellPadding = UDim2.fromOffset(SLOT_GAP, SLOT_GAP)
-	layout.CellSize = UDim2.fromOffset(SLOT_SIZE, SLOT_SIZE)
+	layout.CellPadding = UDim2.fromScale(SLOT_GAP / math.max(1, panelPixelSize.X), SLOT_GAP / gridHeightPx)
+	layout.CellSize = UDim2.fromScale(SLOT_SIZE / math.max(1, panelPixelSize.X), SLOT_SIZE / gridHeightPx)
 	layout.Parent = parent
 
 	local visibleCount = 0
 	for _, tool in inventoryTools do
 		if toolMatchesFilter(tool, selectedCategory) and passesSearch(tool) then
 			visibleCount += 1
-			local slot = makeSlot(parent, "InventorySlot" .. visibleCount, false, visibleCount)
+			local slot = makeSlot(parent, "InventorySlot" .. visibleCount, false, visibleCount, panelPixelSize.X, gridHeightPx)
 			slot.Frame.LayoutOrder = visibleCount
-			setZIndexRecursive(slot.Frame, 30)
+			setZIndexRecursive(slot.Frame, INVENTORY_SLOT_Z_INDEX)
 			updateSlot(slot, tool)
 			connectSlotInput(slot)
 		end
 	end
 
 	if inventoryFrame then
-		local hotbarSize = getTemplateHotbarSize(slotCount)
-		inventoryFrame.Position = UDim2.new(0.5, 0, 1, -hotbarSize.Y.Offset - getHotbarBottomMargin())
+		inventoryFrame.Position = getInventoryPosition(slotCount)
 		inventoryFrame.Size = panelSize
-		local sideBar = inventoryFrame:FindFirstChild("SideBar")
-		if sideBar and sideBar:IsA("GuiObject") then
-			sideBar.Visible = not isMiniLayout()
-		end
+		updateInventoryStaticLayout(inventoryFrame, panelPixelSize)
 	end
-	parent.Position = UDim2.new(0, 0, 0, INVENTORY_HEADER_SIZE)
-	parent.Size = UDim2.new(1, parent.ScrollBarThickness + 1, 1, -INVENTORY_HEADER_SIZE)
-	local columns = math.max(1, math.floor(panelSize.X.Offset / (SLOT_SIZE + SLOT_GAP)))
+	parent.Position = UDim2.fromScale(0, INVENTORY_HEADER_SIZE / math.max(1, panelPixelSize.Y))
+	parent.Size = UDim2.fromScale(1, gridHeightPx / math.max(1, panelPixelSize.Y))
+	local columns = math.max(1, math.floor(panelPixelSize.X / (SLOT_SIZE + SLOT_GAP)))
 	local rows = math.ceil(visibleCount / columns)
-	parent.CanvasSize = UDim2.new(0, 0, 0, math.max(1, rows) * (SLOT_SIZE + SLOT_GAP) + SLOT_GAP)
+	local contentHeight = math.max(1, rows) * (SLOT_SIZE + SLOT_GAP) + SLOT_GAP
+	parent.CanvasSize = UDim2.fromScale(0, math.max(1, contentHeight / gridHeightPx))
 end
 
 refreshLayout = function()
@@ -1060,7 +1124,7 @@ local function makeCategoryButton(parent: Instance, category: string, order: num
 	button.BorderSizePixel = 0
 	button.Font = Enum.Font.GothamBold
 	button.LayoutOrder = order
-	button.Size = UDim2.new(1, 0, 0, 40)
+	button.Size = UDim2.fromScale(1, 0.125)
 	button.Text = category
 	button.TextColor3 = Color3.new(1, 1, 1)
 	button.TextSize = 12
@@ -1146,25 +1210,25 @@ local function buildGui()
 	hotbar.Name = "Hotbar"
 	hotbar.AnchorPoint = Vector2.new(0.5, 1)
 	hotbar.BackgroundTransparency = 1
-	hotbar.Position = UDim2.new(0.5, 0, 1, -getHotbarBottomMargin())
+	hotbar.Position = getHotbarPosition()
 	hotbar.Size = getTemplateHotbarSize(1)
-	hotbar.ZIndex = 20
+	hotbar.ZIndex = HOTBAR_Z_INDEX
 	hotbar.Parent = root
 	hotbarFrame = hotbar
 
 	local inventory = Instance.new("Frame")
 	local initialSlotCount = getHotbarSlotCount()
-	local initialHotbarSize = getTemplateHotbarSize(initialSlotCount)
+	local initialPanelPixelSize = getTemplateInventoryPixelSize(initialSlotCount)
 	local initialPanelSize = getTemplateInventorySize(initialSlotCount)
 	inventory.Name = "Inventory"
 	inventory.AnchorPoint = Vector2.new(0.5, 1)
 	inventory.BackgroundColor3 = Color3.fromRGB(31, 31, 31)
 	inventory.BackgroundTransparency = 0.25
 	inventory.BorderSizePixel = 0
-	inventory.Position = UDim2.new(0.5, 0, 1, -initialHotbarSize.Y.Offset - getHotbarBottomMargin())
+	inventory.Position = getInventoryPosition(initialSlotCount)
 	inventory.Size = initialPanelSize
 	inventory.Visible = false
-	inventory.ZIndex = 20
+	inventory.ZIndex = INVENTORY_Z_INDEX
 	inventory.Parent = root
 	inventoryFrame = inventory
 
@@ -1175,11 +1239,11 @@ local function buildGui()
 	local header = Instance.new("Frame")
 	header.Name = "Header"
 	header.BackgroundTransparency = 1
-	header.Position = UDim2.new(0, 0, 0, 0)
-	header.Size = UDim2.new(1, 0, 0, INVENTORY_HEADER_SIZE)
+	header.Position = UDim2.fromScale(0, 0)
+	header.Size = UDim2.fromScale(1, INVENTORY_HEADER_SIZE / math.max(1, initialPanelPixelSize.Y))
 	header.Parent = inventory
 
-	local title = newText(header, "Title", "Backpack", UDim2.new(0.36, -8, 1, 0), UDim2.fromOffset(8, 0))
+	local title = newText(header, "Title", "Backpack", UDim2.fromScale(0.36, 1), UDim2.fromScale(8 / math.max(1, initialPanelPixelSize.X), 0))
 	title.TextSize = 14
 	title.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -1191,8 +1255,8 @@ local function buildGui()
 	search.ClearTextOnFocus = false
 	search.Font = Enum.Font.Gotham
 	search.PlaceholderText = "Search"
-	search.Position = UDim2.new(1, -195, 0, 5)
-	search.Size = UDim2.new(0, 190, 0, INVENTORY_HEADER_SIZE - 10)
+	search.Position = UDim2.fromScale(1 - 195 / math.max(1, initialPanelPixelSize.X), 5 / INVENTORY_HEADER_SIZE)
+	search.Size = UDim2.fromScale(190 / math.max(1, initialPanelPixelSize.X), (INVENTORY_HEADER_SIZE - 10) / INVENTORY_HEADER_SIZE)
 	search.Text = ""
 	search.TextColor3 = Color3.new(1, 1, 1)
 	search.TextSize = 12
@@ -1208,8 +1272,8 @@ local function buildGui()
 	categories.Name = "SideBar"
 	categories.BackgroundTransparency = 1
 	categories.AnchorPoint = Vector2.new(1, 0.5)
-	categories.Position = UDim2.new(0, -10, 0.5, 0)
-	categories.Size = UDim2.new(0, 87, 1, 0)
+	categories.Position = UDim2.fromScale(-10 / math.max(1, initialPanelPixelSize.X), 0.5)
+	categories.Size = UDim2.fromScale(87 / math.max(1, initialPanelPixelSize.X), 1)
 	categories.Visible = not isMiniLayout()
 	categories.Parent = inventory
 
@@ -1229,14 +1293,14 @@ local function buildGui()
 	grid.Active = true
 	grid.BackgroundTransparency = 1
 	grid.BorderSizePixel = 0
-	grid.CanvasSize = UDim2.new(0, 0, 0, 0)
-	grid.Position = UDim2.new(0, 0, 0, INVENTORY_HEADER_SIZE)
+	grid.CanvasSize = UDim2.fromScale(0, 0)
+	grid.Position = UDim2.fromScale(0, INVENTORY_HEADER_SIZE / math.max(1, initialPanelPixelSize.Y))
 	grid.ScrollBarThickness = 6
-	grid.Size = UDim2.new(1, grid.ScrollBarThickness + 1, 1, -INVENTORY_HEADER_SIZE)
+	grid.Size = UDim2.fromScale(1, (initialPanelPixelSize.Y - INVENTORY_HEADER_SIZE) / math.max(1, initialPanelPixelSize.Y))
 	grid.Parent = inventory
 	gridFrame = grid
 	setZIndexRecursive(button, 20)
-	setZIndexRecursive(inventory, 20)
+	setZIndexRecursive(inventory, INVENTORY_Z_INDEX)
 end
 
 local function bindTool(tool: Tool)
@@ -1313,7 +1377,6 @@ local function bindHotbarLayoutRemotes()
 		return
 	end
 	saveHotbarLayoutEvent = saveRemote
-	requestHotbarLayoutEvent = requestRemote
 	changedRemote.OnClientEvent:Connect(function(layout)
 		local nextLayout = sanitizeHotbarLayout(layout)
 		local currentLayout = getCurrentHotbarLayout()
@@ -1330,7 +1393,7 @@ local function bindHotbarLayoutRemotes()
 			requestRefresh()
 		end
 	end)
-	requestHotbarLayoutEvent:FireServer()
+	requestRemote:FireServer()
 end
 
 -- 初始化模板式背包 UI，并监听玩家 Backpack 与 Character 中的 Tool 变化。

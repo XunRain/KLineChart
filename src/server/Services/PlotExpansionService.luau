@@ -73,17 +73,18 @@ local function handleRequest(player: Player)
 		data.OwnedExpansions = math.max(owned + 1, math.floor(tonumber(nextExpansion.Expansion) or owned + 1))
 		newLevel = data.OwnedExpansions
 		price = nextPrice
-		return true, nil
+		return true, ""
 	end)
 
 	if not changed then
-		local messages = {
+		local messages: { [string]: string } = {
 			MaxLevel = "花园已经扩建到最大等级。",
 			InvalidPrice = "扩建价格配置无效。",
 			InsufficientSheckles = string.format("%s 余额不足，无法扩建。", EconomyConfig.CurrencyName),
 			DataBusy = "数据处理中，请稍后重试。",
 		}
-		notify(player, messages[reason] or "扩建失败，请稍后重试。", "Warning")
+		local reasonKey = if type(reason) == "string" then reason else ""
+		notify(player, messages[reasonKey] or "扩建失败，请稍后重试。", "Warning")
 		return
 	end
 

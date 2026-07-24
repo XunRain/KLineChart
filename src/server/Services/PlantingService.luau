@@ -127,13 +127,14 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 	end)
 
 	if not changed then
-		local messages = {
+		local messages: { [string]: string } = {
 			NoSeeds = "You have no seeds left.",
 			TooClose = "Leave more room between plants.",
 			PlotFull = "Your plot is full.",
 			DataBusy = "Please try again.",
 		}
-		reject(player, messages[reason] or "Could not plant this seed.")
+		local reasonKey = if type(reason) == "string" then reason else ""
+		reject(player, messages[reasonKey] or "Could not plant this seed.")
 		return
 	end
 

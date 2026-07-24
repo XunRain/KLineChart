@@ -18,6 +18,8 @@ return {
 		RequestBuySeed = "RequestBuySeed",
 		-- 客户端到服务端：无参数请求当前玩家的种子商店库存与下次刷新时间；服务端只返回该玩家可见的个人库存快照。
 		RequestSeedShopState = "RequestSeedShopState",
+		-- 客户端到服务端：无参数请求立即跳过当前服务器本轮种子商店等待；服务端重新校验距离、冷却和状态后刷新库存。
+		RequestSeedShopRestock = "RequestSeedShopRestock",
 		-- 服务端到单个客户端：参数为种子商店状态表，包含下次刷新 Unix 秒和每个商品当前库存；客户端只能展示，不能据此结算。
 		SeedShopStateChanged = "SeedShopStateChanged",
 		-- 客户端到服务端：唯一参数为 SellAll 稳定动作或植物 itemId；数量、价格和总额均由服务端权威读取与计算。
@@ -28,6 +30,10 @@ return {
 		RequestMarketState = "RequestMarketState",
 		-- 服务端到客户端：参数为当前服务器共享市场快照，包含每个产物当前价、基础价、下次刷新时间和最近价格历史。
 		MarketStateChanged = "MarketStateChanged",
+		-- 客户端到服务端：无参数请求当前服务器共享天气快照；服务端只返回当前天气、开始时间和结束时间。
+		RequestWeatherState = "RequestWeatherState",
+		-- 服务端到客户端：参数为当前服务器共享天气快照，客户端只能展示 UI 和本地特效，不能影响市场或存档。
+		WeatherStateChanged = "WeatherStateChanged",
 		-- 客户端到服务端：唯一参数为 Seeds、Garden 或 Sell 稳定标识；服务端按白名单自行解析目标，不接受坐标或 Instance。
 		RequestTeleport = "RequestTeleport",
 		-- 客户端到服务端：参数为 1..10 热栏槽位到稳定 ToolKey 或空槽标记的表；服务端只保存布局偏好，不据此增减库存或装备物品。

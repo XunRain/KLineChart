@@ -16,6 +16,7 @@ local PlayerDataService: any
 local InventoryService: any
 local RemoteService: any
 local lastRequestAt: { [Player]: number } = {}
+local lastRestockRequestAt: { [Player]: number } = {}
 local stockTemplate: { [string]: number } = {}
 local playerStockByUserId: { [number]: { [string]: number } } = {}
 local nextRefreshTime = 0
@@ -165,6 +166,12 @@ local function broadcastState()
 	end
 end
 
+local function forceFreshStock()
+	nextRefreshTime = 0
+	ensureFreshStock()
+	broadcastState()
+end
+
 local function isPlayerNearShop(player: Player): boolean
 	local shopRoot = getShopRoot()
 	local characterRoot = getBasePart(player.Character, "HumanoidRootPart")
@@ -256,6 +263,30 @@ local function handleRequest(player: Player, payload: any)
 	)
 end
 
+local function handleManualRestock(player: Player)
+	if not SeedShopConfig.Enabled then
+		return
+	end
+	local now = os.clock()
+	local previous = lastRestockRequestAt[player]
+	if previous and now - previous < math.max(0, SeedShopConfig.ManualRestockCooldown) then
+		return
+	end
+	lastRestockRequestAt[player] = now
+
+	if not PlayerDataService.IsLoaded(player) then
+		RemoteService.Notify(player, "Player data is still loading. You cannot restock yet.", "Warning")
+		return
+	end
+	if not isPlayerNearShop(player) then
+		RemoteService.Notify(player, "Please stand closer to Sam.", "Warning")
+		return
+	end
+
+	forceFreshStock()
+	RemoteService.Notify(player, "Seed shop restocked.", "Success")
+end
+
 -- 注入权威数据、库存与 Remote 服务，并启动补货循环、购买请求和玩家离开清理。
 function SeedShopService.Init(dependencies: {
 	PlayerDataService: any,
@@ -284,8 +315,18 @@ function SeedShopService.Init(dependencies: {
 			warn(string.format("[SeedShopService] 状态请求处理失败 %s：%s", player.Name, tostring(err)))
 		end
 	end)
+	RemoteService.GetEvent("RequestSeedShopRestock").OnServerEvent:Connect(function(player)
+		local ok, err = pcall(function()
+			handleManualRestock(player)
+			return true
+		end)
+		if not ok then
+			warn(string.format("[SeedShopService] 手动刷新请求处理失败 %s：%s", player.Name, tostring(err)))
+		end
+	end)
 	Players.PlayerRemoving:Connect(function(player)
 		lastRequestAt[player] = nil
+		lastRestockRequestAt[player] = nil
 		playerStockByUserId[player.UserId] = nil
 	end)
 	NpcPromptService.Configure(

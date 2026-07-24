@@ -15,13 +15,13 @@
 - 已实现 Carrot 单次收获，以及 Strawberry、Blueberry 重复收获的种植、时间戳成长、收获、种子与产物库存流程。
 - 已实现原生 DataStore 存档、版本字段、会话锁、自动保存和 Studio 内存降级；存档保存库存与地块相对坐标植物记录。
 - 已接入 Studio 自有的 Carrot、Strawberry、Blueberry 植株预制体及 Strawberry、Blueberry 果实预制体；重复收获植物采用“成熟果实槽 + 单个空槽生长”规则：已有成熟果实会保留显示，只要存在空位就继续逐颗生长，但同一时间只推进一个空位，满槽后暂停，种子图标、音效和定制 UI 仍是待补资源。
-- 已实现仅 UserId `10972923838` 可见的代码测试菜单，可按服务端配置分别增加 5 个胡萝卜、草莓或蓝莓种子；它只用于开发验证，不属于正式玩家功能或正式 UI。
-- 已实现首版 Sheckles 与种子商店刷新：新旧缺字段档案默认 20，种子价格来自 `ItemConfig`，个人刷新库存来自 `SeedShopConfig`；合并商店支持按选中数量购买或购买当前可买最大数量，服务端按库存、余额、背包上限和 Sam 距离权威校验，并将 `KLineInventory.Sheckles` 同步到 HUD 金币父子两层 TextLabel。
+- 已实现代码测试菜单，当前通过 `TestMenuConfig.AllowAllPlayers` 临时对所有玩家开放，关闭该开关后回到白名单限制；菜单采用“种子 / 金币 / 天气”一级分类展开二级动作：种子可按服务端配置增加 5 个胡萝卜、草莓或蓝莓种子，金币可增加 1K/1M/1B Sheckles，天气可开始 Rain 或清空当前天气；它只用于开发验证，不属于正式玩家功能或正式 UI。
+- 已实现首版 Sheckles 与种子商店刷新：新旧缺字段档案默认 20，种子价格来自 `ItemConfig`，个人刷新库存来自 `SeedShopConfig`；合并商店支持按选中数量购买、购买当前可买最大数量，以及通过刷新按钮免费跳过当前服务器本轮补货等待，服务端按库存、余额、背包上限、Sam 距离和冷却权威校验，并将 `KLineInventory.Sheckles` 同步到 HUD 金币父子两层 TextLabel。
 - 已实现首版单服务器共享动态市场：Carrot 每 10 秒、Strawberry 每 20 秒、Blueberry 每 30 秒刷新一次产物出售当前价，价格在各自 BaseSellPrice 的 0.5x~2x 区间内四舍五入，并保留最近 10 次带时间戳价格历史；服务端出售结算已改用当前市场价。
 - Sam 与 Steven 的 Custom Prompt 由服务器统一恢复为 Roblox 默认可见样式，客户端在对象流送后幂等兜底；Steven 对话所需 `ReplicatedStorage.Assets.NpcUIs` 三个模板当前已补齐并只读验证，出售结果由 `SellProduceResult` 返回后用于 NPC 对话展示，未来缺失时仍会保留可见 Prompt 并安全禁用出售 UI。
 - 已针对 `Workspace.StreamingEnabled=true` 修复商店 Prompt：服务器统一把 Sam/Steven 现有 Prompt 配置为默认样式，客户端按实际流送并触发的 NPC Prompt 打开界面，不再要求 NPC 在启动时已加载；仍待 Studio Play 验收流入、流出与 NPC 替换。
 - 已实现首版服务端权威传送：现有 `TeleportButtons` 的 Seeds、Garden、Sell 按钮只提交稳定目的地标识，服务端分别解析固定传送点或玩家自己的地块 SpawnPoint；代码已落地但仍待 Studio Play 验收。
-- 基础出售已实现；FarmShop 右侧已接入服务端市场历史价格曲线，打开商店或服务器价格刷新时会更新当前价、预计收益和 Guide 最高/中间/最低价显示；天气和事件仍是目标蓝图，不得写成现有功能。
+- 基础出售已实现；FarmShop 右侧已接入服务端市场历史价格曲线，打开商店或服务器价格刷新时会更新当前价、预计收益和 Guide 最高/中间/最低价显示；Rain 天气 UI 与无声音本地雨天视觉已进入首版接入，暂不影响市场、成长、出售或存档，其他天气与事件仍是目标蓝图。
 - 当前实现依赖 Studio 中已验证的 `Workspace.Gardens.Plot1..Plot8` 地块结构，运行结果仍需工具人与熬夜测试在 Studio 验收。
 
 项目目标蓝图是：

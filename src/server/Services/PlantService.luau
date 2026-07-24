@@ -187,11 +187,6 @@ local function getFruitSlotCount(model: Model): number?
 	return slotCount
 end
 
-local function hasAvailableFruit(model: Model): boolean
-	local fruitCount = model:GetAttribute("FruitCount")
-	return type(fruitCount) == "number" and fruitCount > 0
-end
-
 local function forEachRuntimeFruit(model: Model, callback: (Model, number) -> ())
 	local container = model:FindFirstChild("RuntimeFruits")
 	if not container or not container:IsA("Folder") then

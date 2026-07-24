@@ -62,7 +62,7 @@ end
 
 local function resolveVisibleSurfacePosition(position: Vector3): Vector3
 	local temporary = getTemporaryFolder()
-	local excluded = { temporary }
+	local excluded: { Instance } = { temporary }
 	if localPlayer.Character then
 		table.insert(excluded, localPlayer.Character)
 	end

@@ -61,6 +61,7 @@ local sellTabButton: GuiButton? = nil
 local closeButton: GuiButton? = nil
 local requestBuyRemote: RemoteEvent? = nil
 local requestSeedStateRemote: RemoteEvent? = nil
+local requestSeedRestockRemote: RemoteEvent? = nil
 local requestSellRemote: RemoteEvent? = nil
 local requestMarketStateRemote: RemoteEvent? = nil
 local selectedMode: ShopMode = "Seeds"
@@ -88,11 +89,19 @@ local function setLabelText(root: Instance?, text: string)
 	if not root then
 		return
 	end
-	if root:IsA("TextLabel") or root:IsA("TextButton") or root:IsA("TextBox") then
+	if root:IsA("TextLabel") then
+		root.Text = text
+	elseif root:IsA("TextButton") then
+		root.Text = text
+	elseif root:IsA("TextBox") then
 		root.Text = text
 	end
 	for _, descendant in root:GetDescendants() do
-		if descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox") then
+		if descendant:IsA("TextLabel") then
+			descendant.Text = text
+		elseif descendant:IsA("TextButton") then
+			descendant.Text = text
+		elseif descendant:IsA("TextBox") then
 			descendant.Text = text
 		end
 	end
@@ -184,7 +193,7 @@ local function getMaxSelectedAmount(itemId: string?, definition: ItemConfig.Item
 	return getInventoryCount("Produce", itemId)
 end
 
-local function formatCoins(amount: number): string
+local function _formatCoins(amount: number): string
 	return NumberFormatter.FormatWithSuffix(math.max(0, math.floor(amount)), "¢", 2)
 end
 
@@ -245,10 +254,16 @@ local function renderPriceCurve(values: { number })
 		DotColor = Color3.fromRGB(86, 194, 83),
 		DotStrokeColor = Color3.fromRGB(149, 96, 49),
 	}
-	PriceCurveGraph.Render(chartArea, values, theme)
+	local function draw()
+		if chartArea.Parent and chartArea.AbsoluteSize.X > 1 and chartArea.AbsoluteSize.Y > 1 then
+			PriceCurveGraph.Render(chartArea, values, theme)
+		end
+	end
+	draw()
 	task.defer(function()
 		if chartArea.Parent then
-			PriceCurveGraph.Render(chartArea, values, theme)
+			RunService.RenderStepped:Wait()
+			draw()
 		end
 	end)
 end
@@ -274,7 +289,7 @@ local function clearViewport(viewport: ViewportFrame)
 			child:Destroy()
 		end
 	end
-	viewport.CurrentCamera = nil
+	viewport.CurrentCamera = nil :: any
 end
 
 local function anchorPreviewParts(root: Instance)
@@ -411,12 +426,40 @@ local function updateTabVisuals()
 	end
 end
 
+local function getRestockTimerLabel(): TextLabel?
+	local frame = mainFrame
+	local header = frame and frame:FindFirstChild("Header")
+	local refreshIn = header and header:FindFirstChild("RefreshIn")
+	local timer = refreshIn and refreshIn:FindFirstChild("Timer")
+	if timer and timer:IsA("TextLabel") then
+		return timer
+	end
+	return getLabel(frame, "RestockText")
+end
+
+local function setRestockWidgetsVisible(visible: boolean)
+	local frame = mainFrame
+	local header = frame and frame:FindFirstChild("Header")
+	local refreshIn = header and header:FindFirstChild("RefreshIn")
+	if refreshIn and refreshIn:IsA("GuiObject") then
+		refreshIn.Visible = visible
+	end
+	local fallbackLabel = getLabel(frame, "RestockText")
+	if fallbackLabel then
+		fallbackLabel.Visible = visible
+	end
+	local restockButton = getButton(frame, "RestockButton")
+	if restockButton then
+		restockButton.Visible = visible
+	end
+end
+
 local function updateRestockText()
-	local label = getLabel(mainFrame, "RestockText")
+	local label = getRestockTimerLabel()
+	setRestockWidgetsVisible(selectedMode == "Seeds")
 	if not label then
 		return
 	end
-	label.Visible = selectedMode == "Seeds"
 	if selectedMode ~= "Seeds" then
 		return
 	end
@@ -424,6 +467,20 @@ local function updateRestockText()
 		label.Text = SeedShopConfig.VisualRestockText
 	else
 		label.Text = formatRemaining(currentRefreshAt - os.time())
+	end
+end
+
+local function requestSeedState()
+	local remote = requestSeedStateRemote
+	if remote then
+		remote:FireServer()
+	end
+end
+
+local function requestMarketState()
+	local remote = requestMarketStateRemote
+	if remote then
+		remote:FireServer()
 	end
 end
 
@@ -519,7 +576,6 @@ local function updateDetail()
 	end
 
 	if selectedMode == "Seeds" then
-		local stock = getSeedStock(itemId)
 		if primaryButton and primaryButton:IsA("TextButton") then
 			primaryButton.Active = maxAmount > 0
 			primaryButton.AutoButtonColor = maxAmount > 0
@@ -681,7 +737,10 @@ local function queueRefreshRows()
 	refreshQueued = true
 	task.defer(function()
 		refreshQueued = false
-		rebuildRows()
+		local rebuild = rebuildRows
+		if rebuild then
+			rebuild()
+		end
 	end)
 end
 
@@ -700,7 +759,10 @@ local function applySeedState(state: SeedShopState)
 		end
 	end
 	if selectedMode == "Seeds" then
-		rebuildRows()
+		local rebuild = rebuildRows
+		if rebuild then
+			rebuild()
+		end
 	else
 		updateRestockText()
 	end
@@ -749,13 +811,12 @@ local function openShop(mode: ShopMode, root: BasePart)
 	disconnect(activeConnections)
 	gui.Enabled = true
 	InterfaceVisualController.Open(gui)
-	if requestSeedStateRemote then
-		requestSeedStateRemote:FireServer()
+	requestSeedState()
+	requestMarketState()
+	local rebuild = rebuildRows
+	if rebuild then
+		rebuild()
 	end
-	if requestMarketStateRemote then
-		requestMarketStateRemote:FireServer()
-	end
-	rebuildRows()
 	table.insert(activeConnections, player.CharacterAdded:Connect(closeShop))
 end
 
@@ -819,6 +880,16 @@ local function submitSellAll()
 				Amount = maxAmount,
 			})
 		end
+	end
+end
+
+local function submitManualRestock()
+	if selectedMode ~= "Seeds" then
+		return
+	end
+	local remote = requestSeedRestockRemote
+	if remote then
+		remote:FireServer()
 	end
 end
 
@@ -946,17 +1017,23 @@ local function bindGuiActions()
 		seedsTabButton.Activated:Connect(function()
 			selectedMode = "Seeds"
 			selectedItemId = nil
-			if requestSeedStateRemote then requestSeedStateRemote:FireServer() end
-			if requestMarketStateRemote then requestMarketStateRemote:FireServer() end
-			rebuildRows()
+			requestSeedState()
+			requestMarketState()
+			local rebuild = rebuildRows
+			if rebuild then
+				rebuild()
+			end
 		end)
 	end
 	if sellTabButton then
 		sellTabButton.Activated:Connect(function()
 			selectedMode = "Sell"
 			selectedItemId = nil
-			if requestMarketStateRemote then requestMarketStateRemote:FireServer() end
-			rebuildRows()
+			requestMarketState()
+			local rebuild = rebuildRows
+			if rebuild then
+				rebuild()
+			end
 		end)
 	end
 	local minus = getButton(rightDetail, "MinusButton")
@@ -965,6 +1042,7 @@ local function bindGuiActions()
 	local amountInput = getTextBox(rightDetail, "AmountText")
 	local primary = getButton(rightDetail, "PrimaryButton")
 	local sellAll = getButton(rightDetail, "SellAllButton")
+	local restock = getButton(mainFrame, "RestockButton")
 	if minus then
 		minus.Activated:Connect(function()
 			selectedAmount -= 1
@@ -991,6 +1069,9 @@ local function bindGuiActions()
 	if sellAll then
 		sellAll.Activated:Connect(submitSellAll)
 	end
+	if restock then
+		restock.Activated:Connect(submitManualRestock)
+	end
 end
 
 local function applyPrompt(prompt: ProximityPrompt): (ShopMode?, BasePart?)
@@ -1009,7 +1090,7 @@ local function applyPrompt(prompt: ProximityPrompt): (ShopMode?, BasePart?)
 			SeedShopConfig.PromptObjectText,
 			SeedShopConfig.MaximumInteractionDistance
 		)
-		return "Seeds", seedRoot
+		return "Seeds" :: ShopMode, seedRoot
 	end
 
 	local sellMatched, sellRoot = NpcPromptVisualController.Match(
@@ -1027,7 +1108,7 @@ local function applyPrompt(prompt: ProximityPrompt): (ShopMode?, BasePart?)
 			SellShopConfig.PromptObjectText,
 			SellShopConfig.MaximumInteractionDistance
 		)
-		return "Sell", sellRoot
+		return "Sell" :: ShopMode, sellRoot
 	end
 	return nil, nil
 end
@@ -1041,8 +1122,10 @@ local function bindPrompts()
 			return
 		end
 		local mode, root = applyPrompt(prompt)
-		if mode and root then
-			openShop(mode, root)
+		if mode == "Seeds" and root then
+			openShop("Seeds", root)
+		elseif mode == "Sell" and root then
+			openShop("Sell", root)
 		end
 	end)
 end
@@ -1051,6 +1134,7 @@ local function bindRemotes()
 	local folder = ReplicatedStorage:WaitForChild(NetworkConfig.FolderName)
 	requestBuyRemote = folder:WaitForChild(NetworkConfig.Events.RequestBuySeed) :: RemoteEvent
 	requestSeedStateRemote = folder:WaitForChild(NetworkConfig.Events.RequestSeedShopState) :: RemoteEvent
+	requestSeedRestockRemote = folder:WaitForChild(NetworkConfig.Events.RequestSeedShopRestock) :: RemoteEvent
 	requestSellRemote = folder:WaitForChild(NetworkConfig.Events.RequestSellProduce) :: RemoteEvent
 	requestMarketStateRemote = folder:WaitForChild(NetworkConfig.Events.RequestMarketState) :: RemoteEvent
 	local seedStateChanged = folder:WaitForChild(NetworkConfig.Events.SeedShopStateChanged) :: RemoteEvent
@@ -1087,12 +1171,8 @@ function FarmShopController.Init(dependencies: { InterfaceVisualController: any 
 	bindGuiActions()
 	bindInventoryMirrors()
 	bindPrompts()
-	if requestSeedStateRemote then
-		requestSeedStateRemote:FireServer()
-	end
-	if requestMarketStateRemote then
-		requestMarketStateRemote:FireServer()
-	end
+	requestSeedState()
+	requestMarketState()
 	task.spawn(function()
 		while screenGui and screenGui.Parent do
 			updateRestockText()

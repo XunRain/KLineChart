@@ -11,6 +11,10 @@ local TestMenuConfig = require(ReplicatedStorage.Shared.TestMenuConfig)
 local TestMenuController = {}
 local initialized = false
 local SCREEN_GUI_NAME = "KLineTestMenu"
+local CATEGORY_BUTTON_HEIGHT = 42
+local ACTION_BUTTON_HEIGHT = 38
+local PANEL_BASE_HEIGHT = 58
+local BUTTON_GAP = 8
 local InterfaceVisualController: any
 
 local function addCorner(instance: GuiObject, radius: number)
@@ -45,6 +49,20 @@ end
 
 local function createMenu(requestEvent: RemoteEvent): ScreenGui
 	local actions = TestMenuConfig.GetSortedActions()
+	local categories = TestMenuConfig.GetSortedCategories()
+	local actionsByCategory: { [string]: { TestMenuConfig.TestAction } } = {}
+	for _, action in actions do
+		local category = action.Category
+		if type(category) == "string" then
+			local list = actionsByCategory[category]
+			if not list then
+				list = {}
+				actionsByCategory[category] = list
+			end
+			table.insert(list, action)
+		end
+	end
+
 	local gui = Instance.new("ScreenGui")
 	gui.Name = SCREEN_GUI_NAME
 	gui.ResetOnSpawn = false
@@ -61,7 +79,7 @@ local function createMenu(requestEvent: RemoteEvent): ScreenGui
 	panel.Name = "ActionPanel"
 	panel.AnchorPoint = Vector2.new(0, 1)
 	panel.Position = UDim2.new(0, 16, 0.65, -30)
-	panel.Size = UDim2.fromOffset(240, 58 + #actions * 50)
+	panel.Size = UDim2.fromOffset(240, PANEL_BASE_HEIGHT + #categories * (CATEGORY_BUTTON_HEIGHT + BUTTON_GAP))
 	panel.BackgroundColor3 = Color3.fromRGB(24, 31, 43)
 	panel.Visible = false
 	panel.Parent = gui
@@ -93,15 +111,62 @@ local function createMenu(requestEvent: RemoteEvent): ScreenGui
 	title.Text = "白名单测试功能"
 	title.Parent = panel
 
-	for index, action in actions do
-		local button = createTextButton(action.ActionId, action.DisplayText, UDim2.new(1, 0, 0, 42))
-		local actionId = action.ActionId
-		button.LayoutOrder = index
-		button.Activated:Connect(function()
-			requestEvent:FireServer(actionId)
-		end)
-		button.Parent = panel
+	local activeCategory: string? = nil
+	local categoryButtons: { [string]: TextButton } = {}
+	local actionButtonsByCategory: { [string]: { TextButton } } = {}
+
+	local function updatePanel()
+		local visibleActions = if activeCategory and actionsByCategory[activeCategory] then #actionsByCategory[activeCategory] else 0
+		panel.Size = UDim2.fromOffset(
+			240,
+			PANEL_BASE_HEIGHT
+				+ #categories * (CATEGORY_BUTTON_HEIGHT + BUTTON_GAP)
+				+ visibleActions * (ACTION_BUTTON_HEIGHT + BUTTON_GAP)
+		)
+		for categoryId, button in categoryButtons do
+			local active = categoryId == activeCategory
+			button.BackgroundColor3 = if active then Color3.fromRGB(57, 93, 128) else Color3.fromRGB(42, 55, 72)
+			local baseText = button:GetAttribute("BaseText")
+			button.Text = string.format("%s %s", if active then "▼" else "▶", if type(baseText) == "string" then baseText else categoryId)
+		end
+		for categoryId, buttons in actionButtonsByCategory do
+			local visible = categoryId == activeCategory
+			for _, button in buttons do
+				button.Visible = visible
+			end
+		end
 	end
+
+	for categoryIndex, category in categories do
+		local categoryId = category.CategoryId
+		local button = createTextButton(categoryId .. "Category", category.DisplayText, UDim2.new(1, 0, 0, CATEGORY_BUTTON_HEIGHT))
+		button.LayoutOrder = categoryIndex * 100
+		button:SetAttribute("BaseText", category.DisplayText)
+		button.Parent = panel
+		categoryButtons[categoryId] = button
+		button.Activated:Connect(function()
+			activeCategory = if activeCategory == categoryId then nil else categoryId
+			updatePanel()
+		end)
+
+		local actionButtons: { TextButton } = {}
+		actionButtonsByCategory[categoryId] = actionButtons
+		local categoryActions: { TestMenuConfig.TestAction } = actionsByCategory[categoryId] or {}
+		for actionIndex, action in categoryActions do
+			local actionButton = createTextButton(action.ActionId, action.DisplayText, UDim2.new(1, 0, 0, ACTION_BUTTON_HEIGHT))
+			local actionId = action.ActionId
+			actionButton.LayoutOrder = categoryIndex * 100 + actionIndex
+			actionButton.BackgroundColor3 = Color3.fromRGB(34, 43, 58)
+			actionButton.TextSize = 15
+			actionButton.Visible = false
+			actionButton.Activated:Connect(function()
+				requestEvent:FireServer(actionId)
+			end)
+			actionButton.Parent = panel
+			table.insert(actionButtons, actionButton)
+		end
+	end
+	updatePanel()
 
 	toggle.Activated:Connect(function()
 		panel.Visible = not panel.Visible

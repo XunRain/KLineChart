@@ -115,9 +115,13 @@ local function bindHud(player: Player, serial: number)
 		warn("[HudCurrencyController] 缺少 PlayerGui，金币 HUD 暂不绑定")
 		return
 	end
-	coinsOutlineLabel, coinsLabel, coinsCounter = findCoinsLabels(playerGui)
+	if not playerGui:IsA("PlayerGui") then
+		return
+	end
+	local boundPlayerGui: PlayerGui = playerGui
+	coinsOutlineLabel, coinsLabel, coinsCounter = findCoinsLabels(boundPlayerGui)
 	applyBalance()
-	table.insert(activeConnections, playerGui.ChildAdded:Connect(function(child)
+	table.insert(activeConnections, boundPlayerGui.ChildAdded:Connect(function(child)
 		if child.Name ~= HudConfig.HudName then
 			return
 		end
@@ -125,7 +129,7 @@ local function bindHud(player: Player, serial: number)
 			if serial ~= bindSerial then
 				return
 			end
-			coinsOutlineLabel, coinsLabel, coinsCounter = findCoinsLabels(playerGui)
+			coinsOutlineLabel, coinsLabel, coinsCounter = findCoinsLabels(boundPlayerGui)
 			applyBalance()
 		end)
 	end))

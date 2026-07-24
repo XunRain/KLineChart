@@ -478,7 +478,8 @@ local function bindInput()
 		beginHold(input)
 	end))
 	table.insert(inputConnections, UserInputService.InputChanged:Connect(function(input)
-		if activeInput and input == activeInput then
+		local active = activeInput
+		if active and (input :: any) == active then
 			lastPointerPosition = getPointerPosition(input)
 		end
 	end))
@@ -486,7 +487,8 @@ local function bindInput()
 		if not isActionInput(input) then
 			return
 		end
-		if activeInput == nil or input == activeInput or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		local active = activeInput
+		if active == nil or (input :: any) == active or input.UserInputType == Enum.UserInputType.MouseButton1 then
 			hideProgress()
 		end
 	end))

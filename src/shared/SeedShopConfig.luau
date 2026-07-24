@@ -9,6 +9,8 @@ return {
 	PurchaseAmount = 1,
 	-- 同一玩家两次购买请求之间的最短间隔，单位为秒；服务端用于限制高频点击和 Remote 滥用。
 	PurchaseCooldown = 0.35,
+	-- 同一玩家两次手动刷新请求之间的最短间隔，单位为秒；本轮为免费跳过等待，服务端仍限制 Remote 滥用。
+	ManualRestockCooldown = 1,
 	-- 玩家 HumanoidRootPart 到商店老板根节点的最大服务端购买距离，单位为 stud；客户端 Prompt 不能替代该校验。
 	MaximumInteractionDistance = 10,
 	-- 种子商店每轮自动补货间隔，单位为秒；服务端以 os.time 维护同一服务器统一刷新时刻，客户端只展示倒计时。

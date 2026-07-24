@@ -16,9 +16,23 @@ export type Theme = {
 	DotSizeScale: number?,
 }
 
+type ResolvedTheme = {
+	BackgroundTransparency: number,
+	GridColor: Color3,
+	GridTransparency: number,
+	LineColor: Color3,
+	RisingLineColor: Color3,
+	FallingLineColor: Color3,
+	DotColor: Color3,
+	DotStrokeColor: Color3,
+	LineThickness: number,
+	GlowThickness: number,
+	DotSizeScale: number,
+}
+
 local PriceCurveGraph = {}
 
-local DEFAULT_THEME: Theme = {
+local DEFAULT_THEME: ResolvedTheme = {
 	BackgroundTransparency = 1,
 	GridColor = Color3.fromRGB(204, 166, 105),
 	GridTransparency = 0.45,
@@ -70,6 +84,10 @@ local function markRuntime(instance: Instance)
 	instance:SetAttribute("PriceCurveRuntime", true)
 end
 
+local function toScale(value: number, total: number): number
+	return value / math.max(1, total)
+end
+
 local function addCorner(instance: GuiObject, radius: UDim)
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = radius
@@ -78,6 +96,8 @@ local function addCorner(instance: GuiObject, radius: UDim)
 end
 
 local function createLine(parent: Frame, name: string, startPoint: Vector2, endPoint: Vector2, color: Color3, thickness: number, transparency: number, zIndex: number)
+	local parentWidth = math.max(1, parent.AbsoluteSize.X)
+	local parentHeight = math.max(1, parent.AbsoluteSize.Y)
 	local delta = endPoint - startPoint
 	local length = delta.Magnitude
 	if length <= 0 then
@@ -90,9 +110,12 @@ local function createLine(parent: Frame, name: string, startPoint: Vector2, endP
 	line.BackgroundColor3 = color
 	line.BackgroundTransparency = transparency
 	line.BorderSizePixel = 0
-	line.Position = UDim2.fromOffset((startPoint.X + endPoint.X) * 0.5, (startPoint.Y + endPoint.Y) * 0.5)
+	line.Position = UDim2.fromScale(
+		toScale((startPoint.X + endPoint.X) * 0.5, parentWidth),
+		toScale((startPoint.Y + endPoint.Y) * 0.5, parentHeight)
+	)
 	line.Rotation = math.deg(math.atan2(delta.Y, delta.X))
-	line.Size = UDim2.fromOffset(length, thickness)
+	line.Size = UDim2.fromScale(toScale(length, parentWidth), toScale(thickness, parentHeight))
 	line.ZIndex = zIndex
 	markRuntime(line)
 	line.Parent = parent
@@ -123,24 +146,24 @@ local function getOrCreateGuide(container: Frame, index: number): Frame
 	return guide
 end
 
-local function configureGuide(container: Frame, index: number, y: number, width: number, value: number, chartTheme: Theme)
+local function configureGuide(container: Frame, index: number, y: number, width: number, height: number, value: number, chartTheme: ResolvedTheme)
 	local guide = getOrCreateGuide(container, index)
 	guide.BackgroundColor3 = chartTheme.GridColor or DEFAULT_THEME.GridColor
 	guide.BackgroundTransparency = chartTheme.GridTransparency or DEFAULT_THEME.GridTransparency
 	guide.BorderSizePixel = 0
-	guide.Position = UDim2.fromOffset(0, y)
-	guide.Size = UDim2.fromOffset(width, 1)
+	guide.Position = UDim2.fromScale(0, toScale(y, height))
+	guide.Size = UDim2.fromScale(1, toScale(1, height))
 	guide.ZIndex = container.ZIndex + 1
 	guide.Visible = true
 
 	local label = Instance.new("TextLabel")
-	label.Name = "PriceLabel"
+	label.Name = "GuideLabel" .. index
 	label.AnchorPoint = Vector2.new(1, 0.5)
 	label.BackgroundTransparency = 1
 	label.BorderSizePixel = 0
 	label.Font = Enum.Font.GothamBold
-	label.Position = UDim2.new(1, -4, 0.5, 0)
-	label.Size = UDim2.fromOffset(58, 16)
+	label.Position = UDim2.fromScale(0.98, toScale(y, height))
+	label.Size = UDim2.fromScale(math.clamp(64 / math.max(1, width), 0.18, 0.34), math.clamp(18 / math.max(1, height), 0.14, 0.32))
 	label.Text = formatGuideValue(value)
 	label.TextColor3 = chartTheme.GridColor or DEFAULT_THEME.GridColor
 	label.TextScaled = true
@@ -149,18 +172,35 @@ local function configureGuide(container: Frame, index: number, y: number, width:
 	label.TextXAlignment = Enum.TextXAlignment.Right
 	label.ZIndex = guide.ZIndex + 1
 	markRuntime(label)
-	label.Parent = guide
+	label.Parent = container
 end
 
-local function normalizeTheme(theme: Theme?): Theme
-	local normalized: Theme = {}
-	for key, value in DEFAULT_THEME do
-		normalized[key] = value
-	end
+local function normalizeTheme(theme: Theme?): ResolvedTheme
+	local normalized: ResolvedTheme = {
+		BackgroundTransparency = DEFAULT_THEME.BackgroundTransparency,
+		GridColor = DEFAULT_THEME.GridColor,
+		GridTransparency = DEFAULT_THEME.GridTransparency,
+		LineColor = DEFAULT_THEME.LineColor,
+		RisingLineColor = DEFAULT_THEME.RisingLineColor,
+		FallingLineColor = DEFAULT_THEME.FallingLineColor,
+		DotColor = DEFAULT_THEME.DotColor,
+		DotStrokeColor = DEFAULT_THEME.DotStrokeColor,
+		LineThickness = DEFAULT_THEME.LineThickness,
+		GlowThickness = DEFAULT_THEME.GlowThickness,
+		DotSizeScale = DEFAULT_THEME.DotSizeScale,
+	}
 	if theme then
-		for key, value in theme do
-			normalized[key] = value
-		end
+		normalized.BackgroundTransparency = theme.BackgroundTransparency or normalized.BackgroundTransparency
+		normalized.GridColor = theme.GridColor or normalized.GridColor
+		normalized.GridTransparency = theme.GridTransparency or normalized.GridTransparency
+		normalized.LineColor = theme.LineColor or normalized.LineColor
+		normalized.RisingLineColor = theme.RisingLineColor or normalized.RisingLineColor
+		normalized.FallingLineColor = theme.FallingLineColor or normalized.FallingLineColor
+		normalized.DotColor = theme.DotColor or normalized.DotColor
+		normalized.DotStrokeColor = theme.DotStrokeColor or normalized.DotStrokeColor
+		normalized.LineThickness = theme.LineThickness or normalized.LineThickness
+		normalized.GlowThickness = theme.GlowThickness or normalized.GlowThickness
+		normalized.DotSizeScale = theme.DotSizeScale or normalized.DotSizeScale
 	end
 	return normalized
 end
@@ -203,9 +243,9 @@ function PriceCurveGraph.Render(container: Frame?, values: { number }, theme: Th
 	local displayMinValue = minValue
 	local displayMaxValue = maxValue
 	local displayMidValue = (displayMinValue + displayMaxValue) * 0.5
-	configureGuide(container, 1, height * 0.25, width, displayMaxValue, chartTheme)
-	configureGuide(container, 2, height * 0.5, width, displayMidValue, chartTheme)
-	configureGuide(container, 3, height * 0.75, width, displayMinValue, chartTheme)
+	configureGuide(container, 1, height * 0.25, width, height, displayMaxValue, chartTheme)
+	configureGuide(container, 2, height * 0.5, width, height, displayMidValue, chartTheme)
+	configureGuide(container, 3, height * 0.75, width, height, displayMinValue, chartTheme)
 	if maxValue <= minValue then
 		maxValue = minValue + 1
 	end
@@ -255,8 +295,8 @@ function PriceCurveGraph.Render(container: Frame?, values: { number }, theme: Th
 	dot.AnchorPoint = Vector2.new(0.5, 0.5)
 	dot.BackgroundColor3 = chartTheme.DotColor or DEFAULT_THEME.DotColor
 	dot.BorderSizePixel = 0
-	dot.Position = UDim2.fromOffset(lastPoint.X, lastPoint.Y)
-	dot.Size = UDim2.fromOffset(dotSize, dotSize)
+	dot.Position = UDim2.fromScale(toScale(lastPoint.X, width), toScale(lastPoint.Y, height))
+	dot.Size = UDim2.fromScale(toScale(dotSize, width), toScale(dotSize, height))
 	dot.ZIndex = container.ZIndex + 4
 	markRuntime(dot)
 	dot.Parent = container

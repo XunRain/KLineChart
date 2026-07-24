@@ -181,14 +181,14 @@ local function getOrCreateVisualState(visual: Instance): VisualState
 
 	clearRuntimeOwnedChildren(visual)
 
-	state = {
+	local newState: VisualState = {
 		FenceSkin = "Default",
 		Poles = {},
 		Connectors = {},
 		Beds = {},
 	}
-	visualStateByVisual[visual] = state
-	return state
+	visualStateByVisual[visual] = newState
+	return newState
 end
 
 local function centerCount(minimumCount: number, openingCount: number): number
@@ -315,21 +315,25 @@ local function updatePlotVisual(plotSizeReference: BasePart, visual: Instance, f
 		for n = 1, bedCount do
 			local isFront = n == bedCount
 			local template = if isFront then frontBedTemplate else bedTemplate
-			local bed = state.Beds[nextBedIndex]
+			local bed: Model? = state.Beds[nextBedIndex]
 			if bed and bed.Name ~= template.Name then
 				bed:Destroy()
 				bed = nil
 			end
-			if not bed then
-				bed = template:Clone()
-				bed.Parent = visual
+			local resolvedBed: Model
+			if bed then
+				resolvedBed = bed
+			else
+				local clonedBed = template:Clone()
+				clonedBed.Parent = visual
+				resolvedBed = clonedBed
 			end
-			nextBeds[nextBedIndex] = bed
+			nextBeds[nextBedIndex] = resolvedBed
 
 			local templateSize = if isFront then frontBedSize else normalBedSize
 			local z = if isFront then frontZ else normalFirstZ + (n - 1) * normalBedSize.X
-			bed:PivotTo(referenceCFrame * CFrame.new(rowX, groundY - plotSizeReference.Position.Y + templateSize.Y * 0.5, z) * CFrame.Angles(0, math.pi / 2, 0))
-			alignModel(bed, groundY)
+			resolvedBed:PivotTo(referenceCFrame * CFrame.new(rowX, groundY - plotSizeReference.Position.Y + templateSize.Y * 0.5, z) * CFrame.Angles(0, math.pi / 2, 0))
+			alignModel(resolvedBed, groundY)
 			nextBedIndex += 1
 		end
 	end

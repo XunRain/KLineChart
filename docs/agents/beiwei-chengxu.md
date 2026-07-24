@@ -18,9 +18,9 @@ KLineChart 已实现第一版种植与存档基础：
 - `PlantingService`、`HarvestService`、`InventoryService` 和 `PlantService` 分别拥有请求校验、收获事务、库存物化和运行时植物模型职责。
 - 客户端 `PlantInteractionController` 只提交种植命中点，`PlantVisualController` 以约 12Hz 驱动预制植株与挂点果实的时间戳成长；最终库存与成熟判断均由服务端决定。
 - `PlantService` 从 `ReplicatedStorage.Assets.Plants` 严格验证并克隆 Carrot、Strawberry、Blueberry，并按品种 `PlacementOffsetY` 调整运行时 Root 高度；重复收获品种从 `Assets.Fruits` 按 `BodyRoot` 的 `FruitSlot=true` Attachment 创建视觉果实，缺资源时种植失败并退种，不生成几何降级。
-- 无 Handle 种子 Tool 仍是代码侧交互载体。动态市场首版已实现；FarmShop 的 `PriceCurveGraph` 使用服务端最近 10 次价格历史绘制走势并显示 Guide 最高/中间/最低价；天气和事件仍未实现。
-- `TestMenuService` 与 `TestMenuController` 已提供仅白名单 UserId `10972923838` 可用的代码测试菜单；客户端只提交 `ActionId`，服务端从 `TestMenuConfig` 权威读取种子类型和固定数量。
-- `SeedShopService` 参考模板思路实现 5 分钟一轮的个人库存刷新，当前 Carrot、Strawberry、Blueberry 均按 `SeedShopConfig.StockRules` 刷新个人库存；购买时在靠近 `Workspace.NPCS.Sam.HumanoidRootPart` 后按配置完成“扣 Sheckles + 扣个人库存 + 加种子”的权威事务，`SeedShopController` 克隆 Studio `SeedShop.Frame.NormalShop.ItemTemplate` 模板商品行，填充名称、价格、真实库存、稀有度、Restock 倒计时，并强制从 `ReplicatedStorage.Assets.Seeds.<ItemId>` 渲染种子预览，缺资源时留空告警而不显示模板占位块。
+- 无 Handle 种子 Tool 仍是代码侧交互载体。动态市场首版已实现；FarmShop 的 `PriceCurveGraph` 使用服务端最近 10 次价格历史绘制走势并显示 Guide 最高/中间/最低价；Rain 天气 UI 与无声音本地雨天视觉已进入首版接入，暂不影响市场价格、成长、出售或存档，其他天气和事件仍未实现。
+- `TestMenuService` 与 `TestMenuController` 已提供代码测试菜单；当前 `TestMenuConfig.AllowAllPlayers=true` 临时对所有玩家开放，改回 false 后恢复白名单限制。客户端按“种子 / 金币 / 天气”一级分类展开二级动作并只提交 `ActionId`，服务端从 `TestMenuConfig` 权威读取种子、金币或天气动作，天气动作通过注入的 `WeatherService` 强制开始 Rain 或清空当前天气。
+- `SeedShopService` 参考模板思路实现 5 分钟一轮的个人库存刷新，当前 Carrot、Strawberry、Blueberry 均按 `SeedShopConfig.StockRules` 刷新个人库存；购买时在靠近 `Workspace.NPCS.Sam.HumanoidRootPart` 后按配置完成“扣 Sheckles + 扣个人库存 + 加种子”的权威事务；合并商店 `FarmShop` 的刷新按钮通过 `RequestSeedShopRestock` 免费跳过当前服务器本轮补货等待，并由服务端重新校验 Sam 距离、数据加载和冷却后广播新库存。`SeedShopController` 克隆 Studio `SeedShop.Frame.NormalShop.ItemTemplate` 模板商品行，填充名称、价格、真实库存、稀有度、Restock 倒计时，并强制从 `ReplicatedStorage.Assets.Seeds.<ItemId>` 渲染种子预览，缺资源时留空告警而不显示模板占位块。
 - `HudCurrencyController` 从服务端物化的 `KLineInventory.Sheckles` 只读同步 HUD 金币显示，当前会同时写入 `PlayerGui.HUD.Currencies.CoinsCounter.TextLabel` 描边底字和其子级 `TextLabel` 前景数字，并同步模板 `Target`/`Goal` NumberValue，避免显示 Studio 假值或父子文字重影。
 - `InterfaceVisualController` 用 owner 集合统一管理多个界面的 Blur=20 与当前真实 FOV-10，最后一个界面关闭后恢复；SeedShop 与测试菜单共用该模块。
 - `TeleportController` 只绑定 `PlayerGui.TeleportButtons.TeleportButtons` 的三个现有按钮并提交稳定目的地标识；`TeleportService` 校验白名单、冷却和存活角色后，权威解析固定目标或玩家自己的地块 SpawnPoint，当前仍待 Studio Play 验收。
@@ -33,7 +33,7 @@ KLineChart 已实现第一版种植与存档基础：
 
 ## 已落地接口与数据契约
 
-- Remotes 统一位于 `ReplicatedStorage.KLineRemotes`，名称只从 `NetworkConfig` 读取；当前另包含权威出售入口 `RequestSellProduce` 和仅用于 Steven 对话展示的出售结果事件 `SellProduceResult`。
+- Remotes 统一位于 `ReplicatedStorage.KLineRemotes`，名称只从 `NetworkConfig` 读取；当前另包含权威出售入口 `RequestSellProduce`、仅用于 Steven 对话展示的出售结果事件 `SellProduceResult`、种子商店手动刷新入口 `RequestSeedShopRestock`，以及只读天气同步入口 `RequestWeatherState`/`WeatherStateChanged`。
 - 存档包含 `Version`、顶层权威 `Sheckles`、`Inventory.Seeds`、`Inventory.Produce`、`Plants`。植物记录保存 `recordId`、`plantId`、局部 `position`、`rotationY`、`plantedAt`、`nextHarvestAt`、`harvestCount`；重复结果植物额外保存 `fruitCount` 与 `nextFruitAt`，用于表达当前成熟果实槽数量和下一个空槽成熟时间。
 - 运行时植物模型带 `PlantRecordId`、`PlantId`、`OwnerUserId`、`PlantedAt`、`GrowthTime`、`NextHarvestAt`、`HarvestType` 和 `HarvestCount` 属性；重复结果植物还带 `FruitCount` 与 `FruitNextReadyAt` 供客户端展示成熟果实数量和正在生长的空位进度。
 - 植株预制体必须为以 `Root` 为 PrimaryPart 的 Model，并包含以 `BodyRoot` 为 PrimaryPart 的 `Body` Model；果实预制体必须包含 `Root` 和以 `VisualRoot` 为 PrimaryPart 的 `Visual` Model。
@@ -42,8 +42,10 @@ KLineChart 已实现第一版种植与存档基础：
 - `RequestPlant` 的客户端参数为世界命中点、`seedId` 和种子 Tool；三者均由服务端重新验证，客户端不能提交库存、成长或收获结果。
 - 收获使用服务端创建的 `ProximityPrompt`；服务端重新验证所有权、距离、记录、成熟时间，并用 per-plant lock 防止重复收获。
 - `RequestTestAction` 只接受稳定 `ActionId`；服务端重新检查功能开关、白名单、数据加载、冷却、动作配置及库存上限，不接受客户端数量、SeedId 或目标库存。
+- 测试菜单天气动作不写入存档，但仍必须通过服务端白名单、冷却和动作配置校验；种子与金币动作继续要求玩家数据已加载后才能执行。
 - `RequestBuySeed` 兼容旧版稳定 `itemId` 和新版 `{ ItemId = string, Amount = number }`；服务端从 `ItemConfig` 读取价格、从 `SeedShopConfig` 读取默认数量和本轮库存，并重新检查数据、冷却、Sam 距离、余额、商店库存、购买数量和背包库存上限。
 - `RequestSeedShopState` 无参数请求当前玩家个人商店库存；`SeedShopStateChanged` 只用于服务端向客户端展示当前库存、下次刷新 Unix 秒和倒计时，不承载权威结算结果。
+- `RequestSeedShopRestock` 无参数请求免费跳过当前服务器本轮种子商店等待；服务端必须重新校验玩家数据、Sam 距离和手动刷新冷却，成功后清空本轮个人库存缓存并广播新库存。
 - `RequestTeleport` 只接受 `Seeds`、`Garden` 或 `Sell` 稳定标识；服务端不接受坐标或 Instance，固定目标仅从 `Workspace.Teleports` 读取 BasePart/Model，Garden 仅使用当前玩家已分配地块的 SpawnPoint。
 - `KLineInventory.Sheckles` 只是权威存档的复制 `IntValue`，客户端可用它展示 HUD 余额，但不得通过修改它影响购买或出售结果。
 - Studio 模板 `SeedShop` 与 Sam Prompt 中的遗留 BaseScript 不属于现有代码链路；控制器只检测并警告，运行时克隆商品行会剥离脚本，源模板脚本仍必须由工具人删除。
@@ -53,9 +55,9 @@ KLineChart 已实现第一版种植与存档基础：
 后续目标系统包括：
 
 - 服务端维护种植生命周期、收获结果、玩家持有物和出售结算。
-- 服务端已维护单服务器共享的植物当前价格和带时间戳的近期价格历史；天气和事件状态仍待实现。
+- 服务端已维护单服务器共享的植物当前价格和带时间戳的近期价格历史；Rain 天气状态已由服务端在单服务器内自动排程并同步给客户端，暂未接入价格影响。
 - 服务端已生成带时间戳、按时间有序、长度限制为 10 的近期价格历史，供价格曲线图读取。
-- 共享配置作为植物基础数值与价格刷新规则的单一来源；天气和事件规则待后续实施时补充。
+- 共享配置作为植物基础数值、价格刷新规则与首版 Rain 天气节奏的单一来源；天气市场倍率与事件规则待后续实施时补充。
 - 客户端负责交互、提示、天气和事件表现以及价格曲线图展示，不拥有最终经济结果。
 - 首版曲线数据是单一价格随时间变化的时间序列，不实现金融蜡烛图或 OHLC 数据。
 
@@ -76,6 +78,12 @@ KLineChart 已实现第一版种植与存档基础：
 - 严格保护用户已有改动，不回滚或覆盖与任务无关的内容。
 - 保持共享配置为规则来源，避免把植物 ID、基础价格、天气倍率、事件规则或资源 ID 分散硬编码。
 - Luau 代码统一使用精简中文注释：每个文件在 `--!strict` 后用一句话说明模块职责，每个模块公开接口前用一句话说明输入、返回或副作用；内部函数只在复杂流程或安全边界需要时注释，不逐段翻译代码。
+- Luau 严格类型必须作为默认编码约束：可空 Remote、GUI、Model、Folder、Camera 等对象使用前先复制到局部变量并判空；不要依赖 Luau-LSP 自动理解复杂 upvalue、回调或链式判断。
+- 联合类型必须拆成明确分支处理，例如 TextLabel/TextButton/TextBox、SurfaceGui/BillboardGui、Seeds/Sell 等，不用 `or` 组合后直接访问某个子类型专属属性或传入窄类型参数。
+- `Clone()`、`FindFirstChild()`、`WaitForChild()`、配置查表和 `or {}` 结果如果后续要按具体类型使用，必须通过显式类型标注、局部 `resolvedX` 变量或防御性分支收窄，避免 `Model?`、`table?`、`string?` 等诊断残留。
+- 外部配置允许字段可选，但进入业务或渲染前要 normalize 成内部必填类型，例如 `Theme` 转成 `ResolvedTheme`；业务代码不要反复把 `number?`、`Color3?` 传给必填参数。
+- 不得用大面积 `any` 或 `:: any` 硬压类型红线；只有 Roblox API 类型定义与实际可用行为冲突且已确认安全时，才允许在最小表达式上使用，并在改动摘要中说明原因。
+- 不保留未使用变量、函数或 import；临时保留且确实有后续用途时用 `_` 前缀，否则删除，确保 VSCode 问题面板能优先暴露真实 bug。
 - 配置文件必须详细说明每个字段的用途、单位、取值边界、跨端信任关系及修改风险，涉及 DataStore 名称、键前缀、Schema 版本等线上兼容字段时明确标注不得随意改动。
 - 不为了整理而重写大段无关代码或注释。
 - 只在用户或策划大人明确要求实施时修改文件；若当前协作模式只允许计划，则只输出实施计划。

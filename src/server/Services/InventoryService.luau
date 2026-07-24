@@ -204,19 +204,19 @@ end
 
 local function syncShovelTool(player: Player)
 	local tools = findUtilityTools(player, ShovelConfig.ToolId)
-	local tool = tools[1]
+	local tool: Tool? = tools[1]
 	for index = 2, #tools do
 		tools[index]:Destroy()
 	end
 	if not tool then
-		tool = Instance.new("Tool")
-		prepareShovelTool(tool, player)
+		local createdTool = Instance.new("Tool")
+		prepareShovelTool(createdTool, player)
 		local backpackInstance = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
 		if not backpackInstance or not backpackInstance:IsA("Backpack") then
-			tool:Destroy()
+			createdTool:Destroy()
 			return
 		end
-		tool.Parent = backpackInstance
+		createdTool.Parent = backpackInstance
 		return
 	end
 	prepareShovelTool(tool, player)

@@ -96,7 +96,9 @@ local function setSignVisible(sign: Model, visible: boolean)
 			descendant.CanCollide = visible
 		elseif descendant:IsA("Decal") then
 			descendant.Transparency = if visible then 0 else 1
-		elseif descendant:IsA("SurfaceGui") or descendant:IsA("BillboardGui") then
+		elseif descendant:IsA("SurfaceGui") then
+			descendant.Enabled = visible
+		elseif descendant:IsA("BillboardGui") then
 			descendant.Enabled = visible
 		end
 	end
@@ -185,7 +187,9 @@ local function bindSignGui(gui: Instance, core: BasePart)
 	currentGui.Adornee = core
 	currentGui.Enabled = true
 
-	if gui:IsA("SurfaceGui") or gui:IsA("BillboardGui") then
+	if gui:IsA("SurfaceGui") then
+		gui.Enabled = false
+	elseif gui:IsA("BillboardGui") then
 		gui.Enabled = false
 	end
 

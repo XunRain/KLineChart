@@ -8,7 +8,7 @@ local Workspace = game:GetService("Workspace")
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 
 type DecorationBinding = {
-	Instance: Instance,
+	Instance: Decal | ImageLabel | ImageButton,
 	BaseTransparency: number,
 }
 
@@ -77,7 +77,13 @@ local function collectDecorations(part: BasePart): { DecorationBinding }
 				BaseTransparency = math.clamp(descendant.Transparency, 0, 1),
 			})
 			descendant.Transparency = 1
-		elseif descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
+		elseif descendant:IsA("ImageLabel") then
+			table.insert(decorations, {
+				Instance = descendant,
+				BaseTransparency = math.clamp(descendant.ImageTransparency, 0, 1),
+			})
+			descendant.ImageTransparency = 1
+		elseif descendant:IsA("ImageButton") then
 			table.insert(decorations, {
 				Instance = descendant,
 				BaseTransparency = math.clamp(descendant.ImageTransparency, 0, 1),
@@ -92,7 +98,9 @@ local function setDecorationVisible(decoration: DecorationBinding, visible: bool
 	local targetTransparency = if visible then decoration.BaseTransparency else 1
 	if decoration.Instance:IsA("Decal") then
 		decoration.Instance.Transparency = targetTransparency
-	elseif decoration.Instance:IsA("ImageLabel") or decoration.Instance:IsA("ImageButton") then
+	elseif decoration.Instance:IsA("ImageLabel") then
+		decoration.Instance.ImageTransparency = targetTransparency
+	elseif decoration.Instance:IsA("ImageButton") then
 		decoration.Instance.ImageTransparency = targetTransparency
 	end
 end
