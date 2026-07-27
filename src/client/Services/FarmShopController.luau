@@ -44,6 +44,10 @@ type MarketItemState = {
 type MarketSnapshot = {
 	Items: { MarketItemState }?,
 }
+type SelectedItemByMode = {
+	Seeds: string?,
+	Sell: string?,
+}
 
 local FarmShopController = {}
 
@@ -59,6 +63,7 @@ local rightDetail: Frame? = nil
 local seedsTabButton: GuiButton? = nil
 local sellTabButton: GuiButton? = nil
 local closeButton: GuiButton? = nil
+local marketRefreshLabel: TextLabel? = nil
 local requestBuyRemote: RemoteEvent? = nil
 local requestSeedStateRemote: RemoteEvent? = nil
 local requestSeedRestockRemote: RemoteEvent? = nil
@@ -66,6 +71,7 @@ local requestSellRemote: RemoteEvent? = nil
 local requestMarketStateRemote: RemoteEvent? = nil
 local selectedMode: ShopMode = "Seeds"
 local selectedItemId: string? = nil
+local selectedItemByMode: SelectedItemByMode = {}
 local selectedAmount = FarmShopConfig.MinimumAmount
 local currentRefreshAt = 0
 local seedStockByItem: { [string]: number } = {}
@@ -138,6 +144,24 @@ end
 local function getDetailChild(name: string): Instance?
 	local detail = rightDetail
 	return detail and detail:FindFirstChild(name, true) or nil
+end
+
+local function getSelectedItemForMode(mode: ShopMode): string?
+	if mode == "Seeds" then
+		return selectedItemByMode.Seeds
+	end
+	return selectedItemByMode.Sell
+end
+
+local function setSelectedItemForMode(mode: ShopMode, itemId: string?)
+	if mode == "Seeds" then
+		selectedItemByMode.Seeds = itemId
+	else
+		selectedItemByMode.Sell = itemId
+	end
+	if selectedMode == mode then
+		selectedItemId = itemId
+	end
 end
 
 local function getSortedItems(): { ShopItem }
@@ -273,6 +297,16 @@ local function formatRemaining(seconds: number): string
 	local minutes = math.floor(wholeSeconds / 60)
 	local remainingSeconds = wholeSeconds % 60
 	return string.format("Restock in %dm %02ds", minutes, remainingSeconds)
+end
+
+local function formatMarketRemaining(seconds: number): string
+	local wholeSeconds = math.max(0, math.floor(seconds))
+	local minutes = math.floor(wholeSeconds / 60)
+	local remainingSeconds = wholeSeconds % 60
+	if minutes > 0 then
+		return string.format("Refresh in %dm %02ds", minutes, remainingSeconds)
+	end
+	return string.format("Refresh in %ds", remainingSeconds)
 end
 
 local function removeRuntimeScripts(root: Instance)
@@ -470,6 +504,79 @@ local function updateRestockText()
 	end
 end
 
+local function getMarketRefreshLabel(): TextLabel?
+	local cached = marketRefreshLabel
+	if cached and cached.Parent then
+		return cached
+	end
+
+	local detail = rightDetail
+	if not detail then
+		return nil
+	end
+
+	for _, name in { "MarketRefreshTimer", "PriceRefreshTimer", "RefreshTimer", "RefreshCountdown" } do
+		local label = getLabel(detail, name)
+		if label then
+			marketRefreshLabel = label
+			return label
+		end
+	end
+
+	local itemName = getLabel(detail, "ItemName")
+	if not itemName then
+		return nil
+	end
+	local parent = itemName.Parent
+	if not parent or not parent:IsA("GuiObject") then
+		return nil
+	end
+
+	local label = Instance.new("TextLabel")
+	label.Name = "MarketRefreshTimer"
+	label.AnchorPoint = Vector2.new(1, 0.5)
+	label.BackgroundTransparency = 1
+	label.BorderSizePixel = 0
+	label.Font = Enum.Font.GothamBold
+	label.Position = UDim2.new(1, -10, itemName.Position.Y.Scale, itemName.Position.Y.Offset + math.max(8, itemName.AbsoluteSize.Y * 0.5))
+	label.Size = UDim2.fromOffset(130, 18)
+	label.Text = ""
+	label.TextColor3 = Color3.fromRGB(85, 63, 38)
+	label.TextScaled = true
+	label.TextStrokeColor3 = Color3.fromRGB(255, 242, 194)
+	label.TextStrokeTransparency = 0.35
+	label.TextXAlignment = Enum.TextXAlignment.Right
+	label.ZIndex = itemName.ZIndex + 1
+	label.Parent = parent
+	marketRefreshLabel = label
+	return label
+end
+
+local function updateMarketRefreshText()
+	local label = getMarketRefreshLabel()
+	if not label then
+		return
+	end
+
+	local itemId = selectedItemId
+	if not itemId then
+		label.Visible = false
+		label.Text = ""
+		return
+	end
+
+	local itemState = getMarketState(itemId)
+	local nextRefreshAt = itemState and itemState.NextRefreshAt
+	if type(nextRefreshAt) ~= "number" or nextRefreshAt <= 0 then
+		label.Visible = false
+		label.Text = ""
+		return
+	end
+
+	label.Visible = true
+	label.Text = formatMarketRemaining(nextRefreshAt - os.time())
+end
+
 local function requestSeedState()
 	local remote = requestSeedStateRemote
 	if remote then
@@ -487,6 +594,7 @@ end
 local function updateDetail()
 	updateTabVisuals()
 	updateRestockText()
+	updateMarketRefreshText()
 	clampSelectedAmount()
 	refreshRowSelection()
 
@@ -531,6 +639,7 @@ local function updateDetail()
 		if quantityFrame and quantityFrame:IsA("GuiObject") then quantityFrame.Visible = false end
 		if estimateTitle then estimateTitle.Text = if selectedMode == "Seeds" then "Estimated Cost" else "Estimated Revenue" end
 		if estimateValue then estimateValue.Text = "0" end
+		updateMarketRefreshText()
 		if primaryButton and primaryButton:IsA("TextButton") then
 			primaryButton.Active = false
 			primaryButton.AutoButtonColor = false
@@ -549,6 +658,7 @@ local function updateDetail()
 	if itemName then
 		itemName.Text = if selectedMode == "Seeds" then definition.DisplayName .. " Seed" else definition.DisplayName
 	end
+	updateMarketRefreshText()
 	local marketPrice = getProduceMarketPrice(itemId, definition)
 	local tradeUnitPrice = if selectedMode == "Seeds" then definition.SeedBuyPrice else marketPrice
 	local referenceUnitPrice = if selectedMode == "Seeds" then definition.SeedBuyPrice else definition.BaseSellPrice
@@ -646,7 +756,8 @@ local function configureRow(row: Frame, itemId: string, definition: ItemConfig.I
 	local button = main:FindFirstChild("TextButton")
 	if button and button:IsA("GuiButton") then
 		table.insert(rowConnections, button.Activated:Connect(function()
-			selectedItemId = if selectedItemId == itemId then nil else itemId
+			local nextSelectedItemId = if selectedItemId == itemId then nil else itemId
+			setSelectedItemForMode(selectedMode, nextSelectedItemId)
 			selectedAmount = FarmShopConfig.MinimumAmount
 			local rebuild = rebuildRows
 			if rebuild then
@@ -708,7 +819,7 @@ rebuildRows = function()
 		end
 	end
 	if selectedItemId and not selectedVisible then
-		selectedItemId = nil
+		setSelectedItemForMode(selectedMode, nil)
 		selectedAmount = FarmShopConfig.MinimumAmount
 	end
 	for index, item in visibleItems do
@@ -722,7 +833,7 @@ rebuildRows = function()
 		end
 	end
 	if selectedItemId and not rowByItem[selectedItemId] then
-		selectedItemId = nil
+		setSelectedItemForMode(selectedMode, nil)
 		selectedAmount = FarmShopConfig.MinimumAmount
 	end
 	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -804,7 +915,7 @@ local function openShop(mode: ShopMode, root: BasePart)
 		return
 	end
 	selectedMode = mode
-	selectedItemId = nil
+	selectedItemId = getSelectedItemForMode(mode)
 	selectedAmount = FarmShopConfig.MinimumAmount
 	activeRoot = root
 	activeCloseDistance = if mode == "Sell" then SellShopConfig.DialogueCloseDistance else SeedShopConfig.MaximumInteractionDistance + 4
@@ -1016,7 +1127,8 @@ local function bindGuiActions()
 	if seedsTabButton then
 		seedsTabButton.Activated:Connect(function()
 			selectedMode = "Seeds"
-			selectedItemId = nil
+			selectedItemId = getSelectedItemForMode("Seeds")
+			selectedAmount = FarmShopConfig.MinimumAmount
 			requestSeedState()
 			requestMarketState()
 			local rebuild = rebuildRows
@@ -1028,7 +1140,8 @@ local function bindGuiActions()
 	if sellTabButton then
 		sellTabButton.Activated:Connect(function()
 			selectedMode = "Sell"
-			selectedItemId = nil
+			selectedItemId = getSelectedItemForMode("Sell")
+			selectedAmount = FarmShopConfig.MinimumAmount
 			requestMarketState()
 			local rebuild = rebuildRows
 			if rebuild then
@@ -1176,6 +1289,7 @@ function FarmShopController.Init(dependencies: { InterfaceVisualController: any 
 	task.spawn(function()
 		while screenGui and screenGui.Parent do
 			updateRestockText()
+			updateMarketRefreshText()
 			task.wait(1)
 		end
 	end)

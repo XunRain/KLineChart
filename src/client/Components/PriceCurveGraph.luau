@@ -134,27 +134,34 @@ local function formatGuideValue(value: number): string
 	return tostring(rounded)
 end
 
-local function getOrCreateGuide(container: Frame, index: number): Frame
+local function getOrCreateGuide(container: Frame, index: number): (Frame, boolean)
 	local existing = container:FindFirstChild("Guide" .. index)
 	if existing and existing:IsA("Frame") then
-		return existing
+		return existing, false
 	end
 	local guide = Instance.new("Frame")
 	guide.Name = "Guide" .. index
 	markRuntime(guide)
 	guide.Parent = container
-	return guide
+	return guide, true
 end
 
 local function configureGuide(container: Frame, index: number, y: number, width: number, height: number, value: number, chartTheme: ResolvedTheme)
-	local guide = getOrCreateGuide(container, index)
-	guide.BackgroundColor3 = chartTheme.GridColor or DEFAULT_THEME.GridColor
-	guide.BackgroundTransparency = chartTheme.GridTransparency or DEFAULT_THEME.GridTransparency
-	guide.BorderSizePixel = 0
-	guide.Position = UDim2.fromScale(0, toScale(y, height))
-	guide.Size = UDim2.fromScale(1, toScale(1, height))
-	guide.ZIndex = container.ZIndex + 1
+	local guide, createdGuide = getOrCreateGuide(container, index)
+	local runtimeGuide = createdGuide or guide:GetAttribute("PriceCurveRuntime") == true
+	if runtimeGuide then
+		guide.BackgroundColor3 = chartTheme.GridColor
+		guide.BackgroundTransparency = chartTheme.GridTransparency
+		guide.BorderSizePixel = 0
+		guide.Position = UDim2.fromScale(0, toScale(y, height))
+		guide.Size = UDim2.fromScale(1, toScale(1, height))
+		guide.ZIndex = container.ZIndex + 1
+	end
 	guide.Visible = true
+
+	local labelY = if runtimeGuide
+		then UDim.new(toScale(y, height), 0)
+		else UDim.new(guide.Position.Y.Scale, guide.Position.Y.Offset + (0.5 - guide.AnchorPoint.Y) * guide.AbsoluteSize.Y)
 
 	local label = Instance.new("TextLabel")
 	label.Name = "GuideLabel" .. index
@@ -162,10 +169,10 @@ local function configureGuide(container: Frame, index: number, y: number, width:
 	label.BackgroundTransparency = 1
 	label.BorderSizePixel = 0
 	label.Font = Enum.Font.GothamBold
-	label.Position = UDim2.fromScale(0.98, toScale(y, height))
+	label.Position = UDim2.new(0.98, 0, labelY.Scale, labelY.Offset)
 	label.Size = UDim2.fromScale(math.clamp(64 / math.max(1, width), 0.18, 0.34), math.clamp(18 / math.max(1, height), 0.14, 0.32))
 	label.Text = formatGuideValue(value)
-	label.TextColor3 = chartTheme.GridColor or DEFAULT_THEME.GridColor
+	label.TextColor3 = chartTheme.GridColor
 	label.TextScaled = true
 	label.TextStrokeColor3 = Color3.fromRGB(65, 49, 32)
 	label.TextStrokeTransparency = 0.35
