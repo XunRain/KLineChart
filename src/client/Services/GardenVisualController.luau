@@ -216,11 +216,6 @@ local function updatePlotVisual(plotSizeReference: BasePart, visual: Instance, f
 		return
 	end
 
-	local state = getOrCreateVisualState(visual)
-	clearVisualState(state)
-	clearRuntimeOwnedChildren(visual)
-	state.FenceSkin = resolvedFenceSkin
-
 	local normalBedSize = bedSectionSize :: Vector3
 	local frontBedSize = frontBedSectionSize :: Vector3
 	local poleSize = getModelSize(fencePoleTemplate)
@@ -236,6 +231,11 @@ local function updatePlotVisual(plotSizeReference: BasePart, visual: Instance, f
 	if not groundY then
 		return
 	end
+
+	local state = getOrCreateVisualState(visual)
+	clearVisualState(state)
+	clearRuntimeOwnedChildren(visual)
+	state.FenceSkin = resolvedFenceSkin
 
 	local bedCount = math.max(1, math.floor((plotSizeReference.Size.Z - frontBedSize.X) / normalBedSize.X) + 1)
 	local totalBedLength = frontBedSize.X + (bedCount - 1) * normalBedSize.X
@@ -398,6 +398,16 @@ local function renderAllPlots()
 	end
 end
 
+local function queueStreamingRenders(plotModel: Model)
+	for _, delaySeconds in { 0.5, 2, 5 } do
+		task.delay(delaySeconds, function()
+			if plotModel.Parent then
+				renderPlot(plotModel)
+			end
+		end)
+	end
+end
+
 local function bindPlotSizeReference(plotModel: Model, plotSizeReference: BasePart, connections: { RBXScriptConnection })
 	if plotSizeReferenceByPlot[plotModel] == plotSizeReference then
 		return
@@ -437,6 +447,7 @@ local function setupPlot(plot: Instance)
 			bindPlotSizeReference(plotModel, child, connections)
 		elseif child.Name == "Visual" then
 			renderPlot(plotModel)
+			queueStreamingRenders(plotModel)
 		end
 	end))
 
@@ -447,6 +458,7 @@ local function setupPlot(plot: Instance)
 	end))
 
 	renderPlot(plotModel)
+	queueStreamingRenders(plotModel)
 end
 
 local function watchGardens(gardens: Instance)

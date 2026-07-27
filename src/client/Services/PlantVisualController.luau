@@ -54,6 +54,7 @@ type VisualState = {
 local PlantVisualController = {}
 local tracked: { [Model]: VisualState } = {}
 local warnedInvalidPlants: { [Model]: boolean } = {}
+local watchedPlantFolders: { [Folder]: boolean } = {}
 
 local function getFiniteNumber(value: any): number?
 	return if type(value) == "number" and value == value and math.abs(value) < math.huge then value else nil
@@ -321,17 +322,6 @@ local function collectFruitBindings(
 	return bindings, complete
 end
 
-local function findRuntimePlant(instance: Instance): Model?
-	local current: Instance? = instance
-	while current and current ~= Workspace do
-		if current:IsA("Model") and type(current:GetAttribute("PlantRecordId")) == "string" then
-			return current
-		end
-		current = current.Parent
-	end
-	return nil
-end
-
 local function refreshFruits(model: Model, state: VisualState)
 	local bodyRoot = state.Body.PrimaryPart
 	if not bodyRoot then
@@ -583,30 +573,46 @@ local function updateModel(model: Model, state: VisualState, now: number)
 		)
 end
 
-local function handleDescendant(instance: Instance)
-	local model = findRuntimePlant(instance)
-	if not model then
+local function watchPlantsFolder(folder: Folder)
+	if watchedPlantFolders[folder] then
 		return
 	end
-	local state = tracked[model]
-	if state then
-		local isFruitModel = instance:IsA("Model") and instance:GetAttribute("KLineFruitVisual") == true
-		local isFruitSlot = instance:IsA("Attachment") and instance:GetAttribute("FruitSlot") == true
-		if not state.FruitBindingsReady or isFruitModel or isFruitSlot then
-			refreshFruits(model, state)
-		end
-	else
-		track(model)
+	watchedPlantFolders[folder] = true
+	for _, child in folder:GetChildren() do
+		track(child)
 	end
+	folder.ChildAdded:Connect(function(child)
+		task.defer(track, child)
+	end)
+	folder.AncestryChanged:Connect(function(_, parent)
+		if not parent then
+			watchedPlantFolders[folder] = nil
+		end
+	end)
+end
+
+local function watchPlotPlants(plot: Instance)
+	if not plot:IsA("Model") or not string.match(plot.Name, "^Plot%d+$") then
+		return
+	end
+	local plants = plot:FindFirstChild("Plants")
+	if plants and plants:IsA("Folder") then
+		watchPlantsFolder(plants)
+	end
+	plot.ChildAdded:Connect(function(child)
+		if child.Name == "Plants" and child:IsA("Folder") then
+			watchPlantsFolder(child)
+		end
+	end)
 end
 
 -- 跟踪花园内现有和新增预制植物，并以配置频率刷新尚未稳定的视觉状态。
 function PlantVisualController.Init()
 	local gardens = Workspace:WaitForChild("Gardens")
-	for _, descendant in gardens:GetDescendants() do
-		handleDescendant(descendant)
+	for _, plot in gardens:GetChildren() do
+		watchPlotPlants(plot)
 	end
-	gardens.DescendantAdded:Connect(handleDescendant)
+	gardens.ChildAdded:Connect(watchPlotPlants)
 
 	local accumulated = ItemConfig.Limits.PlantVisualUpdateInterval
 	RunService.Heartbeat:Connect(function(deltaTime)

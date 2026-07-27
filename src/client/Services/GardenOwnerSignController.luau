@@ -12,6 +12,7 @@ local localPlayer = Players.LocalPlayer
 local watchedPlots: { [Model]: { RBXScriptConnection } } = {}
 local billboardByPlot: { [Model]: BillboardGui } = {}
 local warnedMissingGardenSign: { [Model]: boolean } = {}
+local presentationQueuedByPlot: { [Model]: boolean } = {}
 
 local EMPTY_GARDEN_TEXT = "Empty Garden"
 local OWN_GARDEN_TEXT = "Your Garden"
@@ -34,6 +35,7 @@ local function disconnectPlot(plot: Model)
 		billboardByPlot[plot] = nil
 	end
 	warnedMissingGardenSign[plot] = nil
+	presentationQueuedByPlot[plot] = nil
 end
 
 local function getGardenSignGui(plot: Model): SurfaceGui?
@@ -250,6 +252,19 @@ local function updatePlotPresentation(plot: Model)
 	updateOverheadBillboard(plot)
 end
 
+local function queuePlotPresentation(plot: Model)
+	if presentationQueuedByPlot[plot] then
+		return
+	end
+	presentationQueuedByPlot[plot] = true
+	task.defer(function()
+		presentationQueuedByPlot[plot] = nil
+		if plot.Parent then
+			updatePlotPresentation(plot)
+		end
+	end)
+end
+
 local function watchPlot(plot: Instance)
 	if not plot:IsA("Model") or watchedPlots[plot] then
 		return
@@ -260,14 +275,14 @@ local function watchPlot(plot: Instance)
 	watchedPlots[plotModel] = connections
 
 	table.insert(connections, plotModel:GetAttributeChangedSignal("Owner"):Connect(function()
-		updatePlotPresentation(plotModel)
+		queuePlotPresentation(plotModel)
 	end))
 	table.insert(connections, plotModel:GetAttributeChangedSignal("OwnerUserId"):Connect(function()
-		updatePlotPresentation(plotModel)
+		queuePlotPresentation(plotModel)
 	end))
-	table.insert(connections, plotModel.DescendantAdded:Connect(function(descendant)
-		if descendant.Name == "Signs" or descendant.Name == "Garden" or descendant.Name == "SurfaceGui" then
-			updatePlotPresentation(plotModel)
+	table.insert(connections, plotModel.ChildAdded:Connect(function(child)
+		if child.Name == "Signs" then
+			queuePlotPresentation(plotModel)
 		end
 	end))
 	table.insert(connections, plotModel.AncestryChanged:Connect(function(_, parent)

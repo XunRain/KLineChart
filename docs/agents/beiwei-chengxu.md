@@ -18,8 +18,8 @@ KLineChart 已实现第一版种植与存档基础：
 - `PlantingService`、`HarvestService`、`InventoryService` 和 `PlantService` 分别拥有请求校验、收获事务、库存物化和运行时植物模型职责。
 - 客户端 `PlantInteractionController` 只提交种植命中点，`PlantVisualController` 以约 12Hz 驱动预制植株与挂点果实的时间戳成长；最终库存与成熟判断均由服务端决定。
 - `PlantService` 从 `ReplicatedStorage.Assets.Plants` 严格验证并克隆 Carrot、Strawberry、Blueberry，并按品种 `PlacementOffsetY` 调整运行时 Root 高度；重复收获品种从 `Assets.Fruits` 按 `BodyRoot` 的 `FruitSlot=true` Attachment 创建视觉果实，缺资源时种植失败并退种，不生成几何降级。
-- 无 Handle 种子 Tool 仍是代码侧交互载体。动态市场首版已实现；FarmShop 的 `PriceCurveGraph` 使用服务端最近 10 次价格历史绘制走势并显示 Guide 最高/中间/最低价；Rain 天气 UI 与无声音本地雨天视觉已进入首版接入，暂不影响市场价格、成长、出售或存档，其他天气和事件仍未实现。
-- `TestMenuService` 与 `TestMenuController` 已提供代码测试菜单；当前 `TestMenuConfig.AllowAllPlayers=true` 临时对所有玩家开放，改回 false 后恢复白名单限制。客户端按“种子 / 金币 / 天气”一级分类展开二级动作并只提交 `ActionId`，服务端从 `TestMenuConfig` 权威读取种子、金币或天气动作，天气动作通过注入的 `WeatherService` 强制开始 Rain 或清空当前天气。
+- 无 Handle 种子 Tool 仍是代码侧交互载体。动态市场首版已实现；FarmShop 的 `PriceCurveGraph` 使用服务端最近 10 次价格历史绘制走势并显示 Guide 最高/中间/最低价；Rain 天气 UI 与无声音本地雨天视觉已进入首版接入；昼夜切换首版已新增独立时间循环和本地光照合成，暂不影响市场价格、成长、出售或存档，Bloodmoon、Goldmoon、Rainbow Moon、其他天气和事件仍未实现。
+- `TestMenuService` 与 `TestMenuController` 已提供代码测试菜单；当前 `TestMenuConfig.AllowAllPlayers=true` 临时对所有玩家开放，改回 false 后恢复白名单限制。客户端按“种子 / 金币 / 天气”一级分类展开二级动作并只提交 `ActionId`，服务端从 `TestMenuConfig` 权威读取种子、金币、天气或昼夜动作；天气动作通过注入的 `WeatherService` 强制开始 Rain 或清空当前天气，昼夜动作通过注入的 `TimeCycleService` 强制切换 Day/Sunset/Night 或恢复自动循环。
 - `SeedShopService` 参考模板思路实现 5 分钟一轮的个人库存刷新，当前 Carrot、Strawberry、Blueberry 均按 `SeedShopConfig.StockRules` 刷新个人库存；购买时在靠近 `Workspace.NPCS.Sam.HumanoidRootPart` 后按配置完成“扣 Sheckles + 扣个人库存 + 加种子”的权威事务；合并商店 `FarmShop` 的刷新按钮通过 `RequestSeedShopRestock` 免费跳过当前服务器本轮补货等待，并由服务端重新校验 Sam 距离、数据加载和冷却后广播新库存。`SeedShopController` 克隆 Studio `SeedShop.Frame.NormalShop.ItemTemplate` 模板商品行，填充名称、价格、真实库存、稀有度、Restock 倒计时，并强制从 `ReplicatedStorage.Assets.Seeds.<ItemId>` 渲染种子预览，缺资源时留空告警而不显示模板占位块。
 - `HudCurrencyController` 从服务端物化的 `KLineInventory.Sheckles` 只读同步 HUD 金币显示，当前会同时写入 `PlayerGui.HUD.Currencies.CoinsCounter.TextLabel` 描边底字和其子级 `TextLabel` 前景数字，并同步模板 `Target`/`Goal` NumberValue，避免显示 Studio 假值或父子文字重影。
 - `InterfaceVisualController` 用 owner 集合统一管理多个界面的 Blur=20 与当前真实 FOV-10，最后一个界面关闭后恢复；SeedShop 与测试菜单共用该模块。
@@ -42,7 +42,7 @@ KLineChart 已实现第一版种植与存档基础：
 - `RequestPlant` 的客户端参数为世界命中点、`seedId` 和种子 Tool；三者均由服务端重新验证，客户端不能提交库存、成长或收获结果。
 - 收获使用服务端创建的 `ProximityPrompt`；服务端重新验证所有权、距离、记录、成熟时间，并用 per-plant lock 防止重复收获。
 - `RequestTestAction` 只接受稳定 `ActionId`；服务端重新检查功能开关、白名单、数据加载、冷却、动作配置及库存上限，不接受客户端数量、SeedId 或目标库存。
-- 测试菜单天气动作不写入存档，但仍必须通过服务端白名单、冷却和动作配置校验；种子与金币动作继续要求玩家数据已加载后才能执行。
+- 测试菜单天气与昼夜动作不写入存档，但仍必须通过服务端白名单、冷却和动作配置校验；种子与金币动作继续要求玩家数据已加载后才能执行。
 - `RequestBuySeed` 兼容旧版稳定 `itemId` 和新版 `{ ItemId = string, Amount = number }`；服务端从 `ItemConfig` 读取价格、从 `SeedShopConfig` 读取默认数量和本轮库存，并重新检查数据、冷却、Sam 距离、余额、商店库存、购买数量和背包库存上限。
 - `RequestSeedShopState` 无参数请求当前玩家个人商店库存；`SeedShopStateChanged` 只用于服务端向客户端展示当前库存、下次刷新 Unix 秒和倒计时，不承载权威结算结果。
 - `RequestSeedShopRestock` 无参数请求免费跳过当前服务器本轮种子商店等待；服务端必须重新校验玩家数据、Sam 距离和手动刷新冷却，成功后清空本轮个人库存缓存并广播新库存。
@@ -55,9 +55,9 @@ KLineChart 已实现第一版种植与存档基础：
 后续目标系统包括：
 
 - 服务端维护种植生命周期、收获结果、玩家持有物和出售结算。
-- 服务端已维护单服务器共享的植物当前价格和带时间戳的近期价格历史；Rain 天气状态已由服务端在单服务器内自动排程并同步给客户端，暂未接入价格影响。
+- 服务端已维护单服务器共享的植物当前价格和带时间戳的近期价格历史；Rain 天气状态已由服务端在单服务器内自动排程并同步给客户端，昼夜阶段由服务端写入 `Workspace.ActivePhase`、`Workspace.PhaseDuration` 和 `Workspace.ActiveTimeWeather`，二者暂未接入价格影响。
 - 服务端已生成带时间戳、按时间有序、长度限制为 10 的近期价格历史，供价格曲线图读取。
-- 共享配置作为植物基础数值、价格刷新规则与首版 Rain 天气节奏的单一来源；天气市场倍率与事件规则待后续实施时补充。
+- 共享配置作为植物基础数值、价格刷新规则、首版 Rain 天气节奏与昼夜阶段节奏的单一来源；天气市场倍率、特殊月相与事件规则待后续实施时补充。
 - 客户端负责交互、提示、天气和事件表现以及价格曲线图展示，不拥有最终经济结果。
 - 首版曲线数据是单一价格随时间变化的时间序列，不实现金融蜡烛图或 OHLC 数据。
 

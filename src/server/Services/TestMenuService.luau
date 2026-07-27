@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块验证白名单测试动作，并按服务端配置发放种子/金币或控制测试天气。
+-- 本模块验证白名单测试动作，并按服务端配置发放种子/金币或控制测试天气与昼夜阶段。
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,6 +14,7 @@ local PlayerDataService: any
 local InventoryService: any
 local RemoteService: any
 local WeatherService: any
+local TimeCycleService: any
 local lastRequestAt: { [Player]: number } = {}
 
 local function isSafeAction(action: TestMenuConfig.TestAction): boolean
@@ -36,6 +37,10 @@ local function isSafeAction(action: TestMenuConfig.TestAction): boolean
 		return type(action.WeatherId) == "string" and WeatherService ~= nil
 	elseif action.Kind == "ClearWeather" then
 		return WeatherService ~= nil
+	elseif action.Kind == "ForceTimePhase" then
+		return type(action.TimePhaseId) == "string" and TimeCycleService ~= nil
+	elseif action.Kind == "ResumeTimeCycle" then
+		return TimeCycleService ~= nil
 	end
 	return false
 end
@@ -85,6 +90,20 @@ local function runWeatherAction(action: TestMenuConfig.TestAction): (boolean, st
 	return false, "InvalidWeatherAction"
 end
 
+local function runTimeCycleAction(action: TestMenuConfig.TestAction): (boolean, string?)
+	if action.Kind == "ForceTimePhase" then
+		local phaseId = action.TimePhaseId
+		if type(phaseId) ~= "string" or not TimeCycleService.ForcePhase(phaseId) then
+			return false, "InvalidTimePhase"
+		end
+		return true, nil
+	elseif action.Kind == "ResumeTimeCycle" then
+		TimeCycleService.ResumeAutoCycle()
+		return true, nil
+	end
+	return false, "InvalidTimeCycleAction"
+end
+
 local function handleRequest(player: Player, actionId: any)
 	if not TestMenuConfig.Enabled or not TestMenuConfig.IsWhitelisted(player.UserId) then
 		return
@@ -106,6 +125,16 @@ local function handleRequest(player: Player, actionId: any)
 		local ok, reason = runWeatherAction(action)
 		if not ok then
 			RemoteService.Notify(player, string.format("测试天气操作失败：%s", tostring(reason)), "Warning")
+			return
+		end
+		RemoteService.Notify(player, string.format("已执行%s。", action.DisplayText), "Success")
+		return
+	end
+
+	if action.Kind == "ForceTimePhase" or action.Kind == "ResumeTimeCycle" then
+		local ok, reason = runTimeCycleAction(action)
+		if not ok then
+			RemoteService.Notify(player, string.format("测试昼夜操作失败：%s", tostring(reason)), "Warning")
 			return
 		end
 		RemoteService.Notify(player, string.format("已执行%s。", action.DisplayText), "Success")
@@ -140,11 +169,13 @@ function TestMenuService.Init(dependencies: {
 	InventoryService: any,
 	RemoteService: any,
 	WeatherService: any?,
+	TimeCycleService: any?,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	InventoryService = dependencies.InventoryService
 	RemoteService = dependencies.RemoteService
 	WeatherService = dependencies.WeatherService
+	TimeCycleService = dependencies.TimeCycleService
 
 	RemoteService.GetEvent("RequestTestAction").OnServerEvent:Connect(function(player, actionId)
 		local ok, err = pcall(function()

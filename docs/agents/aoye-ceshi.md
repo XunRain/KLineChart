@@ -28,7 +28,7 @@ KLineChart 已实现首版种植与存档代码，但尚未完成 Studio Play �
 - 应验证收获 Prompt 的所有权、距离、成熟时间和重复触发锁，以及多人互相尝试收获时的数据安全。
 - 应分别验证可用 DataStore、Studio API 不可用时的内存降级、会话锁、自动保存和退出释放；没有实际证据时不得写成持久化已通过。
 - 已接入 Carrot、Strawberry、Blueberry 植株预制体和 Strawberry、Blueberry 果实预制体；应验收 Strawberry/Blueberry 的成熟果实保留显示、只有第一个空 FruitSlot 处于生长中、玩家不收获时也会逐颗补满、满槽后暂停、收获一颗后只消耗一颗产物并从空位重新计时、恢复阶段、资源缺失退种和客户端中途加入表现。定制 UI 仍未接入。
-- 已实现代码测试菜单；当前 `TestMenuConfig.AllowAllPlayers=true` 时应验证所有玩家都能看到并使用测试菜单，改回 false 后再验证非白名单完全不创建 UI 且伪造 Remote 无奖励。玩家打开后先看到“种子 / 金币 / 天气”一级菜单，点击后展开对应二级动作；种子动作每次只增加配置指定的 5 个种子，金币动作只增加配置指定的 1K/1M/1B Sheckles，天气动作只允许开始 Rain 或清空当前天气，并覆盖冷却、未知动作、重生去重和移动端布局。
+- 已实现代码测试菜单；当前 `TestMenuConfig.AllowAllPlayers=true` 时应验证所有玩家都能看到并使用测试菜单，改回 false 后再验证非白名单完全不创建 UI 且伪造 Remote 无奖励。玩家打开后先看到“种子 / 金币 / 天气”一级菜单，点击后展开对应二级动作；种子动作每次只增加配置指定的 5 个种子，金币动作只增加配置指定的 1K/1M/1B Sheckles，天气动作只允许开始 Rain、清空当前天气、强制 Day/Sunset/Night 或恢复自动昼夜，并覆盖冷却、未知动作、重生去重和移动端布局。
 - 已实现 Schema v2 的 Sheckles 和首版种子商店刷新；客户端克隆 `SeedShop.Frame.NormalShop.ItemTemplate`/合并商店模板行，应验证 v1/缺字段档案补 20 且原植物库存保留，库存数量以 `SeedShopConfig` 当前规则为准、5 分钟 Restock 倒计时、合并商店刷新按钮会免费跳过当前服务器本轮等待并广播新库存、按数量购买后库存按数量减少、售罄后不能继续购买，以及余额不足、远距、未知 itemId、高频和伪造价格/数量/库存请求完全不变更数据。
 - 应验证 `PlayerGui.HUD.Currencies.CoinsCounter.TextLabel` 及其子级 `TextLabel` 启动后都不再停留在 Studio 模板假值，会同步显示 `KLineInventory.Sheckles`；购买种子、出售产物、重生和 HUD 重新克隆后都应实时更新，客户端手改 HUD 文本或 `KLineInventory.Sheckles` 不得影响服务端结算。
 - 应验证种子商店 `ViewportFrame` 预览强制使用 `ReplicatedStorage.Assets.Seeds.Carrot`、`Seeds.Strawberry` 与 `Seeds.Blueberry`，缺资源时留空告警，不得继续显示模板红色占位块。
@@ -38,7 +38,7 @@ KLineChart 已实现首版种植与存档代码，但尚未完成 Studio Play �
 - 已实现单服务器共享动态市场但尚未完成 Studio Play 验收；应验证 Carrot 每 10 秒、Strawberry 每 20 秒、Blueberry 每 30 秒刷新当前价，价格范围分别为 10~40、8~30、13~50，`Sell Inventory!` 与 FarmShop 按数量出售均使用服务端当前价原子结算，并覆盖远距、死亡、冷却、未知动作、伪造数量/价格/总额、零库存及货币溢出。
 - 应验证 Sam/Steven Prompt 从 Custom 恢复为 Default 后可见；当前 Studio 已补齐且只读验证 `Assets.NpcUIs` 的 Talk_UI/Response_UI/Option_UI 均无 BaseScript，`Option_UI.Frame.Frame.Text_Element` 为选项文案节点且应能被控制器递归识别；出售对话应本地生成 `Billboard_UI.Objects` 并展示模板式选项，仍需验证运行时克隆、距离关闭、重生、Blur/FOV 清理、`SellProduceResult` 对话反馈及未来资源缺失时安全禁用。
 - 应在 `StreamingEnabled=true` 下从远离 NPC 的出生位置进入，验证启动时客户端未流送 Sam/Steven 不再永久失效；覆盖靠近后流入、远离流出、再次流入、NPC 替换和重生，且 HarvestPrompt、Exit_Detection 与其他 NPC 不得误开商店。
-- 动态价格和真实服务端价格历史已进入首版验收范围；Rain 天气 UI 与无声音雨天本地视觉已进入首版验收范围，但暂不影响市场、成长、出售或存档；其他天气和事件仍只能作为后续目标测试范围。当前 FarmShop 的价格曲线应按服务端历史验收显示、缩放、Guide 价格标签和安全降级。
+- 动态价格和真实服务端价格历史已进入首版验收范围；Rain 天气 UI 与无声音雨天本地视觉已进入首版验收范围；昼夜切换首版已进入验收范围，应验证 Day/Sunset/Night 阶段、顶部 TimeCycleBar、Night 卡片和夜间资源清理，但暂不影响市场、成长、出售或存档；Bloodmoon、Goldmoon、Rainbow Moon、其他天气和事件仍只能作为后续目标测试范围。当前 FarmShop 的价格曲线应按服务端历史验收显示、缩放、Guide 价格标签和安全降级。
 
 后续目标测试范围包括：
 

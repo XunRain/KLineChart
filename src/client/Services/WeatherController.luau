@@ -1,36 +1,20 @@
 --!strict
 
--- 本模块展示服务端 Rain 天气状态，并在本地播放无声音的雨滴、水花与阴雨 Lighting 效果。
+-- 本模块展示服务端 Rain 天气状态，并在本地播放无声音的雨滴、水花与阴雨叠加效果。
 
-local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
+local LightingStateController = require(script.Parent.LightingStateController)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 
 type DropState = {
 	Part: BasePart,
 	Position: Vector3,
 	StartY: number,
-}
-
-type LightingSnapshot = {
-	Brightness: number,
-	Ambient: Color3,
-	OutdoorAmbient: Color3,
-	FogEnd: number,
-	FogColor: Color3,
-	ExposureCompensation: number,
-	RainEffectBrightness: number?,
-	RainEffectTintColor: Color3?,
-	Clouds: Clouds?,
-	CloudsEnabled: boolean?,
-	CloudsCover: number?,
-	CloudsDensity: number?,
-	CreatedClouds: boolean,
 }
 
 local localPlayer = Players.LocalPlayer
@@ -47,21 +31,18 @@ local timerConnection: RBXScriptConnection? = nil
 local _rainSpawnTask: thread? = nil
 local rainDropsFolder: Folder? = nil
 local rainSplashesFolder: Folder? = nil
-local lightingSnapshot: LightingSnapshot? = nil
-local rainEffect: ColorCorrectionEffect? = nil
 local drops: { DropState } = {}
 local dropPool: { BasePart } = {}
 local splashPool: { BasePart } = {}
 local random = Random.new()
 
-local WEATHER_CARD_NAMES = { "Rain", "Lightning", "Bloodmoon", "Snowfall", "Night", "Starfall", "Rainbow" }
+local WEATHER_CARD_NAMES = { "Rain", "Lightning", "Bloodmoon", "Snowfall", "Starfall", "Rainbow" }
 local MAX_DROPS = 90
 local DROPS_PER_BATCH = 5
 local SPAWN_INTERVAL = 0.025
 local DROP_SPEED = 78
 local MAX_FALL_DISTANCE = 210
 local CAMERA_LOW_MARGIN = 55
-local RESTORE_TWEEN = TweenInfo.new(3, Enum.EasingStyle.Sine)
 local SPLASH_TWEEN = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 local function formatTime(seconds: number): string
@@ -147,6 +128,10 @@ local function acquireDrop(): BasePart
 end
 
 local function releaseDrop(part: BasePart)
+	if not activeRain then
+		part:Destroy()
+		return
+	end
 	part.Parent = nil
 	table.insert(dropPool, part)
 end
@@ -160,7 +145,16 @@ local function acquireSplash(): BasePart
 end
 
 local function releaseSplash(part: BasePart)
-	part.Parent = nil
+	if not activeRain then
+		part:Destroy()
+		return
+	end
+	local ok = pcall(function()
+		part.Parent = nil
+	end)
+	if not ok then
+		return
+	end
 	part.Transparency = 0.35
 	table.insert(splashPool, part)
 end
@@ -279,125 +273,6 @@ local function renderRain(deltaTime: number)
 	end
 end
 
-local function ensureRainEffect(): ColorCorrectionEffect
-	if rainEffect and rainEffect.Parent then
-		return rainEffect
-	end
-	local existing = Lighting:FindFirstChild("RainEffect")
-	if existing and existing:IsA("ColorCorrectionEffect") then
-		rainEffect = existing
-	else
-		local effect = Instance.new("ColorCorrectionEffect")
-		effect.Name = "RainEffect"
-		effect.Brightness = 0
-		effect.TintColor = Color3.fromRGB(255, 255, 255)
-		effect.Parent = Lighting
-		rainEffect = effect
-	end
-	return rainEffect :: ColorCorrectionEffect
-end
-
-local function saveLighting()
-	local clouds = Workspace.Terrain:FindFirstChildOfClass("Clouds")
-	local effect = ensureRainEffect()
-	local snapshot: LightingSnapshot = {
-		Brightness = Lighting.Brightness,
-		Ambient = Lighting.Ambient,
-		OutdoorAmbient = Lighting.OutdoorAmbient,
-		FogEnd = Lighting.FogEnd,
-		FogColor = Lighting.FogColor,
-		ExposureCompensation = Lighting.ExposureCompensation,
-		RainEffectBrightness = effect.Brightness,
-		RainEffectTintColor = effect.TintColor,
-		CreatedClouds = clouds == nil,
-	}
-	if clouds then
-		snapshot.Clouds = clouds
-		snapshot.CloudsEnabled = clouds.Enabled
-		snapshot.CloudsCover = clouds.Cover
-		snapshot.CloudsDensity = clouds.Density
-	end
-	lightingSnapshot = snapshot
-end
-
-local function applyRainLighting()
-	saveLighting()
-	local effect = ensureRainEffect()
-	local clouds: Clouds? = lightingSnapshot and lightingSnapshot.Clouds
-	if not clouds then
-		local createdClouds = Instance.new("Clouds")
-		createdClouds.Cover = 0
-		createdClouds.Density = 0
-		createdClouds.Parent = Workspace.Terrain
-		clouds = createdClouds
-		local snapshot = lightingSnapshot
-		if snapshot then
-			snapshot.Clouds = createdClouds
-		end
-	end
-	local resolvedClouds = clouds
-	if not resolvedClouds then
-		return
-	end
-	resolvedClouds.Enabled = true
-
-	TweenService:Create(Lighting, RESTORE_TWEEN, {
-		FogEnd = 350,
-		ExposureCompensation = 0.3,
-		Brightness = Lighting.Brightness * 0.7,
-		Ambient = Color3.fromRGB(180, 190, 210),
-		OutdoorAmbient = Color3.fromRGB(70, 75, 85),
-		FogColor = Color3.fromRGB(140, 145, 155),
-	}):Play()
-	TweenService:Create(effect, RESTORE_TWEEN, {
-		Brightness = 0.05,
-		TintColor = Color3.fromRGB(210, 220, 240),
-	}):Play()
-	TweenService:Create(resolvedClouds, RESTORE_TWEEN, {
-		Cover = 0.85,
-		Density = 0.15,
-	}):Play()
-end
-
-local function restoreRainLighting()
-	local snapshot = lightingSnapshot
-	if not snapshot then
-		return
-	end
-	lightingSnapshot = nil
-	local effect = ensureRainEffect()
-	TweenService:Create(Lighting, RESTORE_TWEEN, {
-		Brightness = snapshot.Brightness,
-		Ambient = snapshot.Ambient,
-		OutdoorAmbient = snapshot.OutdoorAmbient,
-		FogEnd = snapshot.FogEnd,
-		FogColor = snapshot.FogColor,
-		ExposureCompensation = snapshot.ExposureCompensation,
-	}):Play()
-	TweenService:Create(effect, RESTORE_TWEEN, {
-		Brightness = snapshot.RainEffectBrightness or 0,
-		TintColor = snapshot.RainEffectTintColor or Color3.fromRGB(255, 255, 255),
-	}):Play()
-
-	local clouds = snapshot.Clouds
-	if clouds and clouds.Parent then
-		TweenService:Create(clouds, RESTORE_TWEEN, {
-			Cover = snapshot.CloudsCover or 0,
-			Density = snapshot.CloudsDensity or 0,
-		}):Play()
-		task.delay(RESTORE_TWEEN.Time, function()
-			if not clouds.Parent then
-				return
-			end
-			if snapshot.CreatedClouds then
-				clouds:Destroy()
-			else
-				clouds.Enabled = snapshot.CloudsEnabled or false
-			end
-		end)
-	end
-end
-
 local function clearRainParts()
 	for _, state in drops do
 		state.Part:Destroy()
@@ -426,7 +301,7 @@ local function startRainEffect()
 		return
 	end
 	activeRain = true
-	applyRainLighting()
+	LightingStateController.SetRainActive(true)
 	renderConnection = RunService.RenderStepped:Connect(renderRain)
 	_rainSpawnTask = task.spawn(function()
 		while activeRain do
@@ -448,7 +323,7 @@ local function stopRainEffect()
 		renderConnection = nil
 	end
 	_rainSpawnTask = nil
-	restoreRainLighting()
+	LightingStateController.SetRainActive(false)
 	clearRainParts()
 end
 

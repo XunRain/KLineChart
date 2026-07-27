@@ -2,6 +2,8 @@
 
 -- 本模块集中定义白名单测试菜单、稳定动作标识和服务端奖励规则，客户端读取仅用于展示。
 
+local TimeCycleConfig = require(script.Parent.TimeCycleConfig)
+
 export type TestAction = {
 	-- 跨端请求使用的稳定动作标识；发布后改名会使旧客户端请求失效，客户端只能提交此字段。
 	ActionId: string,
@@ -9,8 +11,8 @@ export type TestAction = {
 	DisplayText: string,
 	-- 一级菜单分类；客户端只用于折叠展示，服务端仍只按 ActionId 与 Kind 执行动作。
 	Category: "Seeds" | "Currency" | "Weather",
-	-- 测试动作类型；GrantSeed 发种子，GrantCurrency 发 Sheckles，StartWeather/ClearWeather 控制当前服务器天气。
-	Kind: "GrantSeed" | "GrantCurrency" | "StartWeather" | "ClearWeather",
+	-- 测试动作类型；GrantSeed 发种子，GrantCurrency 发 Sheckles，StartWeather/ClearWeather 控制天气，ForceTimePhase/ResumeTimeCycle 控制昼夜。
+	Kind: "GrantSeed" | "GrantCurrency" | "StartWeather" | "ClearWeather" | "ForceTimePhase" | "ResumeTimeCycle",
 	-- GrantSeed 写入 Inventory.Seeds 的稳定植物标识；必须存在于 ItemConfig，客户端不得提交或覆盖。
 	SeedId: string?,
 	-- GrantSeed 单次服务端权威增加的种子整数数量；必须处于 1 到 MaximumSeedGrantAmount。
@@ -19,6 +21,8 @@ export type TestAction = {
 	CurrencyAmount: number?,
 	-- StartWeather 使用的稳定天气标识；必须存在于 WeatherConfig，客户端不得提交或覆盖。
 	WeatherId: string?,
+	-- ForceTimePhase 使用的稳定昼夜阶段标识；必须存在于 TimeCycleConfig，客户端不得提交或覆盖。
+	TimePhaseId: TimeCycleConfig.PhaseId?,
 	-- 功能按钮的升序排列值；允许任意有限整数，仅影响客户端显示顺序，不影响权限或奖励。
 	SortOrder: number,
 }
@@ -135,6 +139,37 @@ TestMenuConfig.Actions = {
 		Category = "Weather",
 		Kind = "ClearWeather",
 		SortOrder = 80,
+	},
+	{
+		ActionId = "ForceTimePhaseDay",
+		DisplayText = "切到白天",
+		Category = "Weather",
+		Kind = "ForceTimePhase",
+		TimePhaseId = "Day",
+		SortOrder = 90,
+	},
+	{
+		ActionId = "ForceTimePhaseSunset",
+		DisplayText = "切到黄昏",
+		Category = "Weather",
+		Kind = "ForceTimePhase",
+		TimePhaseId = "Sunset",
+		SortOrder = 100,
+	},
+	{
+		ActionId = "ForceTimePhaseNight",
+		DisplayText = "切到夜晚",
+		Category = "Weather",
+		Kind = "ForceTimePhase",
+		TimePhaseId = "Night",
+		SortOrder = 110,
+	},
+	{
+		ActionId = "ResumeTimeCycle",
+		DisplayText = "恢复自动昼夜",
+		Category = "Weather",
+		Kind = "ResumeTimeCycle",
+		SortOrder = 120,
 	},
 } :: { TestAction }
 
