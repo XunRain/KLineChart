@@ -10,6 +10,7 @@ local TweenService = game:GetService("TweenService")
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local FarmShopConfig = require(ReplicatedStorage.Shared.FarmShopConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local MarketConfig = require(ReplicatedStorage.Shared.MarketConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
@@ -83,6 +84,10 @@ local activeRoot: BasePart? = nil
 local activeCloseDistance = 14
 local refreshQueued = false
 local rebuildRows: (() -> ())? = nil
+local priceCurveRenderSerial = 0
+local MARKET_PRICE_UNCHANGED_COLOR = Color3.fromRGB(52, 160, 212)
+local MARKET_PRICE_RISING_COLOR = Color3.fromRGB(65, 184, 88)
+local MARKET_PRICE_FALLING_COLOR = Color3.fromRGB(220, 86, 72)
 
 local function disconnect(connections: { RBXScriptConnection })
 	for _, connection in connections do
@@ -109,6 +114,28 @@ local function setLabelText(root: Instance?, text: string)
 			descendant.Text = text
 		elseif descendant:IsA("TextBox") then
 			descendant.Text = text
+		end
+	end
+end
+
+local function setTextColor(root: Instance?, color: Color3)
+	if not root then
+		return
+	end
+	if root:IsA("TextLabel") then
+		root.TextColor3 = color
+	elseif root:IsA("TextButton") then
+		root.TextColor3 = color
+	elseif root:IsA("TextBox") then
+		root.TextColor3 = color
+	end
+	for _, descendant in root:GetDescendants() do
+		if descendant:IsA("TextLabel") then
+			descendant.TextColor3 = color
+		elseif descendant:IsA("TextButton") then
+			descendant.TextColor3 = color
+		elseif descendant:IsA("TextBox") then
+			descendant.TextColor3 = color
 		end
 	end
 end
@@ -234,6 +261,17 @@ local function getTrendPercent(values: { number }): number
 	return ((last - previous) / previous) * 100
 end
 
+local function getPriceTrendColor(values: { number }): Color3
+	local last = values[#values] or 0
+	local previous = values[math.max(1, #values - 1)] or last
+	if last > previous then
+		return MARKET_PRICE_RISING_COLOR
+	elseif last < previous then
+		return MARKET_PRICE_FALLING_COLOR
+	end
+	return MARKET_PRICE_UNCHANGED_COLOR
+end
+
 local function getMarketState(itemId: string): MarketItemState?
 	return marketByItem[itemId]
 end
@@ -263,31 +301,64 @@ local function getProducePriceHistory(itemId: string, fallbackPrice: number): { 
 	return values
 end
 
-local function renderPriceCurve(values: { number })
+local function isFinitePositive(value: number?): boolean
+	return type(value) == "number" and value == value and value > 0 and math.abs(value) < math.huge
+end
+
+local function getProduceGuideValues(itemId: string, definition: ItemConfig.ItemDefinition): PriceCurveGraph.GuideValues
+	local itemState = getMarketState(itemId)
+	local basePrice = if itemState and isFinitePositive(itemState.BaseSellPrice) then itemState.BaseSellPrice :: number else definition.BaseSellPrice
+	local minPrice = if itemState and isFinitePositive(itemState.MinPrice) then itemState.MinPrice :: number else nil
+	local maxPrice = if itemState and isFinitePositive(itemState.MaxPrice) then itemState.MaxPrice :: number else nil
+
+	if not minPrice or not maxPrice then
+		local rule = MarketConfig.GetRule(itemId)
+		local lowerMultiplier = math.min(rule.MultiplierMin, rule.MultiplierMax)
+		local upperMultiplier = math.max(rule.MultiplierMin, rule.MultiplierMax)
+		minPrice = minPrice or math.floor((basePrice * lowerMultiplier) + 0.5)
+		maxPrice = maxPrice or math.floor((basePrice * upperMultiplier) + 0.5)
+	end
+
+	return {
+		Max = maxPrice,
+		Base = basePrice,
+		Min = minPrice,
+	}
+end
+
+local function renderPriceCurve(values: { number }, guideValues: PriceCurveGraph.GuideValues?)
 	local chartArea = getDetailChild("ChartArea")
 	if not chartArea or not chartArea:IsA("Frame") then
 		return
 	end
+	priceCurveRenderSerial += 1
+	local renderSerial = priceCurveRenderSerial
 
 	local theme = {
 		GridColor = Color3.fromRGB(204, 166, 105),
 		GridTransparency = 0.52,
-		LineColor = Color3.fromRGB(52, 160, 212),
-		RisingLineColor = Color3.fromRGB(65, 184, 88),
-		FallingLineColor = Color3.fromRGB(220, 86, 72),
-		DotColor = Color3.fromRGB(86, 194, 83),
+		LineColor = MARKET_PRICE_UNCHANGED_COLOR,
+		RisingLineColor = MARKET_PRICE_RISING_COLOR,
+		FallingLineColor = MARKET_PRICE_FALLING_COLOR,
+		DotColor = MARKET_PRICE_UNCHANGED_COLOR,
 		DotStrokeColor = Color3.fromRGB(149, 96, 49),
 	}
 	local function draw()
+		if renderSerial ~= priceCurveRenderSerial then
+			return
+		end
 		if chartArea.Parent and chartArea.AbsoluteSize.X > 1 and chartArea.AbsoluteSize.Y > 1 then
-			PriceCurveGraph.Render(chartArea, values, theme)
+			PriceCurveGraph.Render(chartArea, values, theme, guideValues)
 		end
 	end
 	draw()
 	task.defer(function()
-		if chartArea.Parent then
+		for _ = 1, 6 do
 			RunService.RenderStepped:Wait()
 			draw()
+			if renderSerial ~= priceCurveRenderSerial or not chartArea.Parent then
+				return
+			end
 		end
 	end)
 end
@@ -631,7 +702,10 @@ local function updateDetail()
 		if viewport then clearViewport(viewport) end
 		renderPriceCurve({ 0, 0 })
 		if itemName then itemName.Text = if selectedMode == "Seeds" then "No seed selected" else "No produce selected" end
-		if currentPrice then currentPrice.Text = "--" end
+		if currentPrice then
+			currentPrice.Text = "--"
+			currentPrice.TextColor3 = MARKET_PRICE_UNCHANGED_COLOR
+		end
 		if referencePrice then referencePrice.Text = "--" end
 		if currentPriceLabel then currentPriceLabel.Text = "Current Price" end
 		if referencePriceLabel then referencePriceLabel.Text = if selectedMode == "Seeds" then "Seed Price" else "Reference Price" end
@@ -666,8 +740,12 @@ local function updateDetail()
 	local total = tradeUnitPrice * selectedAmount
 	local priceHistory = getProducePriceHistory(itemId, marketPrice)
 	local trendPercentValue = getTrendPercent(priceHistory)
-	renderPriceCurve(priceHistory)
-	if currentPrice then currentPrice.Text = formatPriceNumber(marketPrice) end
+	local priceTrendColor = getPriceTrendColor(priceHistory)
+	renderPriceCurve(priceHistory, getProduceGuideValues(itemId, definition))
+	if currentPrice then
+		currentPrice.Text = formatPriceNumber(marketPrice)
+		currentPrice.TextColor3 = priceTrendColor
+	end
 	if referencePrice then referencePrice.Text = formatPriceNumber(referenceUnitPrice) end
 	if currentPriceLabel then currentPriceLabel.Text = "Current Price" end
 	if referencePriceLabel then referencePriceLabel.Text = if selectedMode == "Seeds" then "Seed Price" else "Reference Price" end
@@ -676,13 +754,13 @@ local function updateDetail()
 	if estimateTitle then estimateTitle.Text = if selectedMode == "Seeds" then "Estimated Cost" else "Estimated Revenue" end
 	if estimateValue then estimateValue.Text = formatPriceNumber(total) end
 	if trendStatus then
-		trendStatus.Text = if trendPercentValue >= 0 then "Rising" else "Falling"
-		trendStatus.TextColor3 = if trendPercentValue >= 0 then Color3.fromRGB(35, 165, 89) else Color3.fromRGB(210, 79, 69)
+		trendStatus.Text = if trendPercentValue > 0 then "Rising" elseif trendPercentValue < 0 then "Falling" else "Stable"
+		trendStatus.TextColor3 = priceTrendColor
 	end
 	if trendPercent then
-		local arrow = if trendPercentValue >= 0 then "↑" else "↓"
+		local arrow = if trendPercentValue > 0 then "↑" elseif trendPercentValue < 0 then "↓" else "-"
 		trendPercent.Text = string.format("%+.0f%% %s", trendPercentValue, arrow)
-		trendPercent.TextColor3 = if trendPercentValue >= 0 then Color3.fromRGB(35, 165, 89) else Color3.fromRGB(210, 79, 69)
+		trendPercent.TextColor3 = priceTrendColor
 	end
 
 	if selectedMode == "Seeds" then
@@ -782,7 +860,13 @@ local function configureExpansion(expansion: Frame, itemId: string, definition: 
 		expansion:FindFirstChild("MarketPriceLabel", true),
 		if selectedMode == "Seeds" then FarmShopConfig.SeedPriceLabelText else FarmShopConfig.ProducePriceLabelText
 	)
-	setLabelText(expansion:FindFirstChild("MarketPriceValue", true), formatPriceNumber(price))
+	local marketPriceValue = expansion:FindFirstChild("MarketPriceValue", true)
+	setLabelText(marketPriceValue, formatPriceNumber(price))
+	local priceColor = MARKET_PRICE_UNCHANGED_COLOR
+	if selectedMode == "Sell" then
+		priceColor = getPriceTrendColor(getProducePriceHistory(itemId, price))
+	end
+	setTextColor(marketPriceValue, priceColor)
 
 	local targetSize = expansion.Size
 	expansion.Size = UDim2.new(targetSize.X.Scale, targetSize.X.Offset, 0, 0)
