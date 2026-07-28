@@ -12,6 +12,8 @@ local TeleportService = {}
 local PlotService: any
 local RemoteService: any
 local lastRequestAt: { [Player]: number } = {}
+local lastBoundaryReturnAt: { [Player]: number } = {}
+local boundaryConnections: { [BasePart]: { RBXScriptConnection } } = {}
 
 local function getFixedTargetPivot(targetName: string): CFrame?
 	local folder = Workspace:FindFirstChild(TeleportConfig.WorkspaceFolderName)
@@ -61,6 +63,15 @@ local function withLandingOffset(targetPivot: CFrame): CFrame
 	return CFrame.new(targetPivot.Position + Vector3.new(0, TeleportConfig.LandingOffset, 0)) * targetPivot.Rotation
 end
 
+local function teleportCharacterToGarden(player: Player, character: Model): boolean
+	local targetPivot = getDestinationPivot(player, TeleportConfig.Destinations.Garden)
+	if not targetPivot then
+		return false
+	end
+	character:PivotTo(withLandingOffset(targetPivot))
+	return true
+end
+
 local function handleRequest(player: Player, destinationId: any)
 	if player.Parent ~= Players then
 		return
@@ -96,6 +107,81 @@ local function handleRequest(player: Player, destinationId: any)
 	character:PivotTo(withLandingOffset(targetPivot))
 end
 
+local function getPlayerFromTouchedPart(touchedPart: BasePart): Player?
+	local character = touchedPart:FindFirstAncestorOfClass("Model")
+	if not character then
+		return nil
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return nil
+	end
+	return Players:GetPlayerFromCharacter(character)
+end
+
+local function handleBoundaryReturnTouched(touchedPart: BasePart)
+	local player = getPlayerFromTouchedPart(touchedPart)
+	if not player then
+		return
+	end
+
+	local now = os.clock()
+	local previous = lastBoundaryReturnAt[player]
+	if previous and now - previous < math.max(0, TeleportConfig.BoundaryReturn.Cooldown) then
+		return
+	end
+	lastBoundaryReturnAt[player] = now
+
+	local character = getLivingCharacter(player)
+	if not character then
+		return
+	end
+	teleportCharacterToGarden(player, character)
+end
+
+local function disconnectBoundaryPart(part: BasePart)
+	local connections = boundaryConnections[part]
+	if not connections then
+		return
+	end
+	for _, connection in connections do
+		connection:Disconnect()
+	end
+	boundaryConnections[part] = nil
+end
+
+local function bindBoundaryPart(instance: Instance)
+	if not instance:IsA("BasePart") or instance.Name ~= TeleportConfig.BoundaryReturn.TriggerPartName then
+		return
+	end
+	if boundaryConnections[instance] then
+		return
+	end
+
+	instance.CanTouch = true
+	local touchedConnection = instance.Touched:Connect(handleBoundaryReturnTouched)
+	local ancestryConnection = instance.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			disconnectBoundaryPart(instance)
+		end
+	end)
+	boundaryConnections[instance] = { touchedConnection, ancestryConnection }
+end
+
+local function bindBoundaryReturnParts()
+	local baseplate = Workspace:FindFirstChild(TeleportConfig.BoundaryReturn.BaseplateName)
+	if not baseplate then
+		warn(string.format("[TeleportService] 缺少 Workspace.%s，防出界传送块未绑定", TeleportConfig.BoundaryReturn.BaseplateName))
+		return
+	end
+
+	for _, descendant in baseplate:GetDescendants() do
+		bindBoundaryPart(descendant)
+	end
+	bindBoundaryPart(baseplate)
+	baseplate.DescendantAdded:Connect(bindBoundaryPart)
+end
+
 local function warnMissingFixedTargets()
 	local folder = Workspace:FindFirstChild(TeleportConfig.WorkspaceFolderName)
 	if not folder then
@@ -129,8 +215,10 @@ function TeleportService.Init(dependencies: { PlotService: any, RemoteService: a
 	end)
 	Players.PlayerRemoving:Connect(function(player)
 		lastRequestAt[player] = nil
+		lastBoundaryReturnAt[player] = nil
 	end)
 	warnMissingFixedTargets()
+	bindBoundaryReturnParts()
 end
 
 return TeleportService

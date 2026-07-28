@@ -34,6 +34,16 @@ TeleportConfig.RequestCooldown = 0.75
 -- 角色最终落点相对目标 Pivot 沿世界 Y 轴向上的偏移，单位为 stud，用于避免角色卡入标记或地面。
 TeleportConfig.LandingOffset = 4
 
+-- 大厅防出界传送块配置；服务端会监听指定场景根节点下所有同名 BasePart，玩家触碰后回到自己的花园 SpawnPoint。
+TeleportConfig.BoundaryReturn = {
+	-- 放置防出界传送块的大厅地基对象名称；当前由 Studio 维护在 Workspace.Baseplate 下。
+	BaseplateName = "Baseplate",
+	-- 作为防出界触发器的 Part 名称；允许同一父级下存在多个同名 Teleport Part。
+	TriggerPartName = "Teleport",
+	-- 同一玩家连续触发防出界传送的最短间隔，单位秒；用于吸收角色多部件 Touch 和物理抖动造成的重复触发。
+	Cooldown = 1.25,
+}
+
 -- 目的地表同时作为客户端按钮绑定清单和服务端白名单；服务端仍独立解析目标且不信任客户端配置副本。
 TeleportConfig.Destinations = {
 	-- 种子商店入口：SeedsButton 请求后由服务端解析 Workspace.Teleports.Seeds。

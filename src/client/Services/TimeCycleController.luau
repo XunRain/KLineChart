@@ -46,7 +46,9 @@ local NIGHT_RING_NAME = "KLineNightCircleRing"
 local NIGHT_RING_PADDING = 1.18
 local NIGHT_RING_PIXELS_PER_STUD = 2
 local NIGHT_RING_HEIGHT_OFFSET = 1.62
-local NIGHT_TEMPLATE_BEAMS_ENABLED = false
+local NIGHT_TEMPLATE_BEAMS_ENABLED = true
+local NIGHT_MOON_HEIGHT = 230
+local NIGHT_MOON_OUTSIDE_PADDING = 90
 
 type NightCircleTarget = {
 	Center: Vector3,
@@ -202,6 +204,57 @@ local function getNightCircleTarget(): NightCircleTarget?
 	return nil
 end
 
+local function findOwnPlot(): Model?
+	local gardens = Workspace:FindFirstChild("Gardens")
+	if not gardens then
+		return nil
+	end
+
+	local plotId = localPlayer:GetAttribute("PlotId")
+	if type(plotId) == "number" then
+		local plotById = gardens:FindFirstChild("Plot" .. tostring(plotId))
+		if plotById and plotById:IsA("Model") then
+			return plotById
+		end
+	end
+
+	for _, plot in gardens:GetChildren() do
+		if plot:IsA("Model") and plot:GetAttribute("OwnerUserId") == localPlayer.UserId then
+			return plot
+		end
+	end
+	return nil
+end
+
+local function getModelHorizontalCenter(model: Model): Vector3
+	local cframe, _size = model:GetBoundingBox()
+	return cframe.Position
+end
+
+local function getMoonTargetPosition(): Vector3?
+	local baseTarget = getNightCircleTarget()
+	if not baseTarget then
+		return nil
+	end
+
+	local plot = findOwnPlot()
+	local plotCenter = if plot then getModelHorizontalCenter(plot) else baseTarget.Center + Vector3.new(0, 0, -1)
+	local direction = Vector3.new(plotCenter.X - baseTarget.Center.X, 0, plotCenter.Z - baseTarget.Center.Z)
+	if direction.Magnitude < 1 then
+		direction = Vector3.new(0, 0, -1)
+	else
+		direction = direction.Unit
+	end
+
+	local radius = math.max(baseTarget.Coverage, NIGHT_CIRCLE_MIN_COVERAGE) * 0.5
+	local distance = radius + NIGHT_MOON_OUTSIDE_PADDING
+	return Vector3.new(
+		baseTarget.Center.X + direction.X * distance,
+		baseTarget.Center.Y + NIGHT_MOON_HEIGHT,
+		baseTarget.Center.Z + direction.Z * distance
+	)
+end
+
 local function setEffectEnabled(effect: Instance, enabled: boolean)
 	if effect:IsA("ParticleEmitter") then
 		effect.Enabled = enabled
@@ -262,33 +315,37 @@ local function debugNightModelState(model: Model, context: string, force: boolea
 	)
 end
 
-local function disableMoonVisuals(model: Model)
-	local removedParts = 0
-	local disabledEffects = 0
-	for _, child in model:GetChildren() do
-		if child:IsA("BasePart") and child:FindFirstChild("Moon", true) then
-			removedParts += 1
-			child:Destroy()
-		end
-	end
-
-	for _, descendant in model:GetDescendants() do
-		if descendant.Name == "Moon" then
-			for _, moonChild in descendant:GetDescendants() do
-				if moonChild:IsA("ParticleEmitter") or moonChild:IsA("Beam") or moonChild:IsA("Trail") then
-					disabledEffects += 1
-				end
-				setEffectEnabled(moonChild, false)
-			end
-		end
-	end
-	debugNightVisual(string.format("禁用 Moon 分支：removedParts=%d, disabledEffects=%d", removedParts, disabledEffects), true)
-end
-
 local function setCircleEffectsEnabled(circle: BasePart, enabled: boolean)
 	for _, descendant in circle:GetDescendants() do
 		setEffectEnabled(descendant, enabled)
 	end
+end
+
+local function refreshMoonVisual(model: Model)
+	local targetPosition = getMoonTargetPosition()
+	if not targetPosition then
+		debugNightVisual("refreshMoonVisual：缺少地基目标，月亮位置保持模板默认值", false)
+		return
+	end
+
+	local movedParts = 0
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart") and descendant:FindFirstChild("Moon", true) then
+			descendant.CFrame = CFrame.new(targetPosition) * descendant.CFrame.Rotation
+			descendant.Transparency = 1
+			descendant.CanCollide = false
+			descendant.CanQuery = false
+			descendant.CanTouch = false
+			movedParts += 1
+		elseif descendant.Name == "Moon" then
+			setEffectEnabled(descendant, true)
+			for _, moonChild in descendant:GetDescendants() do
+				setEffectEnabled(moonChild, true)
+			end
+		end
+	end
+
+	debugNightVisual(string.format("月亮已定位：parts=%d, position=(%s)", movedParts, formatVector3(targetPosition)), true)
 end
 
 local function setTemplateCircleBeamsEnabled(circle: BasePart, enabled: boolean)
@@ -550,7 +607,7 @@ local function startNightModel()
 
 	local model = template:Clone()
 	model.Name = "ActiveNight"
-	disableMoonVisuals(model)
+	refreshMoonVisual(model)
 	refreshNightCircleEffects(model)
 	model.Parent = getTemporaryFolder()
 	nightModel = model
