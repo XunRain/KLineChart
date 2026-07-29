@@ -96,11 +96,13 @@ local function defaultConfig(): Types.Config
 		showLegend = true,
 		legendToggle = true,
 		tooltips = true,
+		tooltipTextSize = nil,
 		cornerRadius = 8,
 		title = nil,
 		xAxisTitle = nil,
 		yAxisTitle = nil,
 		formatValue = nil,
+		tooltipFormatter = nil,
 		xLabels = nil,
 		maxPoints = nil,
 	}
@@ -178,11 +180,13 @@ local function mergeConfig(base: Types.Config, partial: Types.PartialConfig): Ty
 		showLegend = pick(partial.showLegend, base.showLegend),
 		legendToggle = pick(partial.legendToggle, base.legendToggle),
 		tooltips = pick(partial.tooltips, base.tooltips),
+		tooltipTextSize = pickOptional(partial.tooltipTextSize, base.tooltipTextSize),
 		cornerRadius = pick(partial.cornerRadius, base.cornerRadius),
 		title = pickOptional(partial.title, base.title),
 		xAxisTitle = pickOptional(partial.xAxisTitle, base.xAxisTitle),
 		yAxisTitle = pickOptional(partial.yAxisTitle, base.yAxisTitle),
 		formatValue = pickOptional(partial.formatValue, base.formatValue),
+		tooltipFormatter = pickOptional(partial.tooltipFormatter, base.tooltipFormatter),
 		xLabels = pickOptional(partial.xLabels, base.xLabels),
 		maxPoints = pickOptional(partial.maxPoints, base.maxPoints),
 	}
@@ -238,7 +242,7 @@ local function createTooltip(): TextLabel
 	tooltip.Name = "Tooltip"
 	tooltip.AnchorPoint = Vector2.new(0.5, 1)
 	tooltip.AutomaticSize = Enum.AutomaticSize.XY
-	tooltip.Size = UDim2.fromOffset(0, 0)
+	tooltip.Size = UDim2.fromScale(0, 0)
 	tooltip.BorderSizePixel = 0
 	tooltip.TextSize = Constants.DEFAULT_TEXT_SIZE
 	tooltip.Visible = false
@@ -676,7 +680,7 @@ function Graph._draw(self: Graph, animated: boolean)
 	self._tooltip.BackgroundColor3 = theme.tooltipBackground
 	self._tooltip.TextColor3 = theme.tooltipText
 	self._tooltip.FontFace = Constants.font(theme)
-	self._tooltip.TextSize = Constants.textSize(theme)
+	self._tooltip.TextSize = config.tooltipTextSize or Constants.textSize(theme)
 
 	local size = canvas.AbsoluteSize
 	if not Layout.canvasFits(size) then
@@ -706,6 +710,7 @@ function Graph._draw(self: Graph, animated: boolean)
 
 	local pointCount = summary.pointCount
 	local format = config.formatValue or Scale.format
+	local tooltipFormatter = config.tooltipFormatter
 
 	local function xForIndex(index: number): number
 		return Layout.xForIndex(index, pointCount, plot, summary.hasBars)
@@ -760,7 +765,7 @@ function Graph._draw(self: Graph, animated: boolean)
 		if config.tooltips then
 			local built = table.create(#entry.values)
 			for index, value in entry.values do
-				built[index] = `{entry.name}  {format(value)}`
+				built[index] = if tooltipFormatter then tooltipFormatter(entry.name, value, index) else `{entry.name}  {format(value)}`
 			end
 			labels = built
 		end

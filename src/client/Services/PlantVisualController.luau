@@ -18,6 +18,7 @@ type GrowthPartBinding = {
 	Offset: CFrame,
 	Stage: number,
 	BaseTransparency: number,
+	BaseCanCollide: boolean,
 	Decorations: { DecorationBinding },
 }
 
@@ -67,6 +68,15 @@ local function getBaseTransparency(part: BasePart): number
 	end
 	part:SetAttribute("KLineBaseTransparency", part.Transparency)
 	return math.clamp(part.Transparency, 0, 1)
+end
+
+local function getBaseCanCollide(part: BasePart): boolean
+	local stored = part:GetAttribute("KLineBaseCanCollide")
+	if type(stored) == "boolean" then
+		return stored
+	end
+	part:SetAttribute("KLineBaseCanCollide", part.CanCollide)
+	return part.CanCollide
 end
 
 local function collectDecorations(part: BasePart): { DecorationBinding }
@@ -121,6 +131,7 @@ local function collectGrowthParts(container: Model, root: BasePart): ({ GrowthPa
 					Offset = root.CFrame:ToObjectSpace(descendant.CFrame),
 					Stage = stageIndex,
 					BaseTransparency = getBaseTransparency(descendant),
+					BaseCanCollide = getBaseCanCollide(descendant),
 					Decorations = collectDecorations(descendant),
 				})
 				descendant.Transparency = 1
@@ -168,7 +179,7 @@ local function applyGrowthParts(
 			binding.Part.Transparency = 1
 			binding.Part.LocalTransparencyModifier = 1
 		end
-		binding.Part.CanCollide = false
+		binding.Part.CanCollide = if visible then binding.BaseCanCollide else false
 		for _, decoration in binding.Decorations do
 			setDecorationVisible(decoration, partProgress >= 1)
 		end
@@ -183,8 +194,10 @@ local function setFruitRawVisible(binding: FruitBinding, visible: boolean)
 	for _, descendant in binding.Model:GetDescendants() do
 		if descendant:IsA("BasePart") then
 			local baseTransparency = getBaseTransparency(descendant)
+			local baseCanCollide = getBaseCanCollide(descendant)
 			descendant.Transparency = if visible then baseTransparency else 1
 			descendant.LocalTransparencyModifier = if visible then 0 else 1
+			descendant.CanCollide = if visible then baseCanCollide else false
 		end
 	end
 end
@@ -208,8 +221,10 @@ local function hideRawFruit(model: Model, _minimumScale: number)
 	for _, descendant in model:GetDescendants() do
 		if descendant:IsA("BasePart") then
 			getBaseTransparency(descendant)
+			getBaseCanCollide(descendant)
 			descendant.Transparency = 1
 			descendant.LocalTransparencyModifier = 1
+			descendant.CanCollide = false
 		end
 	end
 end

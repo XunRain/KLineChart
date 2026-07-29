@@ -13,6 +13,7 @@ local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
 
 local BackpackController = {}
+BackpackController.StateChanged = Instance.new("BindableEvent")
 
 local player = Players.LocalPlayer
 local initialized = false
@@ -24,6 +25,7 @@ local gridFrame: ScrollingFrame? = nil
 local searchBox: TextBox? = nil
 local toggleButton: ImageButton? = nil
 local outsideCloseButton: TextButton? = nil
+local InterfaceVisualController: any = nil
 
 local HOTBAR_SLOTS_FULL = 10
 local HOTBAR_SLOTS_MINI = 5
@@ -100,7 +102,7 @@ local function getUiScaleFactor(): number
 	local viewport = getViewportSize()
 	local shortSide = math.min(viewport.X, viewport.Y)
 	if isMiniLayout() then
-		return math.clamp(shortSide / 520, 0.68, 0.82)
+		return math.clamp(shortSide / 560, 0.58, 0.74)
 	end
 	return math.clamp(shortSide / 720, 0.9, 1)
 end
@@ -110,7 +112,7 @@ local function scalePixel(value: number, minimum: number): number
 end
 
 local function getSlotSize(): number
-	return scalePixel(SLOT_SIZE, 40)
+	return scalePixel(SLOT_SIZE, 34)
 end
 
 local function getSlotGap(): number
@@ -118,7 +120,7 @@ local function getSlotGap(): number
 end
 
 local function getInventoryHeaderSize(): number
-	return scalePixel(INVENTORY_HEADER_SIZE, 28)
+	return scalePixel(INVENTORY_HEADER_SIZE, 24)
 end
 
 local function getScaledTextSize(baseSize: number, minimum: number): number
@@ -126,11 +128,15 @@ local function getScaledTextSize(baseSize: number, minimum: number): number
 end
 
 local function getSearchWidth(): number
-	return scalePixel(190, 132)
+	return scalePixel(190, 112)
 end
 
 local function getSearchInset(): number
 	return scalePixel(5, 3)
+end
+
+local function getCategorySidebarWidth(): number
+	return scalePixel(87, 64)
 end
 
 local function getHotbarSlotCount(): number
@@ -901,7 +907,10 @@ local function equipTool(tool: Tool?)
 	tool.Parent = character
 end
 
-local function setZIndexRecursive(root: Instance, zIndex: number)
+local function setZIndexRecursive(root: Instance?, zIndex: number)
+	if not root then
+		return
+	end
 	if root:IsA("GuiObject") then
 		root.ZIndex = zIndex
 	end
@@ -935,8 +944,9 @@ local function updateInventoryStaticLayout(panel: Frame, panelPixelSize: Vector2
 	end
 	local sideBar = panel:FindFirstChild("SideBar")
 	if sideBar and sideBar:IsA("GuiObject") then
+		local sidebarWidth = getCategorySidebarWidth()
 		sideBar.Position = UDim2.fromScale(-10 / math.max(1, panelPixelSize.X), 0.5)
-		sideBar.Size = UDim2.fromScale(87 / math.max(1, panelPixelSize.X), 1)
+		sideBar.Size = UDim2.fromScale(sidebarWidth / math.max(1, panelPixelSize.X), 1)
 		sideBar.Visible = true
 	end
 end
@@ -1189,6 +1199,13 @@ local function setInventoryOpen(open: boolean)
 	inventoryOpen = open
 	if inventoryFrame then
 		inventoryFrame.Visible = open
+		if InterfaceVisualController then
+			if open then
+				InterfaceVisualController.Open(inventoryFrame)
+			else
+				InterfaceVisualController.Close(inventoryFrame)
+			end
+		end
 	end
 	if outsideCloseButton then
 		outsideCloseButton.Visible = open
@@ -1200,6 +1217,22 @@ local function setInventoryOpen(open: boolean)
 	end
 	updateTogglePosition()
 	refreshLayout()
+	BackpackController.StateChanged:Fire(open)
+end
+
+-- 设置背包面板开关状态，供 Topbar 或快捷键复用同一套 UI 行为。
+function BackpackController.SetInventoryOpen(open: boolean)
+	setInventoryOpen(open)
+end
+
+-- 切换背包面板开关状态，供外部按钮直接调用。
+function BackpackController.ToggleInventory()
+	setInventoryOpen(not inventoryOpen)
+end
+
+-- 返回当前背包面板是否展开，供外部按钮同步选中态。
+function BackpackController.IsInventoryOpen(): boolean
+	return inventoryOpen
 end
 
 local function makeCategoryButton(parent: Instance, category: string, order: number): TextButton
@@ -1273,26 +1306,6 @@ local function buildGui()
 		setInventoryOpen(false)
 	end)
 
-	local button = Instance.new("ImageButton")
-	button.Name = "InventoryIcon"
-	button.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
-	button.BackgroundTransparency = 0.1
-	button.BorderSizePixel = 0
-	button.Image = "rbxasset://textures/ui/TopBar/inventoryOff.png"
-	button.Size = scaleSize(42, 42)
-	button.ZIndex = 20
-	button.Parent = root
-	toggleButton = button
-	updateTogglePosition()
-
-	local buttonCorner = Instance.new("UICorner")
-	buttonCorner.CornerRadius = UDim.new(1, 0)
-	buttonCorner.Parent = button
-
-	button.MouseButton1Click:Connect(function()
-		setInventoryOpen(not inventoryOpen)
-	end)
-
 	local hotbar = Instance.new("Frame")
 	hotbar.Name = "Hotbar"
 	hotbar.AnchorPoint = Vector2.new(0.5, 1)
@@ -1321,6 +1334,11 @@ local function buildGui()
 	inventory.ZIndex = INVENTORY_Z_INDEX
 	inventory.Parent = root
 	inventoryFrame = inventory
+	if InterfaceVisualController then
+		InterfaceVisualController.RegisterExclusive(inventory, function()
+			setInventoryOpen(false)
+		end)
+	end
 
 	local inventoryCorner = Instance.new("UICorner")
 	inventoryCorner.CornerRadius = UDim.new(0, 8)
@@ -1369,7 +1387,7 @@ local function buildGui()
 	categories.BackgroundTransparency = 1
 	categories.AnchorPoint = Vector2.new(1, 0.5)
 	categories.Position = UDim2.fromScale(-10 / math.max(1, initialPanelPixelSize.X), 0.5)
-	categories.Size = UDim2.fromScale(87 / math.max(1, initialPanelPixelSize.X), 1)
+	categories.Size = UDim2.fromScale(getCategorySidebarWidth() / math.max(1, initialPanelPixelSize.X), 1)
 	categories.Visible = true
 	categories.Parent = inventory
 
@@ -1395,7 +1413,6 @@ local function buildGui()
 	grid.Size = UDim2.fromScale(1, (initialPanelPixelSize.Y - initialHeaderSize) / math.max(1, initialPanelPixelSize.Y))
 	grid.Parent = inventory
 	gridFrame = grid
-	setZIndexRecursive(button, 20)
 	setZIndexRecursive(inventory, INVENTORY_Z_INDEX)
 end
 
@@ -1493,11 +1510,14 @@ local function bindHotbarLayoutRemotes()
 end
 
 -- 初始化模板式背包 UI，并监听玩家 Backpack 与 Character 中的 Tool 变化。
-function BackpackController.Init()
+function BackpackController.Init(dependencies: { InterfaceVisualController: any }?)
 	if initialized then
 		return
 	end
 	initialized = true
+	if dependencies then
+		InterfaceVisualController = dependencies.InterfaceVisualController
+	end
 
 	pcall(function()
 		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)

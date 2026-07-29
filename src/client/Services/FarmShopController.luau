@@ -82,6 +82,7 @@ local rowConnections: { RBXScriptConnection } = {}
 local activeConnections: { RBXScriptConnection } = {}
 local activeRoot: BasePart? = nil
 local activeCloseDistance = 14
+local suppressedPromptStates: { [ProximityPrompt]: boolean } = {}
 local refreshQueued = false
 local rebuildRows: (() -> ())? = nil
 local priceCurveRenderSerial = 0
@@ -166,6 +167,65 @@ end
 local function getButton(root: Instance?, name: string): GuiButton?
 	local child = root and root:FindFirstChild(name, true)
 	return if child and child:IsA("GuiButton") then child else nil
+end
+
+local function isShopOpen(): boolean
+	local gui = screenGui
+	return gui ~= nil and gui.Enabled
+end
+
+local function matchShopPrompt(prompt: ProximityPrompt): (ShopMode?, BasePart?)
+	local seedMatched, seedRoot = NpcPromptVisualController.Match(
+		prompt,
+		SeedShopConfig.NpcFolderName,
+		SeedShopConfig.NpcModelName,
+		SeedShopConfig.NpcRootName,
+		SeedShopConfig.PreferredPromptName,
+		SeedShopConfig.FallbackPromptName
+	)
+	if seedMatched and seedRoot then
+		return "Seeds" :: ShopMode, seedRoot
+	end
+
+	local sellMatched, sellRoot = NpcPromptVisualController.Match(
+		prompt,
+		SellShopConfig.NpcFolderName,
+		SellShopConfig.NpcModelName,
+		SellShopConfig.NpcRootName,
+		SellShopConfig.PreferredPromptName,
+		SellShopConfig.FallbackPromptName
+	)
+	if sellMatched and sellRoot then
+		return "Sell" :: ShopMode, sellRoot
+	end
+	return nil, nil
+end
+
+local function suppressShopPrompt(prompt: ProximityPrompt)
+	if suppressedPromptStates[prompt] == nil then
+		suppressedPromptStates[prompt] = prompt.Enabled
+	end
+	prompt.Enabled = false
+end
+
+local function suppressVisibleShopPrompts()
+	for _, descendant in workspace:GetDescendants() do
+		if descendant:IsA("ProximityPrompt") then
+			local mode = matchShopPrompt(descendant)
+			if mode ~= nil then
+				suppressShopPrompt(descendant)
+			end
+		end
+	end
+end
+
+local function restoreSuppressedShopPrompts()
+	for prompt, wasEnabled in suppressedPromptStates do
+		if prompt.Parent ~= nil then
+			prompt.Enabled = wasEnabled
+		end
+	end
+	table.clear(suppressedPromptStates)
 end
 
 local function getDetailChild(name: string): Instance?
@@ -991,6 +1051,7 @@ local function closeShop()
 		gui.Enabled = false
 		InterfaceVisualController.Close(gui)
 	end
+	restoreSuppressedShopPrompts()
 end
 
 local function openShop(mode: ShopMode, root: BasePart)
@@ -1005,6 +1066,7 @@ local function openShop(mode: ShopMode, root: BasePart)
 	activeCloseDistance = if mode == "Sell" then SellShopConfig.DialogueCloseDistance else SeedShopConfig.MaximumInteractionDistance + 4
 	disconnect(activeConnections)
 	gui.Enabled = true
+	suppressVisibleShopPrompts()
 	InterfaceVisualController.Open(gui)
 	requestSeedState()
 	requestMarketState()
@@ -1170,6 +1232,7 @@ local function bindGui(): boolean
 	screenGui = screen
 	screen.Enabled = false
 	screen.ResetOnSpawn = false
+	InterfaceVisualController.RegisterExclusive(screen, closeShop)
 	removeRuntimeScripts(screen)
 
 	local frame = screen:FindFirstChild(FarmShopConfig.MainFrameName)
@@ -1272,40 +1335,31 @@ local function bindGuiActions()
 end
 
 local function applyPrompt(prompt: ProximityPrompt): (ShopMode?, BasePart?)
-	local seedMatched, seedRoot = NpcPromptVisualController.Match(
-		prompt,
-		SeedShopConfig.NpcFolderName,
-		SeedShopConfig.NpcModelName,
-		SeedShopConfig.NpcRootName,
-		SeedShopConfig.PreferredPromptName,
-		SeedShopConfig.FallbackPromptName
-	)
-	if seedMatched and seedRoot then
+	local mode, root = matchShopPrompt(prompt)
+	if mode == "Seeds" and root then
 		NpcPromptVisualController.Apply(
 			prompt,
 			SeedShopConfig.PromptActionText,
 			SeedShopConfig.PromptObjectText,
 			SeedShopConfig.MaximumInteractionDistance
 		)
-		return "Seeds" :: ShopMode, seedRoot
+		if isShopOpen() then
+			suppressShopPrompt(prompt)
+		end
+		return "Seeds" :: ShopMode, root
 	end
 
-	local sellMatched, sellRoot = NpcPromptVisualController.Match(
-		prompt,
-		SellShopConfig.NpcFolderName,
-		SellShopConfig.NpcModelName,
-		SellShopConfig.NpcRootName,
-		SellShopConfig.PreferredPromptName,
-		SellShopConfig.FallbackPromptName
-	)
-	if sellMatched and sellRoot then
+	if mode == "Sell" and root then
 		NpcPromptVisualController.Apply(
 			prompt,
 			SellShopConfig.PromptActionText,
 			SellShopConfig.PromptObjectText,
 			SellShopConfig.MaximumInteractionDistance
 		)
-		return "Sell" :: ShopMode, sellRoot
+		if isShopOpen() then
+			suppressShopPrompt(prompt)
+		end
+		return "Sell" :: ShopMode, root
 	end
 	return nil, nil
 end
@@ -1316,6 +1370,9 @@ local function bindPrompts()
 	end)
 	ProximityPromptService.PromptTriggered:Connect(function(prompt, triggeringPlayer)
 		if triggeringPlayer and triggeringPlayer ~= player then
+			return
+		end
+		if isShopOpen() then
 			return
 		end
 		local mode, root = applyPrompt(prompt)

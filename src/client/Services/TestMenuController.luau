@@ -9,13 +9,21 @@ local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local TestMenuConfig = require(ReplicatedStorage.Shared.TestMenuConfig)
 
 local TestMenuController = {}
+TestMenuController.StateChanged = Instance.new("BindableEvent")
+
 local initialized = false
+local available = false
+local menuPanel: Frame? = nil
 local SCREEN_GUI_NAME = "KLineTestMenu"
 local CATEGORY_BUTTON_HEIGHT = 42
 local ACTION_BUTTON_HEIGHT = 38
-local PANEL_BASE_HEIGHT = 58
 local BUTTON_GAP = 8
+local PANEL_POSITION = UDim2.fromScale(0.94, 0.12)
+local PANEL_SIZE = UDim2.fromScale(0.32, 0.46)
+local PANEL_MIN_SIZE = Vector2.new(220, 170)
+local PANEL_MAX_SIZE = Vector2.new(300, 430)
 local InterfaceVisualController: any
+local setPanelOpen: (boolean) -> ()
 
 local function addCorner(instance: GuiObject, radius: number)
 	local corner = Instance.new("UICorner")
@@ -70,21 +78,25 @@ local function createMenu(requestEvent: RemoteEvent): ScreenGui
 	gui.DisplayOrder = 100
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
-	local toggle = createTextButton("ToggleButton", "测试菜单", UDim2.fromOffset(128, 44))
-	toggle.AnchorPoint = Vector2.new(0, 0.5)
-	toggle.Position = UDim2.new(0, 16, 0.65, 0)
-	toggle.Parent = gui
-
 	local panel = Instance.new("Frame")
 	panel.Name = "ActionPanel"
-	panel.AnchorPoint = Vector2.new(0, 1)
-	panel.Position = UDim2.new(0, 16, 0.65, -30)
-	panel.Size = UDim2.fromOffset(240, PANEL_BASE_HEIGHT + #categories * (CATEGORY_BUTTON_HEIGHT + BUTTON_GAP))
+	panel.AnchorPoint = Vector2.new(1, 0)
+	panel.Position = PANEL_POSITION
+	panel.Size = PANEL_SIZE
 	panel.BackgroundColor3 = Color3.fromRGB(24, 31, 43)
 	panel.Visible = false
 	panel.Parent = gui
+	menuPanel = panel
+	InterfaceVisualController.RegisterExclusive(panel, function()
+		setPanelOpen(false)
+	end)
 	addCorner(panel, 10)
 	addStroke(panel, Color3.fromRGB(126, 167, 214))
+
+	local panelSizeConstraint = Instance.new("UISizeConstraint")
+	panelSizeConstraint.MinSize = PANEL_MIN_SIZE
+	panelSizeConstraint.MaxSize = PANEL_MAX_SIZE
+	panelSizeConstraint.Parent = panel
 
 	local padding = Instance.new("UIPadding")
 	padding.PaddingTop = UDim.new(0, 10)
@@ -93,17 +105,11 @@ local function createMenu(requestEvent: RemoteEvent): ScreenGui
 	padding.PaddingRight = UDim.new(0, 10)
 	padding.Parent = panel
 
-	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 8)
-	layout.FillDirection = Enum.FillDirection.Vertical
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = panel
-
 	local title = Instance.new("TextLabel")
 	title.Name = "Title"
 	title.LayoutOrder = 0
-	title.Size = UDim2.new(1, 0, 0, 30)
+	title.Position = UDim2.fromScale(0, 0)
+	title.Size = UDim2.fromScale(1, 0.14)
 	title.BackgroundTransparency = 1
 	title.Font = Enum.Font.GothamBold
 	title.TextColor3 = Color3.fromRGB(244, 247, 252)
@@ -111,18 +117,31 @@ local function createMenu(requestEvent: RemoteEvent): ScreenGui
 	title.Text = "白名单测试功能"
 	title.Parent = panel
 
+	local content = Instance.new("ScrollingFrame")
+	content.Name = "Content"
+	content.Position = UDim2.fromScale(0, 0.17)
+	content.Size = UDim2.fromScale(1, 0.83)
+	content.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	content.CanvasSize = UDim2.fromScale(0, 0)
+	content.ScrollingDirection = Enum.ScrollingDirection.Y
+	content.ScrollBarThickness = 5
+	content.BackgroundTransparency = 1
+	content.BorderSizePixel = 0
+	content.ClipsDescendants = true
+	content.Parent = panel
+
+	local contentLayout = Instance.new("UIListLayout")
+	contentLayout.Padding = UDim.new(0, BUTTON_GAP)
+	contentLayout.FillDirection = Enum.FillDirection.Vertical
+	contentLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	contentLayout.Parent = content
+
 	local activeCategory: string? = nil
 	local categoryButtons: { [string]: TextButton } = {}
 	local actionButtonsByCategory: { [string]: { TextButton } } = {}
 
 	local function updatePanel()
-		local visibleActions = if activeCategory and actionsByCategory[activeCategory] then #actionsByCategory[activeCategory] else 0
-		panel.Size = UDim2.fromOffset(
-			240,
-			PANEL_BASE_HEIGHT
-				+ #categories * (CATEGORY_BUTTON_HEIGHT + BUTTON_GAP)
-				+ visibleActions * (ACTION_BUTTON_HEIGHT + BUTTON_GAP)
-		)
 		for categoryId, button in categoryButtons do
 			local active = categoryId == activeCategory
 			button.BackgroundColor3 = if active then Color3.fromRGB(57, 93, 128) else Color3.fromRGB(42, 55, 72)
@@ -142,7 +161,7 @@ local function createMenu(requestEvent: RemoteEvent): ScreenGui
 		local button = createTextButton(categoryId .. "Category", category.DisplayText, UDim2.new(1, 0, 0, CATEGORY_BUTTON_HEIGHT))
 		button.LayoutOrder = categoryIndex * 100
 		button:SetAttribute("BaseText", category.DisplayText)
-		button.Parent = panel
+		button.Parent = content
 		categoryButtons[categoryId] = button
 		button.Activated:Connect(function()
 			activeCategory = if activeCategory == categoryId then nil else categoryId
@@ -162,21 +181,43 @@ local function createMenu(requestEvent: RemoteEvent): ScreenGui
 			actionButton.Activated:Connect(function()
 				requestEvent:FireServer(actionId)
 			end)
-			actionButton.Parent = panel
+			actionButton.Parent = content
 			table.insert(actionButtons, actionButton)
 		end
 	end
 	updatePanel()
 
-	toggle.Activated:Connect(function()
-		panel.Visible = not panel.Visible
-		if panel.Visible then
-			InterfaceVisualController.Open(panel)
-		else
-			InterfaceVisualController.Close(panel)
-		end
-	end)
 	return gui
+end
+
+setPanelOpen = function(open: boolean)
+	local panel = menuPanel
+	if not panel then
+		return
+	end
+	panel.Visible = open
+	if open then
+		InterfaceVisualController.Open(panel)
+	else
+		InterfaceVisualController.Close(panel)
+	end
+	TestMenuController.StateChanged:Fire(open)
+end
+
+-- 切换测试菜单面板开关状态，供 Topbar 测试按钮调用。
+function TestMenuController.ToggleMenu()
+	setPanelOpen(not TestMenuController.IsOpen())
+end
+
+-- 返回测试菜单是否已经创建并允许当前玩家使用。
+function TestMenuController.IsAvailable(): boolean
+	return available and menuPanel ~= nil
+end
+
+-- 返回测试菜单面板当前是否展开。
+function TestMenuController.IsOpen(): boolean
+	local panel = menuPanel
+	return panel ~= nil and panel.Visible
 end
 
 -- 注入通用界面视觉控制器，并在白名单与功能开关通过后创建唯一 ScreenGui。
@@ -199,6 +240,7 @@ function TestMenuController.Init(dependencies: { InterfaceVisualController: any 
 	local requestEvent = folder:WaitForChild(NetworkConfig.Events.RequestTestAction) :: RemoteEvent
 	local gui = createMenu(requestEvent)
 	gui.Parent = playerGui
+	available = true
 end
 
 return TestMenuController

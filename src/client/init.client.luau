@@ -22,10 +22,11 @@ local TestMenuController = require(Services.TestMenuController)
 local TimeCycleBarController = require(Services.TimeCycleBarController)
 local TimeCycleController = require(Services.TimeCycleController)
 local ToolVisualController = require(Services.ToolVisualController)
+local TopbarController = require(Services.TopbarController)
 local WeatherController = require(Services.WeatherController)
 
-BackpackController.Init()
 InterfaceVisualController.Init()
+BackpackController.Init({ InterfaceVisualController = InterfaceVisualController })
 LightingStateController.Init()
 HudCurrencyController.Init()
 NotificationController.Init()
@@ -42,6 +43,10 @@ TimeCycleController.Init()
 TimeCycleBarController.Init()
 WeatherController.Init()
 TestMenuController.Init({ InterfaceVisualController = InterfaceVisualController })
+TopbarController.Init({
+	BackpackController = BackpackController,
+	TestMenuController = TestMenuController,
+})
 task.spawn(function()
 	FarmShopController.Init({ InterfaceVisualController = InterfaceVisualController })
 end)

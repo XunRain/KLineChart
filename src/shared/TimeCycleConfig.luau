@@ -22,6 +22,12 @@ export type PhaseDefinition = {
 	BarIconImage: string,
 }
 
+type PhaseMap = {
+	Day: PhaseDefinition,
+	Sunset: PhaseDefinition,
+	Night: PhaseDefinition,
+}
+
 local TimeCycleConfig = {}
 
 -- WorkspaceAttributeNames 集中声明服务端写入、客户端读取的 Attribute 名；不得让客户端提交这些值。
@@ -60,7 +66,7 @@ TimeCycleConfig.Phases = {
 		BarColor = Color3.new(0.117647, 0.278431, 0.580392),
 		BarIconImage = "rbxassetid://91446334780160",
 	},
-} :: { [PhaseId]: PhaseDefinition }
+} :: PhaseMap
 
 local sortedPhasesCache: { PhaseDefinition }? = nil
 local cycleDurationCache: number? = nil
@@ -71,10 +77,11 @@ function TimeCycleConfig.GetSortedPhases(): { PhaseDefinition }
 		return table.clone(sortedPhasesCache :: { PhaseDefinition })
 	end
 
-	local phases = {}
-	for _, definition in TimeCycleConfig.Phases do
-		table.insert(phases, definition)
-	end
+	local phases: { PhaseDefinition } = {
+		TimeCycleConfig.Phases.Day,
+		TimeCycleConfig.Phases.Sunset,
+		TimeCycleConfig.Phases.Night,
+	}
 	table.sort(phases, function(a, b)
 		if a.StartOrder == b.StartOrder then
 			return a.PhaseId < b.PhaseId

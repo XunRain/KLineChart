@@ -499,14 +499,19 @@ local function renderWithPlottr(container: Frame, data: { number }, chartTheme: 
 			showPoints = true,
 			showLegend = false,
 			legendToggle = false,
-			tooltips = false,
+			tooltips = true,
+			tooltipTextSize = 16,
 			cornerRadius = 0,
 			formatValue = formatGuideValue,
+			tooltipFormatter = function(_seriesName: string, value: number, _index: number): string
+				return "Price: " .. formatGuideValue(value)
+			end,
 			xLabels = noXLabel,
 			maxPoints = 10,
 		}
 
 		local state = plottrByContainer[container] :: PlottrState?
+		local graph: any
 		local series = {
 			name = SERIES_NAME,
 			values = data,
@@ -518,21 +523,21 @@ local function renderWithPlottr(container: Frame, data: { number }, chartTheme: 
 			smooth = true,
 		}
 		if not state then
-			state = {
-				Graph = Plottr.new(container, config),
-			}
+			graph = Plottr.new(container, config)
+			state = { Graph = graph }
 			plottrByContainer[container] = state
 		else
-			state.Graph:configure(config)
+			graph = state.Graph
+			graph:configure(config)
 		end
 		local canvas = container:FindFirstChild("PlottrCanvas")
 		if canvas and canvas:IsA("GuiObject") then
 			canvas.ZIndex = container.ZIndex + 1
 			canvas.BackgroundTransparency = chartTheme.BackgroundTransparency
 		end
-		state.Graph:setSeries({ series })
+		graph:setSeries({ series })
 
-		state.Graph:render()
+		graph:render()
 		canvas = container:FindFirstChild("PlottrCanvas")
 		if canvas and canvas:IsA("GuiObject") then
 			canvas.ZIndex = container.ZIndex + 1

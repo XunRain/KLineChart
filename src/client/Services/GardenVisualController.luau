@@ -22,9 +22,11 @@ local frontBedSectionSize: Vector3? = nil
 local visualStateByVisual: { [Instance]: VisualState } = {}
 local plotConnections: { [Model]: { RBXScriptConnection } } = {}
 local plotSizeReferenceByPlot: { [Model]: BasePart } = {}
+local visualByPlot: { [Model]: Instance } = {}
 local renderQueued: { [Model]: boolean } = {}
 local warnedMissingPlotAssets = false
 local warnedMissingGround = false
+local RUNTIME_VISUAL_ATTRIBUTE = "KLineRuntimeGardenVisual"
 
 local visualConfig = PlotExpansionConfig.Visual
 local TEMPLATE_FRONT_OPENING_WIDTH = tonumber(visualConfig.FrontOpeningWidth) or 18
@@ -173,6 +175,14 @@ local function clearRuntimeOwnedChildren(visual: Instance)
 	end
 end
 
+local function isRuntimeOwnedChild(instance: Instance): boolean
+	return PlotExpansionConfig.Visual.RuntimeOwnedNames[instance.Name] == true
+end
+
+local function markRuntimeModel(model: Model)
+	model:SetAttribute(RUNTIME_VISUAL_ATTRIBUTE, true)
+end
+
 local function getOrCreateVisualState(visual: Instance): VisualState
 	local state = visualStateByVisual[visual]
 	if state then
@@ -259,6 +269,7 @@ local function updatePlotVisual(plotSizeReference: BasePart, visual: Instance, f
 		for i = 0, count do
 			if not (hasOpening and (openingStart + 1 <= i and i <= openingEnd)) then
 				local pole = state.Poles[nextPoleIndex] or fencePoleTemplate:Clone()
+				markRuntimeModel(pole)
 				if not pole.Parent then
 					pole.Parent = visual
 				end
@@ -274,6 +285,7 @@ local function updatePlotVisual(plotSizeReference: BasePart, visual: Instance, f
 		for j = 0, count - 1 do
 			if not (hasOpening and (openingStart <= j and j <= openingEnd)) then
 				local connector = state.Connectors[nextConnectorIndex] or fenceConnectorTemplate:Clone()
+				markRuntimeModel(connector)
 				if not connector.Parent then
 					connector.Parent = visual
 				end
@@ -325,9 +337,11 @@ local function updatePlotVisual(plotSizeReference: BasePart, visual: Instance, f
 				resolvedBed = bed
 			else
 				local clonedBed = template:Clone()
+				markRuntimeModel(clonedBed)
 				clonedBed.Parent = visual
 				resolvedBed = clonedBed
 			end
+			markRuntimeModel(resolvedBed)
 			nextBeds[nextBedIndex] = resolvedBed
 
 			local templateSize = if isFront then frontBedSize else normalBedSize
@@ -375,6 +389,7 @@ local function clearPlot(plot: Model)
 		plotConnections[plot] = nil
 	end
 	plotSizeReferenceByPlot[plot] = nil
+	visualByPlot[plot] = nil
 
 	local visual = plot:FindFirstChild("Visual")
 	if visual then
@@ -386,6 +401,33 @@ local function clearPlot(plot: Model)
 	end
 end
 
+local function queueStreamingRenders(plotModel: Model)
+	for _, delaySeconds in { 0.5, 2, 5 } do
+		task.delay(delaySeconds, function()
+			if plotModel.Parent then
+				renderPlot(plotModel)
+			end
+		end)
+	end
+end
+
+local function bindVisual(plotModel: Model, visual: Instance, connections: { RBXScriptConnection })
+	if visualByPlot[plotModel] == visual then
+		return
+	end
+	visualByPlot[plotModel] = visual
+
+	table.insert(connections, visual.ChildAdded:Connect(function(child)
+		if isRuntimeOwnedChild(child) and child:GetAttribute(RUNTIME_VISUAL_ATTRIBUTE) ~= true then
+			child:Destroy()
+			renderPlot(plotModel)
+		end
+	end))
+
+	renderPlot(plotModel)
+	queueStreamingRenders(plotModel)
+end
+
 local function renderAllPlots()
 	local gardens = Workspace:FindFirstChild("Gardens")
 	if not gardens then
@@ -395,16 +437,6 @@ local function renderAllPlots()
 		if plot:IsA("Model") and string.match(plot.Name, "^Plot%d+$") then
 			renderPlot(plot)
 		end
-	end
-end
-
-local function queueStreamingRenders(plotModel: Model)
-	for _, delaySeconds in { 0.5, 2, 5 } do
-		task.delay(delaySeconds, function()
-			if plotModel.Parent then
-				renderPlot(plotModel)
-			end
-		end)
 	end
 end
 
@@ -442,12 +474,15 @@ local function setupPlot(plot: Instance)
 	if plotSizeReference and plotSizeReference:IsA("BasePart") then
 		bindPlotSizeReference(plotModel, plotSizeReference, connections)
 	end
+	local visual = plotModel:FindFirstChild("Visual")
+	if visual then
+		bindVisual(plotModel, visual, connections)
+	end
 	table.insert(connections, plotModel.ChildAdded:Connect(function(child)
 		if child.Name == "PlotSizeReference" and child:IsA("BasePart") then
 			bindPlotSizeReference(plotModel, child, connections)
 		elseif child.Name == "Visual" then
-			renderPlot(plotModel)
-			queueStreamingRenders(plotModel)
+			bindVisual(plotModel, child, connections)
 		end
 	end))
 

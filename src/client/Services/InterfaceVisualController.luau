@@ -23,6 +23,9 @@ local activeCamera: Camera? = nil
 local baselineFov: number? = nil
 local transitionSerial = 0
 local owners: { [Instance]: RBXScriptConnection } = {}
+local exclusiveClosers: { [Instance]: () -> () } = {}
+local exclusiveOwnerConnections: { [Instance]: RBXScriptConnection } = {}
+local isClosingExclusiveOwners = false
 
 local function hasOwners(): boolean
 	return next(owners) ~= nil
@@ -32,6 +35,32 @@ local function cancelTween(tween: Tween?)
 	if tween then
 		tween:Cancel()
 	end
+end
+
+local function closeExclusiveOwnersExcept(nextOwner: Instance)
+	if isClosingExclusiveOwners then
+		return
+	end
+	local closers: { () -> () } = {}
+	for owner in owners do
+		if owner ~= nextOwner then
+			local closeCallback = exclusiveClosers[owner]
+			if closeCallback then
+				table.insert(closers, closeCallback)
+			end
+		end
+	end
+	if #closers <= 0 then
+		return
+	end
+	isClosingExclusiveOwners = true
+	for _, closeCallback in closers do
+		local ok = pcall(closeCallback)
+		if not ok then
+			warn("[InterfaceVisualController] 关闭旧界面失败。")
+		end
+	end
+	isClosingExclusiveOwners = false
 end
 
 local function ensureBlur(): BlurEffect
@@ -123,6 +152,7 @@ end
 -- 注册一个界面 owner；首个 owner 保存真实 FOV 并播放 Blur=20、FOV-10 的统一打开过渡。
 function InterfaceVisualController.Open(owner: Instance)
 	InterfaceVisualController.Init()
+	closeExclusiveOwnersExcept(owner)
 	if owners[owner] then
 		return
 	end
@@ -161,6 +191,24 @@ function InterfaceVisualController.Close(owner: Instance)
 		if transitionSerial == serial and not hasOwners() then
 			baselineFov = nil
 			cameraTween = nil
+		end
+	end)
+end
+
+-- 注册互斥界面关闭回调；新界面打开时会先调用其它已打开互斥界面的关闭回调。
+function InterfaceVisualController.RegisterExclusive(owner: Instance, closeCallback: () -> ())
+	InterfaceVisualController.Init()
+	exclusiveClosers[owner] = closeCallback
+	local oldConnection = exclusiveOwnerConnections[owner]
+	if oldConnection then
+		oldConnection:Disconnect()
+	end
+	exclusiveOwnerConnections[owner] = owner.Destroying:Connect(function()
+		exclusiveClosers[owner] = nil
+		local connection = exclusiveOwnerConnections[owner]
+		if connection then
+			connection:Disconnect()
+			exclusiveOwnerConnections[owner] = nil
 		end
 	end)
 end

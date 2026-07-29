@@ -32,7 +32,6 @@ local warnMissingNightAtmosphere = false
 local warnMissingNightUi = false
 local elapsedSinceLightingUpdate = 0
 local lastNightDebugAt = 0
-local lastNightDebugMessage = ""
 
 local DAY_START_CLOCK = 7
 local DAY_CLOCK_RANGE = 8
@@ -98,7 +97,6 @@ local function debugNightVisual(message: string, force: boolean?)
 		return
 	end
 	lastNightDebugAt = now
-	lastNightDebugMessage = message
 	warn("[TimeCycleController][NightDebug] " .. message)
 end
 
@@ -728,8 +726,8 @@ local function bindNightUi()
 		return
 	end
 
+	card.Visible = false
 	nightCard = card
-	nightCard.Visible = false
 	local timeLabel = card:FindFirstChild("Time")
 	if timeLabel and timeLabel:IsA("TextLabel") then
 		nightTimeLabel = timeLabel

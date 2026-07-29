@@ -250,11 +250,17 @@ function Validate.config(config: Types.PartialConfig)
 	if given(config.formatValue) then
 		assertType(config.formatValue, "function", "config.formatValue")
 	end
+	if given(config.tooltipFormatter) then
+		assertType(config.tooltipFormatter, "function", "config.tooltipFormatter")
+	end
 	if given(config.xLabels) then
 		validateXLabels(config.xLabels)
 	end
 	if given(config.maxPoints) then
 		assertPositive(config.maxPoints, "config.maxPoints")
+	end
+	if given(config.tooltipTextSize) then
+		assertPositive(config.tooltipTextSize, "config.tooltipTextSize")
 	end
 end
 

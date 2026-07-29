@@ -76,12 +76,32 @@ local function validateFruitTemplate(template: Model): (boolean, string?)
 end
 
 local function prepareRuntimeParts(model: Model)
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
 	for _, descendant in model:GetDescendants() do
-		if descendant:IsA("BasePart") then
+		if descendant:IsA("Model") then
+			descendant.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
+		elseif descendant:IsA("BasePart") then
 			descendant.Anchored = true
-			descendant.CanCollide = false
 			descendant.CanQuery = true
 			descendant.CanTouch = false
+		end
+	end
+end
+
+local function getBaseCanCollide(part: BasePart): boolean
+	local stored = part:GetAttribute("KLineBaseCanCollide")
+	if type(stored) == "boolean" then
+		return stored
+	end
+	part:SetAttribute("KLineBaseCanCollide", part.CanCollide)
+	return part.CanCollide
+end
+
+local function setModelCollisionVisible(model: Model, visible: boolean)
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			local baseCanCollide = getBaseCanCollide(descendant)
+			descendant.CanCollide = if visible then baseCanCollide else false
 		end
 	end
 end
@@ -168,8 +188,10 @@ local function addRuntimeFruits(
 		prepareRuntimeParts(fruit)
 		for _, descendant in fruit:GetDescendants() do
 			if descendant:IsA("BasePart") then
+				getBaseCanCollide(descendant)
 				descendant:SetAttribute("KLineBaseTransparency", descendant.Transparency)
 				descendant.Transparency = 1
+				descendant.CanCollide = false
 			end
 		end
 		fruit.Parent = container
@@ -219,6 +241,7 @@ local function setRepeatAttributes(model: Model, record: PlantRecord, definition
 		fruit:SetAttribute("FruitMature", mature)
 		fruit:SetAttribute("FruitGrowing", growing)
 		fruit:SetAttribute("FruitNextReadyAt", if growing then state.NextFruitAt else 0)
+		setModelCollisionVisible(fruit, mature or growing)
 		local root = fruit.PrimaryPart
 		local prompt = root and root:FindFirstChild("HarvestPrompt")
 		if prompt and prompt:IsA("ProximityPrompt") then

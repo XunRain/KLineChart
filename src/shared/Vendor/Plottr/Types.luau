@@ -208,11 +208,13 @@ export type XLabelSource = { string } | (index: number) -> string?
 	.showLegend boolean -- Shown when there is more than one series
 	.legendToggle boolean -- Clicking a legend entry hides or shows its series
 	.tooltips boolean
+	.tooltipTextSize number? -- Overrides the tooltip label size; nil follows theme.textSize
 	.cornerRadius number -- Canvas corner rounding
 	.title string? -- Heading drawn above the plot
 	.xAxisTitle string? -- Caption drawn under the x axis
 	.yAxisTitle string? -- Caption drawn rotated beside the y axis
 	.formatValue ((value: number) -> string)? -- Formats tick labels and tooltips
+	.tooltipFormatter ((seriesName: string, value: number, index: number) -> string)? -- Overrides tooltip text
 	.xLabels XLabelSource? -- Labels per data index; defaults to the index
 	.maxPoints number? -- Realtime window for [Graph:push]; nil keeps everything
 ]=]
@@ -234,11 +236,13 @@ export type Config = {
 	showLegend: boolean,
 	legendToggle: boolean,
 	tooltips: boolean,
+	tooltipTextSize: number?,
 	cornerRadius: number,
 	title: string?,
 	xAxisTitle: string?,
 	yAxisTitle: string?,
 	formatValue: ((value: number) -> string)?,
+	tooltipFormatter: ((seriesName: string, value: number, index: number) -> string)?,
 	xLabels: XLabelSource?,
 	maxPoints: number?,
 }
@@ -261,11 +265,13 @@ export type PartialConfig = {
 	showLegend: boolean?,
 	legendToggle: boolean?,
 	tooltips: boolean?,
+	tooltipTextSize: number?,
 	cornerRadius: number?,
 	title: string?,
 	xAxisTitle: string?,
 	yAxisTitle: string?,
 	formatValue: ((value: number) -> string)?,
+	tooltipFormatter: ((seriesName: string, value: number, index: number) -> string)?,
 	xLabels: XLabelSource?,
 	maxPoints: number?,
 }
