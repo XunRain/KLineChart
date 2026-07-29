@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块在 Steven 附近以权威事务出售全部产物、单品种产物或当前手持产物。
+-- 本模块在玩家靠近任一商店 NPC 时以权威事务出售全部产物、单品种产物或当前手持产物。
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
 local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
 local NpcPromptService = require(script.Parent.NpcPromptService)
 
@@ -49,18 +50,36 @@ local function getRoot(parent: Instance?, name: string): BasePart?
 	return if child and child:IsA("BasePart") then child else nil
 end
 
-local function isAliveNearSteven(player: Player): boolean
+local function getNpcRoot(modelName: string, rootName: string): BasePart?
+	local npcs = Workspace:FindFirstChild(SellShopConfig.NpcFolderName)
+	local npc = npcs and npcs:FindFirstChild(modelName)
+	return getRoot(npc, rootName)
+end
+
+local function isNearRoot(playerRoot: BasePart, npcRoot: BasePart?, maximumDistance: number): boolean
+	return npcRoot ~= nil and (playerRoot.Position - npcRoot.Position).Magnitude <= maximumDistance
+end
+
+local function isAliveNearShop(player: Player): boolean
 	if player.Parent ~= Players then return false end
 	local character = player.Character
+	if not character or not character:IsDescendantOf(Workspace) then
+		return false
+	end
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 or humanoid:GetState() == Enum.HumanoidStateType.Dead then
+		return false
+	end
 	local playerRoot = getRoot(character, "HumanoidRootPart")
-	local npcs = Workspace:FindFirstChild(SellShopConfig.NpcFolderName)
-	local steven = npcs and npcs:FindFirstChild(SellShopConfig.NpcModelName)
-	local npcRoot = getRoot(steven, SellShopConfig.NpcRootName)
-	return character ~= nil and character:IsDescendantOf(Workspace)
-		and humanoid ~= nil and humanoid.Health > 0 and humanoid:GetState() ~= Enum.HumanoidStateType.Dead
-		and playerRoot ~= nil and npcRoot ~= nil
-		and (playerRoot.Position - npcRoot.Position).Magnitude <= SellShopConfig.MaximumInteractionDistance
+	if not playerRoot then
+		return false
+	end
+	local seedRoot = getNpcRoot(SeedShopConfig.NpcModelName, SeedShopConfig.NpcRootName)
+	if isNearRoot(playerRoot, seedRoot, SeedShopConfig.MaximumInteractionDistance) then
+		return true
+	end
+	local sellRoot = getNpcRoot(SellShopConfig.NpcModelName, SellShopConfig.NpcRootName)
+	return isNearRoot(playerRoot, sellRoot, SellShopConfig.MaximumInteractionDistance)
 end
 
 local function getActionId(payload: any): string
@@ -138,8 +157,8 @@ local function handleRequest(player: Player, payload: any)
 		failRequest(player, actionId, "InvalidAction", "Invalid sell action.", "Warning")
 		return
 	end
-	if not PlayerDataService.IsLoaded(player) or not isAliveNearSteven(player) then
-		failRequest(player, actionId, "NotNear", "Please stand closer to Steven.", "Warning")
+	if not PlayerDataService.IsLoaded(player) or not isAliveNearShop(player) then
+		failRequest(player, actionId, "NotNear", "Please stand closer to a shop.", "Warning")
 		return
 	end
 	if actionId == SellShopConfig.QuoteHeldOneActionId then

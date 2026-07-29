@@ -21,7 +21,7 @@ return {
 	PromptActionText = "Sell Produce",
 	-- Roblox 默认 Prompt 上显示的 NPC 对象文本，不参与出售权限或服务端距离判断。
 	PromptObjectText = "Steven",
-	-- 服务端允许出售的最大角色距离，单位为 stud；客户端 Prompt 和界面距离不能替代该校验。
+	-- 服务端允许靠近任一商店 NPC 出售的最大角色距离，单位为 stud；客户端 Prompt 和界面距离不能替代该校验。
 	MaximumInteractionDistance = 10,
 	-- 同一玩家两次出售请求的最短间隔，单位为秒，用于限制连点和 Remote 滥用。
 	RequestCooldown = 0.4,

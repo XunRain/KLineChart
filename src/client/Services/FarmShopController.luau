@@ -17,6 +17,7 @@ local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
 local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
 local NpcPromptVisualController = require(script.Parent.NpcPromptVisualController)
 local PriceCurveGraph = require(script.Parent.Parent.Components.PriceCurveGraph)
+local ViewportPreviewCamera = require(script.Parent.Parent.Components.ViewportPreviewCamera)
 
 type ShopMode = "Seeds" | "Sell"
 type ShopItem = {
@@ -40,6 +41,9 @@ type MarketItemState = {
 	MaxPrice: number?,
 	NextRefreshAt: number?,
 	RefreshInterval: number?,
+	ActiveModifierId: string?,
+	IsRefreshPaused: boolean?,
+	PausedRemainingSeconds: number?,
 	History: { MarketHistoryPoint }?,
 }
 type MarketSnapshot = {
@@ -509,27 +513,21 @@ local function renderPreview(viewport: ViewportFrame?, mode: ShopMode, itemId: s
 	local worldModel = Instance.new("WorldModel")
 	worldModel.Name = "PreviewWorld"
 	worldModel.Parent = viewport
-	clone.Parent = worldModel
 
-	local boundsCFrame: CFrame
-	local boundsSize: Vector3
-	if clone:IsA("Model") then
-		clone:PivotTo(CFrame.new())
-		boundsCFrame, boundsSize = clone:GetBoundingBox()
-		clone:PivotTo(CFrame.new(-boundsCFrame.Position))
-	elseif clone:IsA("BasePart") then
-		clone.CFrame = CFrame.new()
-		boundsCFrame = clone.CFrame
-		boundsSize = clone.Size
-	else
+	local previewRoot = ViewportPreviewCamera.MountPreviewRoot(clone, worldModel)
+	if not previewRoot then
 		return
 	end
+	previewRoot:PivotTo(CFrame.new())
+	local boundsCFrame, boundsSize = ViewportPreviewCamera.GetVisibleBounds(previewRoot)
+	previewRoot:PivotTo(CFrame.new(-boundsCFrame.Position))
 
-	local maxSize = math.max(boundsSize.X, boundsSize.Y, boundsSize.Z, 0.25)
-	local camera = Instance.new("Camera")
+	local camera = ViewportPreviewCamera.CreateForBounds(viewport, boundsSize, Vector3.new(0, 0, 0), {
+		Direction = Vector3.new(1.15, 0.7, 2.5),
+		FieldOfView = 35,
+		Padding = 1.22,
+	})
 	camera.Name = "PreviewCamera"
-	camera.FieldOfView = 35
-	camera.CFrame = CFrame.lookAt(Vector3.new(maxSize * 1.15, maxSize * 0.7, maxSize * 2.5), Vector3.new(0, 0, 0))
 	camera.Parent = viewport
 	viewport.CurrentCamera = camera
 end
@@ -697,6 +695,14 @@ local function updateMarketRefreshText()
 	end
 
 	local itemState = getMarketState(itemId)
+	if itemState and itemState.IsRefreshPaused == true then
+		local pausedRemaining = itemState.PausedRemainingSeconds
+		if type(pausedRemaining) == "number" and pausedRemaining >= 0 then
+			label.Visible = true
+			label.Text = formatMarketRemaining(pausedRemaining)
+			return
+		end
+	end
 	local nextRefreshAt = itemState and itemState.NextRefreshAt
 	if type(nextRefreshAt) ~= "number" or nextRefreshAt <= 0 then
 		label.Visible = false
@@ -908,25 +914,71 @@ local function configureRow(row: Frame, itemId: string, definition: ItemConfig.I
 	rowByItem[itemId] = row
 end
 
-local function configureExpansion(expansion: Frame, itemId: string, definition: ItemConfig.ItemDefinition, order: number)
-	expansion.Name = "FarmShopExpansion_" .. itemId
-	expansion.LayoutOrder = order
-	expansion.Visible = true
-	removeRuntimeScripts(expansion)
+local function updateExpansionMarketVisuals(expansion: Frame, itemId: string, definition: ItemConfig.ItemDefinition)
 	local price = if selectedMode == "Seeds" then definition.SeedBuyPrice else getProduceMarketPrice(itemId, definition)
 	setLabelText(expansion:FindFirstChild("MarketTag", true), FarmShopConfig.MarketPrimaryTagText)
-	setLabelText(expansion:FindFirstChild("MarketTrend", true), FarmShopConfig.MarketSecondaryTagText)
 	setLabelText(
 		expansion:FindFirstChild("MarketPriceLabel", true),
 		if selectedMode == "Seeds" then FarmShopConfig.SeedPriceLabelText else FarmShopConfig.ProducePriceLabelText
 	)
 	local marketPriceValue = expansion:FindFirstChild("MarketPriceValue", true)
 	setLabelText(marketPriceValue, formatPriceNumber(price))
+	local itemState = getMarketState(itemId)
+	local modifierId = itemState and itemState.ActiveModifierId
+	local rainTag: GuiObject? = nil
+	local trendTag: GuiObject? = nil
+	local trendTextLabel: TextLabel? = nil
+	local marketPanel = expansion:FindFirstChild("MarketPanel")
+	if marketPanel and marketPanel:IsA("GuiObject") then
+		local scrollingFrame = marketPanel:FindFirstChild("ScrollingFrame")
+		if scrollingFrame and scrollingFrame:IsA("ScrollingFrame") then
+			local rainTagCandidate = scrollingFrame:FindFirstChild("RainTag")
+			if rainTagCandidate and rainTagCandidate:IsA("GuiObject") then
+				rainTag = rainTagCandidate
+			end
+
+			local trendTagCandidate = scrollingFrame:FindFirstChild("TrendTag")
+			if trendTagCandidate and trendTagCandidate:IsA("GuiObject") then
+				trendTag = trendTagCandidate
+				local marketTrendCandidate = trendTagCandidate:FindFirstChild("MarketTrend", true)
+				if marketTrendCandidate and marketTrendCandidate:IsA("TextLabel") then
+					trendTextLabel = marketTrendCandidate
+				else
+					local trendTextCandidate = trendTagCandidate:FindFirstChild("TextLabel", true)
+					if trendTextCandidate and trendTextCandidate:IsA("TextLabel") then
+						trendTextLabel = trendTextCandidate
+					elseif trendTagCandidate:IsA("TextLabel") then
+						trendTextLabel = trendTagCandidate
+					end
+				end
+			end
+		end
+	end
+	local hasRainRule = MarketConfig.GetWeatherModifier("Rain", "Strawberry") ~= nil
+	local showRainTag = itemId == "Strawberry"
+		and modifierId == "Rain"
+		and hasRainRule
+	setGuiObjectVisible(rainTag, showRainTag)
+	local priceHistory = getProducePriceHistory(itemId, price)
+	local trendPercent = getTrendPercent(priceHistory)
+	local trendArrow = if trendPercent > 0 then "↑" elseif trendPercent < 0 then "↓" else "-"
+	if trendTextLabel then
+		trendTextLabel.Text = string.format("%+.0f%% %s", trendPercent, trendArrow)
+	end
+	setGuiObjectVisible(trendTag, true)
 	local priceColor = MARKET_PRICE_UNCHANGED_COLOR
 	if selectedMode == "Sell" then
-		priceColor = getPriceTrendColor(getProducePriceHistory(itemId, price))
+		priceColor = getPriceTrendColor(priceHistory)
 	end
 	setTextColor(marketPriceValue, priceColor)
+end
+
+local function configureExpansion(expansion: Frame, itemId: string, definition: ItemConfig.ItemDefinition, order: number)
+	expansion.Name = "FarmShopExpansion_" .. itemId
+	expansion.LayoutOrder = order
+	expansion.Visible = true
+	removeRuntimeScripts(expansion)
+	updateExpansionMarketVisuals(expansion, itemId, definition)
 
 	local targetSize = expansion.Size
 	expansion.Size = UDim2.new(targetSize.X.Scale, targetSize.X.Offset, 0, 0)
@@ -999,6 +1051,57 @@ local function queueRefreshRows()
 	end)
 end
 
+-- 市场快照只原地更新现有展开栏和详情，避免改变列表实例、滚动位置或重播展开动画。
+local function refreshExistingMarketUi()
+	local list = leftList
+	local itemId = selectedItemId
+	local definition = itemId and ItemConfig.Get(itemId)
+	if list and itemId and definition then
+		local expansionCandidate = list:FindFirstChild("FarmShopExpansion_" .. itemId)
+		if expansionCandidate and expansionCandidate:IsA("Frame") and expansionCandidate.Parent == list then
+			updateExpansionMarketVisuals(expansionCandidate, itemId, definition)
+		end
+	end
+	updateDetail()
+end
+
+local function hasSameMarketHistory(left: { MarketHistoryPoint }?, right: { MarketHistoryPoint }?): boolean
+	if left == right then
+		return true
+	end
+	if not left or not right or #left ~= #right then
+		return false
+	end
+	for index, leftPoint in left do
+		local rightPoint = right[index]
+		if not rightPoint or leftPoint.Time ~= rightPoint.Time or leftPoint.Price ~= rightPoint.Price then
+			return false
+		end
+	end
+	return true
+end
+
+-- 完整行情广播只有在当前选中植物的可见价格状态变化时才需要重画详情。
+local function hasSameMarketVisualState(left: MarketItemState?, right: MarketItemState?): boolean
+	if left == right then
+		return true
+	end
+	if not left or not right then
+		return false
+	end
+	return left.ItemId == right.ItemId
+		and left.CurrentPrice == right.CurrentPrice
+		and left.BaseSellPrice == right.BaseSellPrice
+		and left.MinPrice == right.MinPrice
+		and left.MaxPrice == right.MaxPrice
+		and left.NextRefreshAt == right.NextRefreshAt
+		and left.RefreshInterval == right.RefreshInterval
+		and left.ActiveModifierId == right.ActiveModifierId
+		and left.IsRefreshPaused == right.IsRefreshPaused
+		and left.PausedRemainingSeconds == right.PausedRemainingSeconds
+		and hasSameMarketHistory(left.History, right.History)
+end
+
 local function applySeedState(state: SeedShopState)
 	if type(state) ~= "table" then
 		return
@@ -1027,6 +1130,8 @@ local function applyMarketState(snapshot: MarketSnapshot)
 	if type(snapshot) ~= "table" then
 		return
 	end
+	local itemId = selectedItemId
+	local previousSelectedState = if itemId then marketByItem[itemId] else nil
 	table.clear(marketByItem)
 	if type(snapshot.Items) == "table" then
 		for _, itemState in snapshot.Items do
@@ -1036,10 +1141,13 @@ local function applyMarketState(snapshot: MarketSnapshot)
 			end
 		end
 	end
-	if screenGui and screenGui.Enabled then
-		queueRefreshRows()
-	else
-		updateDetail()
+	local nextSelectedState = if itemId then marketByItem[itemId] else nil
+	if hasSameMarketVisualState(previousSelectedState, nextSelectedState) then
+		return
+	end
+	local gui = screenGui
+	if gui and gui.Enabled then
+		refreshExistingMarketUi()
 	end
 end
 

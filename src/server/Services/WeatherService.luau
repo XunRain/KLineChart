@@ -25,6 +25,7 @@ type WeatherDefinition = {
 
 local WeatherService = {}
 local RemoteService: any = nil
+local MarketService: any = nil
 local initialized = false
 local activeWeatherId: string? = nil
 local startedAt = 0
@@ -67,33 +68,52 @@ local function setActiveWeather(weatherId: string?)
 		activeWeatherId = nil
 		startedAt = timeNow
 		endsAt = 0
+		if MarketService then
+			MarketService.SetActiveWeather(nil)
+		end
 		broadcastSnapshot()
 		return
 	end
 
-	activeWeatherId = definition.WeatherId
-	startedAt = timeNow
+	local resolvedWeatherId = definition.WeatherId
+	local isSameWeather = activeWeatherId == resolvedWeatherId
+	activeWeatherId = resolvedWeatherId
+	if not isSameWeather then
+		startedAt = timeNow
+	end
 	endsAt = timeNow + math.max(1, math.floor(definition.Duration))
+	if MarketService then
+		MarketService.SetActiveWeather(resolvedWeatherId)
+	end
 	broadcastSnapshot()
 end
 
 local function startScheduler()
 	task.spawn(function()
 		while initialized do
-			setActiveWeather(nil)
-			task.wait(getClearGap())
-			if not initialized then
-				break
-			end
-
-			local weatherId = WeatherConfig.DefaultWeatherId
-			local definition = WeatherConfig.GetWeather(weatherId)
-			if definition then
-				setActiveWeather(weatherId)
-				task.wait(math.max(1, math.floor(definition.Duration)))
+			local scheduledWeatherId = activeWeatherId
+			if scheduledWeatherId then
+				while initialized and activeWeatherId == scheduledWeatherId do
+					local remaining = endsAt - getServerTime()
+					if remaining <= 0 then
+						break
+					end
+					task.wait(math.min(1, remaining))
+				end
+				if initialized and activeWeatherId == scheduledWeatherId and endsAt <= getServerTime() then
+					setActiveWeather(nil)
+				end
 			else
-				warn(string.format("[WeatherService] 未找到默认天气配置：%s", tostring(weatherId)))
-				task.wait(5)
+				task.wait(getClearGap())
+				if initialized and activeWeatherId == nil then
+					local weatherId = WeatherConfig.DefaultWeatherId
+					if WeatherConfig.GetWeather(weatherId) then
+						setActiveWeather(weatherId)
+					else
+						warn(string.format("[WeatherService] 未找到默认天气配置：%s", tostring(weatherId)))
+						task.wait(5)
+					end
+				end
 			end
 		end
 	end)
@@ -102,10 +122,6 @@ end
 -- 返回当前服务器天气快照；调用方只能读取，不能修改内部状态。
 function WeatherService.GetSnapshot(): WeatherSnapshot
 	local timeNow = getServerTime()
-	if activeWeatherId and endsAt <= timeNow then
-		activeWeatherId = nil
-		endsAt = 0
-	end
 
 	local weathers = {}
 	for weatherId, definition in WeatherConfig.Weathers do
@@ -136,12 +152,13 @@ function WeatherService.ClearWeather()
 end
 
 -- 初始化天气 Remote、玩家补发快照和自动排程；天气状态不保存、不跨服同步。
-function WeatherService.Init(dependencies: { RemoteService: any })
+function WeatherService.Init(dependencies: { RemoteService: any, MarketService: any })
 	if initialized then
 		return
 	end
 	initialized = true
 	RemoteService = dependencies.RemoteService
+	MarketService = dependencies.MarketService
 
 	RemoteService.GetEvent("RequestWeatherState").OnServerEvent:Connect(function(player)
 		if player.Parent == Players then

@@ -21,7 +21,6 @@ local barGradient: UIGradient? = nil
 local timerLabel: TextLabel? = nil
 local vectorIcon: ImageLabel? = nil
 local updateConnection: RBXScriptConnection? = nil
-local warnMissingUi = false
 local elapsedSinceUpdate = 0
 
 local UPDATE_INTERVAL = 1
@@ -72,10 +71,6 @@ local function bindUi()
 	local gradient = if bar then bar:FindFirstChildOfClass("UIGradient") else nil
 
 	if not bar or not bar:IsA("ImageLabel") or not label or not label:IsA("TextLabel") then
-		if not warnMissingUi then
-			warn("[TimeCycleBarController] 缺少 PlayerGui.TeleportButtons.TimeCycleBar.MainFrame.Bar/TextLabel，昼夜进度条已安全禁用。")
-			warnMissingUi = true
-		end
 		barFrame = nil
 		timerLabel = nil
 		barGradient = nil

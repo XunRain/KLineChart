@@ -11,8 +11,15 @@ export type TestAction = {
 	DisplayText: string,
 	-- 一级菜单分类；客户端只用于折叠展示，服务端仍只按 ActionId 与 Kind 执行动作。
 	Category: "Seeds" | "Currency" | "Weather",
-	-- 测试动作类型；GrantSeed 发种子，GrantCurrency 发 Sheckles，StartWeather/ClearWeather 控制天气，ForceTimePhase/ResumeTimeCycle 控制昼夜。
-	Kind: "GrantSeed" | "GrantCurrency" | "StartWeather" | "ClearWeather" | "ForceTimePhase" | "ResumeTimeCycle",
+	-- 测试动作类型；GrantSeed 发种子，GrantCurrency/ClearCurrency 调整 Sheckles，StartWeather/ClearWeather 控制天气，ForceTimePhase/ResumeTimeCycle 控制昼夜。
+	Kind:
+		"GrantSeed"
+		| "GrantCurrency"
+		| "ClearCurrency"
+		| "StartWeather"
+		| "ClearWeather"
+		| "ForceTimePhase"
+		| "ResumeTimeCycle",
 	-- GrantSeed 写入 Inventory.Seeds 的稳定植物标识；必须存在于 ItemConfig，客户端不得提交或覆盖。
 	SeedId: string?,
 	-- GrantSeed 单次服务端权威增加的种子整数数量；必须处于 1 到 MaximumSeedGrantAmount。
@@ -124,6 +131,13 @@ TestMenuConfig.Actions = {
 		Kind = "GrantCurrency",
 		CurrencyAmount = 1_000_000_000,
 		SortOrder = 60,
+	},
+	{
+		ActionId = "ClearSheckles",
+		DisplayText = "清空金币",
+		Category = "Currency",
+		Kind = "ClearCurrency",
+		SortOrder = 65,
 	},
 	{
 		ActionId = "StartRainWeather",

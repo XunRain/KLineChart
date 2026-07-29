@@ -29,6 +29,7 @@ MarketService.Init({
 })
 WeatherService.Init({
 	RemoteService = RemoteService,
+	MarketService = MarketService,
 })
 TimeCycleService.Init()
 PlotService.Init()

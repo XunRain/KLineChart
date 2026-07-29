@@ -11,6 +11,7 @@ local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
+local ViewportPreviewCamera = require(script.Parent.Parent.Components.ViewportPreviewCamera)
 
 local BackpackController = {}
 BackpackController.StateChanged = Instance.new("BindableEvent")
@@ -32,7 +33,6 @@ local HOTBAR_SLOTS_MINI = 5
 local SLOT_SIZE = 60
 local SLOT_GAP = 5
 local HOTBAR_SELECTED_SCALE = 1.16
-local VIEWPORT_MODEL_SCALE = 1.5
 local INVENTORY_ROWS_FULL = 4
 local INVENTORY_ROWS_MINI = 2
 local INVENTORY_HEADER_SIZE = 40
@@ -492,25 +492,25 @@ local function renderToolModel(viewport: ViewportFrame, tool: Tool?)
 	end
 	stripScripts(clone)
 	prepareViewportInstance(clone)
-	clone.Parent = viewport
 
-	local center = Vector3.new()
-	local size = Vector3.new(2, 2, 2)
-	if clone:IsA("Model") then
-		clone:PivotTo(CFrame.new())
-		local boundingCFrame, boundingSize = clone:GetBoundingBox()
-		center = boundingCFrame.Position
-		size = boundingSize
-	elseif clone:IsA("BasePart") then
-		clone.CFrame = CFrame.new()
-		center = clone.Position
-		size = clone.Size
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Name = "PreviewWorld"
+	worldModel.Parent = viewport
+
+	local previewRoot = ViewportPreviewCamera.MountPreviewRoot(clone, worldModel)
+	if not previewRoot then
+		return
 	end
+	previewRoot:PivotTo(CFrame.new())
+	local boundsCFrame, boundsSize = ViewportPreviewCamera.GetVisibleBounds(previewRoot)
+	previewRoot:PivotTo(CFrame.new(-boundsCFrame.Position))
 
-	local maxSize = math.max(size.X, size.Y, size.Z, 1)
-	local camera = Instance.new("Camera")
-	local distance = maxSize * 2.4 / VIEWPORT_MODEL_SCALE
-	camera.CFrame = CFrame.new(center + Vector3.new(distance * 0.25, distance * 0.25, distance), center)
+	local itemType = tool:GetAttribute("KLineItemType")
+	local previewPadding = if itemType == "Utility" then 1.05 else 1.22
+	local camera = ViewportPreviewCamera.CreateForBounds(viewport, boundsSize, Vector3.new(0, 0, 0), {
+		FieldOfView = 35,
+		Padding = previewPadding,
+	})
 	camera.Parent = viewport
 	viewport.CurrentCamera = camera
 end

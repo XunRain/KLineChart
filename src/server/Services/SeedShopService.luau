@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块维护种子商店个人库存刷新，并在权威数据事务中扣款、扣库存和增加种子。
+-- 本模块维护种子商店个人库存刷新，并在玩家靠近任一商店 NPC 时权威处理种子购买。
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,6 +9,7 @@ local Workspace = game:GetService("Workspace")
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
+local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
 local NpcPromptService = require(script.Parent.NpcPromptService)
 
 local SeedShopService = {}
@@ -27,10 +28,18 @@ local function getBasePart(parent: Instance?, name: string): BasePart?
 	return if child and child:IsA("BasePart") then child else nil
 end
 
-local function getShopRoot(): BasePart?
+local function getNpcRoot(modelName: string, rootName: string): BasePart?
 	local npcs = Workspace:FindFirstChild(SeedShopConfig.NpcFolderName)
-	local sam = npcs and npcs:FindFirstChild(SeedShopConfig.NpcModelName)
-	return getBasePart(sam, SeedShopConfig.NpcRootName)
+	local npc = npcs and npcs:FindFirstChild(modelName)
+	return getBasePart(npc, rootName)
+end
+
+local function getSeedShopRoot(): BasePart?
+	return getNpcRoot(SeedShopConfig.NpcModelName, SeedShopConfig.NpcRootName)
+end
+
+local function getSellShopRoot(): BasePart?
+	return getNpcRoot(SellShopConfig.NpcModelName, SellShopConfig.NpcRootName)
 end
 
 local function isSafePositiveInteger(value: any, maximum: number): boolean
@@ -173,11 +182,17 @@ local function forceFreshStock()
 end
 
 local function isPlayerNearShop(player: Player): boolean
-	local shopRoot = getShopRoot()
 	local characterRoot = getBasePart(player.Character, "HumanoidRootPart")
-	return shopRoot ~= nil
-		and characterRoot ~= nil
-		and (shopRoot.Position - characterRoot.Position).Magnitude <= SeedShopConfig.MaximumInteractionDistance
+	if not characterRoot then
+		return false
+	end
+	local seedRoot = getSeedShopRoot()
+	if seedRoot and (seedRoot.Position - characterRoot.Position).Magnitude <= SeedShopConfig.MaximumInteractionDistance then
+		return true
+	end
+	local sellRoot = getSellShopRoot()
+	return sellRoot ~= nil
+		and (sellRoot.Position - characterRoot.Position).Magnitude <= SellShopConfig.MaximumInteractionDistance
 end
 
 local function handleRequest(player: Player, payload: any)
@@ -212,7 +227,7 @@ local function handleRequest(player: Player, payload: any)
 	end
 	amount = math.floor(amount)
 	if not isPlayerNearShop(player) then
-		RemoteService.Notify(player, "Please stand closer to Sam.", "Warning")
+		RemoteService.Notify(player, "Please stand closer to a shop.", "Warning")
 		return
 	end
 	local stock = getPlayerStock(player)
@@ -279,7 +294,7 @@ local function handleManualRestock(player: Player)
 		return
 	end
 	if not isPlayerNearShop(player) then
-		RemoteService.Notify(player, "Please stand closer to Sam.", "Warning")
+		RemoteService.Notify(player, "Please stand closer to a shop.", "Warning")
 		return
 	end
 
@@ -340,8 +355,8 @@ function SeedShopService.Init(dependencies: {
 		SeedShopConfig.MaximumInteractionDistance
 	)
 
-	if not getShopRoot() then
-		warn("[SeedShopService] 缺少 Workspace.NPCS.Sam.HumanoidRootPart，购买将安全拒绝")
+	if not getSeedShopRoot() and not getSellShopRoot() then
+		warn("[SeedShopService] 缺少 Workspace.NPCS 下任一商店 NPC 根节点，购买将安全拒绝")
 	end
 	nextRefreshTime = 0
 	ensureFreshStock()

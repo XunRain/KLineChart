@@ -46,6 +46,19 @@ type ResolvedGuideValues = {
 	Max: number,
 }
 
+type ResolvedDrawingRange = {
+	Min: number,
+	Max: number,
+}
+
+type RenderSignature = {
+	Data: { number },
+	GuideValues: ResolvedGuideValues,
+	Size: Vector2,
+	ZIndex: number,
+	Theme: ResolvedTheme,
+}
+
 local PriceCurveGraph = {}
 
 local DEFAULT_THEME: ResolvedTheme = {
@@ -66,6 +79,8 @@ local DEFAULT_THEME: ResolvedTheme = {
 local SERIES_NAME = "Market Price"
 local PLOTTR_COMMIT = "4a48b93c12f2ed5e4c080a541cae2ea55701d76f"
 local PLOTTR_MIN_CANVAS_SIZE = 2
+local DRAWING_RANGE_PADDING_RATIO = 0.08
+local DRAWING_RANGE_MIN_PADDING = 1
 
 -- Plottr 是第三方库，当前项目没有它的 Luau 类型声明；any 只隔离在适配层内。
 type PlottrState = {
@@ -73,6 +88,8 @@ type PlottrState = {
 }
 
 local plottrByContainer: any = setmetatable({}, { __mode = "k" })
+local renderSignatureByContainer: { [Frame]: RenderSignature } = {}
+setmetatable(renderSignatureByContainer, { __mode = "k" })
 local plottrModule: any? = nil
 local plottrLoadFailed = false
 local plottrWarningShown = false
@@ -380,6 +397,85 @@ local function resolveGuideValues(data: { number }, guideValues: GuideValues?): 
 	}
 end
 
+local function hasSameTheme(left: ResolvedTheme, right: ResolvedTheme): boolean
+	return left.BackgroundTransparency == right.BackgroundTransparency
+		and left.GridColor == right.GridColor
+		and left.GridTransparency == right.GridTransparency
+		and left.LineColor == right.LineColor
+		and left.RisingLineColor == right.RisingLineColor
+		and left.FallingLineColor == right.FallingLineColor
+		and left.DotColor == right.DotColor
+		and left.DotStrokeColor == right.DotStrokeColor
+		and left.LineThickness == right.LineThickness
+		and left.GlowThickness == right.GlowThickness
+		and left.DotSizeScale == right.DotSizeScale
+		and left.UsePlottr == right.UsePlottr
+end
+
+local function hasSameRenderSignature(left: RenderSignature, right: RenderSignature): boolean
+	if left.Size ~= right.Size
+		or left.ZIndex ~= right.ZIndex
+		or left.GuideValues.Min ~= right.GuideValues.Min
+		or left.GuideValues.Base ~= right.GuideValues.Base
+		or left.GuideValues.Max ~= right.GuideValues.Max
+		or not hasSameTheme(left.Theme, right.Theme)
+		or #left.Data ~= #right.Data
+	then
+		return false
+	end
+	for index, value in left.Data do
+		if value ~= right.Data[index] then
+			return false
+		end
+	end
+	return true
+end
+
+local function buildRenderSignature(container: Frame, data: { number }, chartTheme: ResolvedTheme, guideValues: GuideValues?): RenderSignature
+	return {
+		Data = table.clone(data),
+		GuideValues = resolveGuideValues(data, guideValues),
+		Size = container.AbsoluteSize,
+		ZIndex = container.ZIndex,
+		Theme = chartTheme,
+	}
+end
+
+local function hasRenderedGraph(container: Frame): boolean
+	local state = plottrByContainer[container] :: PlottrState?
+	local canvas = container:FindFirstChild("PlottrCanvas")
+	if state and canvas and canvas:IsA("GuiObject") then
+		return true
+	end
+	local fallbackDot = container:FindFirstChild("PriceCurveDot")
+	return fallbackDot ~= nil and fallbackDot:IsA("GuiObject") and fallbackDot:GetAttribute("PriceCurveRuntime") == true
+end
+
+-- 绘制轴仅在真实价格突破参考区间时扩张，保留真实数据与固定 Guide 文案。
+local function resolveDrawingRange(data: { number }, guideValues: GuideValues?): ResolvedDrawingRange
+	local guideRange = resolveGuideValues(data, guideValues)
+	local dataMin, dataMax = getRange(data)
+	local minValue = math.min(guideRange.Min, dataMin)
+	local maxValue = math.max(guideRange.Max, dataMax)
+	local effectiveSpan = math.max(maxValue - minValue, DRAWING_RANGE_MIN_PADDING)
+	local padding = math.max(effectiveSpan * DRAWING_RANGE_PADDING_RATIO, DRAWING_RANGE_MIN_PADDING)
+
+	if dataMin < guideRange.Min then
+		minValue = math.max(0, minValue - padding)
+	end
+	if dataMax > guideRange.Max then
+		maxValue += padding
+	end
+	if maxValue <= minValue then
+		maxValue = minValue + DRAWING_RANGE_MIN_PADDING
+	end
+
+	return {
+		Min = minValue,
+		Max = maxValue,
+	}
+end
+
 local function getTrendColor(previousValue: number, currentValue: number, chartTheme: ResolvedTheme): Color3
 	if currentValue > previousValue then
 		return chartTheme.RisingLineColor
@@ -469,12 +565,7 @@ local function renderWithPlottr(container: Frame, data: { number }, chartTheme: 
 		container.BackgroundTransparency = chartTheme.BackgroundTransparency
 		container.ClipsDescendants = true
 
-		local guideRange = resolveGuideValues(data, guideValues)
-		local minValue = guideRange.Min
-		local maxValue = guideRange.Max
-		if maxValue <= minValue then
-			maxValue = minValue + 1
-		end
+		local drawingRange = resolveDrawingRange(data, guideValues)
 
 		local config = {
 			theme = buildPlottrTheme(chartTheme),
@@ -492,8 +583,8 @@ local function renderWithPlottr(container: Frame, data: { number }, chartTheme: 
 			yTickCount = 3,
 			maxXTickCount = 1,
 			baselineZero = false,
-			yMin = minValue,
-			yMax = maxValue,
+			yMin = drawingRange.Min,
+			yMax = drawingRange.Max,
 			lineThickness = chartTheme.LineThickness,
 			pointRadius = 2,
 			showPoints = true,
@@ -534,6 +625,7 @@ local function renderWithPlottr(container: Frame, data: { number }, chartTheme: 
 		if canvas and canvas:IsA("GuiObject") then
 			canvas.ZIndex = container.ZIndex + 1
 			canvas.BackgroundTransparency = chartTheme.BackgroundTransparency
+			canvas.ClipsDescendants = true
 		end
 		graph:setSeries({ series })
 
@@ -542,6 +634,7 @@ local function renderWithPlottr(container: Frame, data: { number }, chartTheme: 
 		if canvas and canvas:IsA("GuiObject") then
 			canvas.ZIndex = container.ZIndex + 1
 			canvas.BackgroundTransparency = chartTheme.BackgroundTransparency
+			canvas.ClipsDescendants = true
 		end
 		renderGuides(container, data, chartTheme, guideValues)
 	end)
@@ -561,18 +654,13 @@ local function renderFallback(container: Frame, data: { number }, chartTheme: Re
 
 	local width = math.max(1, container.AbsoluteSize.X)
 	local height = math.max(1, container.AbsoluteSize.Y)
-	local guideRange = resolveGuideValues(data, guideValues)
-	local minValue = guideRange.Min
-	local maxValue = guideRange.Max
+	local drawingRange = resolveDrawingRange(data, guideValues)
 	renderGuides(container, data, chartTheme, guideValues)
-	if maxValue <= minValue then
-		maxValue = minValue + 1
-	end
 
 	local points = {}
 	for index, value in data do
 		local x = ((index - 1) / math.max(1, #data - 1)) * width
-		local alpha = (value - minValue) / (maxValue - minValue)
+		local alpha = (value - drawingRange.Min) / (drawingRange.Max - drawingRange.Min)
 		local y = height - (alpha * height)
 		table.insert(points, Vector2.new(x, math.clamp(y, 0, height)))
 	end
@@ -614,10 +702,17 @@ function PriceCurveGraph.Render(container: Frame?, values: { number }, theme: Th
 
 	local chartTheme = normalizeTheme(theme)
 	local data = sanitizeData(values)
+	local renderSignature = buildRenderSignature(container, data, chartTheme, guideValues)
+	local previousSignature = renderSignatureByContainer[container]
+	if previousSignature and hasSameRenderSignature(previousSignature, renderSignature) and hasRenderedGraph(container) then
+		return
+	end
 	if chartTheme.UsePlottr and renderWithPlottr(container, data, chartTheme, guideValues) then
+		renderSignatureByContainer[container] = renderSignature
 		return
 	end
 	renderFallback(container, data, chartTheme, guideValues)
+	renderSignatureByContainer[container] = renderSignature
 end
 
 return PriceCurveGraph

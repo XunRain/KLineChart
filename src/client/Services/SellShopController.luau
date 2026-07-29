@@ -362,7 +362,7 @@ local function describeSellFailure(result: any?): string
 	elseif reason == "NoHeldProduce" then
 		return "You aren't holding anything!"
 	elseif reason == "NotNear" then
-		return "Please stand closer to Steven."
+		return "Please stand closer to a shop."
 	elseif reason == "Cooldown" then
 		return "Slow down! Ask me again in a moment."
 	elseif typeof(result.Message) == "string" and result.Message ~= "" then

@@ -11,6 +11,7 @@ local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
 local NpcPromptVisualController = require(script.Parent.NpcPromptVisualController)
+local ViewportPreviewCamera = require(script.Parent.Parent.Components.ViewportPreviewCamera)
 
 type ShopItem = {
 	ItemId: string,
@@ -237,46 +238,20 @@ local function renderSeedPreview(viewport: ViewportFrame, itemId: string)
 	removeRuntimeScripts(visual)
 	anchorPreviewParts(visual)
 
-	local previewRoot: Instance = visual
-	if visual:IsA("BasePart") then
-		local model = Instance.new("Model")
-		visual.Parent = model
-		model.Parent = worldModel
-		previewRoot = model
-	else
-		visual.Parent = worldModel
-	end
-
-	if previewRoot:IsA("Model") then
-		previewRoot:PivotTo(CFrame.new())
-	elseif previewRoot:IsA("BasePart") then
-		previewRoot.CFrame = CFrame.new()
-	end
-
-	local boundsCFrame: CFrame
-	local boundsSize: Vector3
-	if previewRoot:IsA("Model") then
-		boundsCFrame, boundsSize = previewRoot:GetBoundingBox()
-	elseif previewRoot:IsA("BasePart") then
-		boundsCFrame = previewRoot.CFrame
-		boundsSize = previewRoot.Size
-	else
+	local previewRoot = ViewportPreviewCamera.MountPreviewRoot(visual, worldModel)
+	if not previewRoot then
 		return
 	end
+	previewRoot:PivotTo(CFrame.new())
+	local boundsCFrame, boundsSize = ViewportPreviewCamera.GetVisibleBounds(previewRoot)
+	previewRoot:PivotTo(CFrame.new(-boundsCFrame.Position))
 
-	local maxSize = math.max(boundsSize.X, boundsSize.Y, boundsSize.Z, 0.25)
-	if previewRoot:IsA("Model") then
-		previewRoot:PivotTo(CFrame.new(-boundsCFrame.Position))
-	elseif previewRoot:IsA("BasePart") then
-		previewRoot.CFrame = CFrame.new()
-	end
-	local camera = Instance.new("Camera")
+	local camera = ViewportPreviewCamera.CreateForBounds(viewport, boundsSize, Vector3.new(0, 0, 0), {
+		Direction = Vector3.new(1.2, 0.65, 2.4),
+		FieldOfView = 35,
+		Padding = 1.22,
+	})
 	camera.Name = "KLineSeedPreviewCamera_" .. itemId
-	camera.FieldOfView = 35
-	camera.CFrame = CFrame.lookAt(
-		Vector3.new(maxSize * 1.2, maxSize * 0.65, maxSize * 2.4),
-		Vector3.new(0, 0, 0)
-	)
 	camera.Parent = viewport
 	viewport.CurrentCamera = camera
 	debugSeedPreview(string.format(
@@ -286,7 +261,7 @@ local function renderSeedPreview(viewport: ViewportFrame, itemId: string)
 		boundsSize.X,
 		boundsSize.Y,
 		boundsSize.Z,
-		maxSize * 2.4
+		(camera.CFrame.Position - Vector3.new(0, 0, 0)).Magnitude
 	))
 end
 

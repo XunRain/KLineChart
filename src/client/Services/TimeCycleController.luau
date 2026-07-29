@@ -29,7 +29,7 @@ local nightAtmosphere: Atmosphere? = nil
 local nightAtmosphereTween: Tween? = nil
 local warnMissingNightAsset = false
 local warnMissingNightAtmosphere = false
-local warnMissingNightUi = false
+local warnMissingNightTimeLabel = false
 local elapsedSinceLightingUpdate = 0
 local lastNightDebugAt = 0
 
@@ -717,10 +717,6 @@ local function bindNightUi()
 	local frame = if weatherGui then weatherGui:FindFirstChild("Frame") else nil
 	local card = if frame then frame:FindFirstChild("Night") else nil
 	if not card or not card:IsA("GuiObject") then
-		if not warnMissingNightUi then
-			warn("[TimeCycleController] 缺少 PlayerGui.WeatherUI.Frame.Night，夜晚卡片倒计时已跳过。")
-			warnMissingNightUi = true
-		end
 		nightCard = nil
 		nightTimeLabel = nil
 		return
@@ -732,7 +728,10 @@ local function bindNightUi()
 	if timeLabel and timeLabel:IsA("TextLabel") then
 		nightTimeLabel = timeLabel
 	else
-		warn("[TimeCycleController] WeatherUI.Frame.Night 缺少 Time TextLabel，夜晚倒计时不会显示。")
+		if not warnMissingNightTimeLabel then
+			warn("[TimeCycleController] WeatherUI.Frame.Night 缺少 Time TextLabel，夜晚倒计时不会显示。")
+			warnMissingNightTimeLabel = true
+		end
 		nightTimeLabel = nil
 	end
 	applyPhase(false)

@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local MarketConfig = require(ReplicatedStorage.Shared.MarketConfig)
 
@@ -20,6 +21,9 @@ type MarketItemState = {
 	MaxPrice: number,
 	NextRefreshAt: number,
 	RefreshInterval: number,
+	ActiveModifierId: string?,
+	IsRefreshPaused: boolean,
+	PausedRemainingSeconds: number,
 	History: { MarketHistoryPoint },
 }
 
@@ -27,6 +31,8 @@ local MarketService = {}
 local RemoteService: any
 local random = Random.new(os.time())
 local stateByItem: { [string]: MarketItemState } = {}
+local activeWeatherId: string? = nil
+local initialized = false
 
 local function roundNumber(value: number): number
 	return math.floor(value + 0.5)
@@ -49,6 +55,17 @@ end
 
 local function getInitialPrice(definition: ItemConfig.ItemDefinition, minPrice: number, maxPrice: number): number
 	return math.clamp(roundNumber(definition.BaseSellPrice), minPrice, maxPrice)
+end
+
+local function getForcedPrice(definition: ItemConfig.ItemDefinition, configuredMultiplier: number): number
+	local maximumPrice = math.max(1, math.floor(finiteNumber(EconomyConfig.MaximumSheckles, 1)))
+	local basePrice = math.max(1, finiteNumber(definition.BaseSellPrice, 1))
+	local multiplier = finiteNumber(configuredMultiplier, 1)
+	if multiplier <= 0 then
+		multiplier = 1
+	end
+	local boundedMultiplier = math.min(multiplier, maximumPrice / basePrice)
+	return math.clamp(roundNumber(basePrice * boundedMultiplier), 1, maximumPrice)
 end
 
 local function generatePrice(definition: ItemConfig.ItemDefinition, minPrice: number, maxPrice: number, multiplierMin: number, multiplierMax: number): number
@@ -102,6 +119,9 @@ local function buildItemState(itemId: string, definition: ItemConfig.ItemDefinit
 		MaxPrice = maxPrice,
 		NextRefreshAt = timeNow + interval,
 		RefreshInterval = interval,
+		ActiveModifierId = nil,
+		IsRefreshPaused = false,
+		PausedRemainingSeconds = 0,
 		History = history,
 	}
 end
@@ -113,30 +133,85 @@ local function broadcastSnapshot()
 	RemoteService.GetEvent("MarketStateChanged"):FireAllClients(MarketService.GetSnapshot())
 end
 
-local function refreshItem(itemId: string)
+local function refreshItem(itemId: string, timeNow: number): boolean
 	local itemState = stateByItem[itemId]
 	local definition = ItemConfig.Get(itemId)
-	if not itemState or not definition then
-		return
+	if not itemState or not definition or itemState.IsRefreshPaused then
+		return false
 	end
 	local rule = MarketConfig.GetRule(itemId)
-	local timeNow = os.time()
 	local price = generatePrice(definition, itemState.MinPrice, itemState.MaxPrice, rule.MultiplierMin, rule.MultiplierMax)
 	itemState.CurrentPrice = price
 	itemState.NextRefreshAt = timeNow + itemState.RefreshInterval
 	pushHistory(itemState, price, timeNow)
-	broadcastSnapshot()
+	return true
 end
 
-local function startItemLoop(itemId: string)
+local function startRefreshLoop()
 	task.spawn(function()
-		while stateByItem[itemId] do
-			local itemState = stateByItem[itemId]
-			local waitSeconds = math.max(0.25, itemState.NextRefreshAt - os.time())
-			task.wait(waitSeconds)
-			refreshItem(itemId)
+		while initialized do
+			local timeNow = os.time()
+			local didRefresh = false
+			for itemId, itemState in stateByItem do
+				if not itemState.IsRefreshPaused and timeNow >= itemState.NextRefreshAt then
+					didRefresh = refreshItem(itemId, timeNow) or didRefresh
+				end
+			end
+			if didRefresh then
+				broadcastSnapshot()
+			end
+			task.wait(0.25)
 		end
 	end)
+end
+
+-- 切换服务端权威天气行情；相同天气重复设置只延长天气本身，不重复改价或写入历史。
+function MarketService.SetActiveWeather(weatherId: string?)
+	if activeWeatherId == weatherId then
+		return
+	end
+
+	local previousWeatherId = activeWeatherId
+	local timeNow = os.time()
+	local didChange = false
+	if previousWeatherId then
+		for itemId, itemState in stateByItem do
+			local modifier = MarketConfig.GetWeatherModifier(previousWeatherId, itemId)
+			if modifier and itemState.ActiveModifierId == previousWeatherId then
+				itemState.ActiveModifierId = nil
+				itemState.IsRefreshPaused = false
+				itemState.PausedRemainingSeconds = 0
+				if modifier.RefreshOnEnd then
+					refreshItem(itemId, timeNow)
+				else
+					itemState.NextRefreshAt = timeNow + itemState.RefreshInterval
+				end
+				didChange = true
+			end
+		end
+	end
+
+	activeWeatherId = weatherId
+	if weatherId then
+		for itemId, itemState in stateByItem do
+			local modifier = MarketConfig.GetWeatherModifier(weatherId, itemId)
+			local definition = ItemConfig.Get(itemId)
+			if modifier and definition then
+				itemState.ActiveModifierId = weatherId
+				itemState.IsRefreshPaused = modifier.PauseRefresh
+				itemState.PausedRemainingSeconds = if modifier.PauseRefresh
+					then math.max(0, itemState.NextRefreshAt - timeNow)
+					else 0
+				itemState.CurrentPrice = getForcedPrice(definition, modifier.PriceMultiplier)
+				pushHistory(itemState, itemState.CurrentPrice, timeNow)
+				didChange = true
+			end
+		end
+	end
+
+	if didChange then
+		broadcastSnapshot()
+	end
 end
 
 -- 返回指定品种当前服务器权威售价，未纳入市场时回退到基础售价。
@@ -163,6 +238,9 @@ function MarketService.GetSnapshot(): { [string]: any }
 				MaxPrice = itemState.MaxPrice,
 				NextRefreshAt = itemState.NextRefreshAt,
 				RefreshInterval = itemState.RefreshInterval,
+				ActiveModifierId = itemState.ActiveModifierId,
+				IsRefreshPaused = itemState.IsRefreshPaused,
+				PausedRemainingSeconds = itemState.PausedRemainingSeconds,
 				History = cloneHistory(itemState.History),
 			})
 		end
@@ -174,8 +252,12 @@ function MarketService.GetSnapshot(): { [string]: any }
 	}
 end
 
--- 初始化服务器市场状态、客户端请求 Remote 和每个品种的独立刷新循环。
+-- 初始化服务器市场状态、客户端请求 Remote 和统一刷新循环。
 function MarketService.Init(dependencies: { RemoteService: any })
+	if initialized then
+		return
+	end
+	initialized = true
 	RemoteService = dependencies.RemoteService
 	local timeNow = os.time()
 	for itemId, definition in ItemConfig.Items do
@@ -186,9 +268,7 @@ function MarketService.Init(dependencies: { RemoteService: any })
 			RemoteService.GetEvent("MarketStateChanged"):FireClient(player, MarketService.GetSnapshot())
 		end
 	end)
-	for itemId in stateByItem do
-		startItemLoop(itemId)
-	end
+	startRefreshLoop()
 end
 
 return MarketService

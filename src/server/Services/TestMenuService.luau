@@ -33,6 +33,8 @@ local function isSafeAction(action: TestMenuConfig.TestAction): boolean
 			and amount == math.floor(amount)
 			and amount > 0
 			and amount <= TestMenuConfig.MaximumCurrencyGrantAmount
+	elseif action.Kind == "ClearCurrency" then
+		return true
 	elseif action.Kind == "StartWeather" then
 		return type(action.WeatherId) == "string" and WeatherService ~= nil
 	elseif action.Kind == "ClearWeather" then
@@ -72,6 +74,13 @@ local function grantCurrency(player: Player, action: TestMenuConfig.TestAction):
 			return false, "CurrencyLimit"
 		end
 		data.Sheckles = current + amount
+		return true, ""
+	end)
+end
+
+local function clearCurrency(player: Player): (boolean, string?)
+	return PlayerDataService.Update(player, function(data)
+		data.Sheckles = 0
 		return true, ""
 	end)
 end
@@ -150,6 +159,8 @@ local function handleRequest(player: Player, actionId: any)
 	local reason: string?
 	if action.Kind == "GrantCurrency" then
 		changed, reason = grantCurrency(player, action)
+	elseif action.Kind == "ClearCurrency" then
+		changed, reason = clearCurrency(player)
 	else
 		changed, reason = grantSeed(player, action)
 	end
@@ -160,7 +171,11 @@ local function handleRequest(player: Player, actionId: any)
 
 	PlayerDataService.RequestSave(player)
 	InventoryService.Sync(player)
-	RemoteService.Notify(player, string.format("已发放%s。", action.DisplayText), "Success")
+	if action.Kind == "ClearCurrency" then
+		RemoteService.Notify(player, "已清空金币。", "Success")
+	else
+		RemoteService.Notify(player, string.format("已发放%s。", action.DisplayText), "Success")
+	end
 end
 
 -- 注入权威数据、库存、天气与 Remote 服务，并注册测试动作请求及离开清理。

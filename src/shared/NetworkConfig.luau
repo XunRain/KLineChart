@@ -28,7 +28,7 @@ return {
 		SellProduceResult = "SellProduceResult",
 		-- 客户端到服务端：无参数请求当前服务器共享市场快照；服务端只返回权威展示数据，不接受客户端提交价格或历史。
 		RequestMarketState = "RequestMarketState",
-		-- 服务端到客户端：参数为当前服务器共享市场快照，包含每个产物当前价、基础价、下次刷新时间和最近价格历史。
+		-- 服务端到客户端：参数为当前服务器共享市场快照，包含每个产物当前价、基础价、下次刷新时间、天气修正标识、暂停状态、冻结剩余秒数和最近价格历史。
 		MarketStateChanged = "MarketStateChanged",
 		-- 客户端到服务端：无参数请求当前服务器共享天气快照；服务端只返回当前天气、开始时间和结束时间。
 		RequestWeatherState = "RequestWeatherState",

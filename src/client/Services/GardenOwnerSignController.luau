@@ -11,7 +11,6 @@ local initialized = false
 local localPlayer = Players.LocalPlayer
 local watchedPlots: { [Model]: { RBXScriptConnection } } = {}
 local billboardByPlot: { [Model]: BillboardGui } = {}
-local warnedMissingGardenSign: { [Model]: boolean } = {}
 local presentationQueuedByPlot: { [Model]: boolean } = {}
 
 local EMPTY_GARDEN_TEXT = "Empty Garden"
@@ -34,7 +33,6 @@ local function disconnectPlot(plot: Model)
 		billboard:Destroy()
 		billboardByPlot[plot] = nil
 	end
-	warnedMissingGardenSign[plot] = nil
 	presentationQueuedByPlot[plot] = nil
 end
 
@@ -211,13 +209,8 @@ end
 local function updateGardenSign(plot: Model)
 	local surfaceGui = getGardenSignGui(plot)
 	if not surfaceGui then
-		if not warnedMissingGardenSign[plot] then
-			warn(string.format("[GardenOwnerSignController] %s 缺少 Signs.Garden.CorePart.SurfaceGui", plot:GetFullName()))
-			warnedMissingGardenSign[plot] = true
-		end
 		return
 	end
-	warnedMissingGardenSign[plot] = nil
 
 	local playerFrame = surfaceGui:FindFirstChild("Player")
 	local textLabel = playerFrame and playerFrame:FindFirstChild("TextLabel")
