@@ -16,13 +16,18 @@ type DropState = {
 	Position: Vector3,
 	StartY: number,
 }
+export type WeatherState = {
+	ActiveWeatherId: string?,
+	EndsAt: number,
+}
 
 local localPlayer = Players.LocalPlayer
 
 local WeatherController = {}
 local initialized = false
 local activeRain = false
-local rainEndsAt = 0
+local activeWeatherId: string? = nil
+local activeWeatherEndsAt = 0
 local rainCard: GuiObject? = nil
 local rainTimeLabel: TextLabel? = nil
 local requestWeatherStateRemote: RemoteEvent? = nil
@@ -334,11 +339,13 @@ local function setCardVisible(visible: boolean)
 end
 
 local function updateTimer()
-	local remaining = math.max(0, rainEndsAt - Workspace:GetServerTimeNow())
+	local remaining = math.max(0, activeWeatherEndsAt - Workspace:GetServerTimeNow())
 	if rainTimeLabel then
 		rainTimeLabel.Text = formatTime(remaining)
 	end
 	if remaining <= 0 and activeRain then
+		activeWeatherId = nil
+		activeWeatherEndsAt = 0
 		setCardVisible(false)
 		stopRainEffect()
 	end
@@ -361,19 +368,20 @@ local function applySnapshot(snapshot: any)
 	if type(snapshot) ~= "table" then
 		return
 	end
-	local activeWeatherId = snapshot.ActiveWeatherId
+	local snapshotWeatherId = snapshot.ActiveWeatherId
 	local endsAt = snapshot.EndsAt
-	local rainActive = activeWeatherId == "Rain"
+	local weatherActive = type(snapshotWeatherId) == "string"
 		and type(endsAt) == "number"
 		and endsAt > Workspace:GetServerTimeNow()
+	activeWeatherId = if weatherActive then snapshotWeatherId else nil
+	activeWeatherEndsAt = if weatherActive then endsAt else 0
+	local rainActive = activeWeatherId == "Rain"
 
 	if rainActive then
-		rainEndsAt = endsAt
 		setCardVisible(true)
 		startRainEffect()
 		startTimer()
 	else
-		rainEndsAt = 0
 		setCardVisible(false)
 		stopTimer()
 		stopRainEffect()
@@ -427,6 +435,22 @@ local function bindRemotes()
 	if remote then
 		remote:FireServer()
 	end
+end
+
+-- 返回当前服务端同步天气的只读副本；过期状态按无活动天气返回。
+function WeatherController.GetState(): WeatherState
+	local weatherId = activeWeatherId
+	local endsAt = activeWeatherEndsAt
+	if weatherId and endsAt > Workspace:GetServerTimeNow() then
+		return {
+			ActiveWeatherId = weatherId,
+			EndsAt = endsAt,
+		}
+	end
+	return {
+		ActiveWeatherId = nil,
+		EndsAt = 0,
+	}
 end
 
 -- 初始化天气 UI、Remote 监听和当前状态请求；重复调用不会重复绑定。

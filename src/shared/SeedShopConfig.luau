@@ -38,6 +38,21 @@ return {
 			MinStock = 1,
 			MaxStock = 8,
 		},
+		Tulip = {
+			Chance = 1,
+			MinStock = 3,
+			MaxStock = 4,
+		},
+		Tomato = {
+			Chance = 0.9,
+			MinStock = 2,
+			MaxStock = 3,
+		},
+		Apple = {
+			Chance = 0.5263,
+			MinStock = 1,
+			MaxStock = 1,
+		},
 	},
 	-- 仅用于模板商店视觉兼容的种子稀有度文案；当前不参与解锁、权重、售价、库存或服务端购买校验。
 	VisualRarityText = "Common",

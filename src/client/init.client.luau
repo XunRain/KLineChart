@@ -48,5 +48,8 @@ TopbarController.Init({
 	TestMenuController = TestMenuController,
 })
 task.spawn(function()
-	FarmShopController.Init({ InterfaceVisualController = InterfaceVisualController })
+	FarmShopController.Init({
+		InterfaceVisualController = InterfaceVisualController,
+		WeatherController = WeatherController,
+	})
 end)

@@ -48,6 +48,21 @@ MarketConfig.Rules = {
 		MultiplierMin = 0.5,
 		MultiplierMax = 2,
 	},
+	Tulip = {
+		RefreshInterval = 40,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Tomato = {
+		RefreshInterval = 50,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Apple = {
+		RefreshInterval = 60,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
 } :: { [string]: MarketRule }
 
 -- 天气行情规则以稳定 WeatherId 和品种 Id 为键；只改变单服务器产物售价，不影响种子价、成长或存档。

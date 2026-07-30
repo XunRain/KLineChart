@@ -6,6 +6,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local FarmShopConfig = require(ReplicatedStorage.Shared.FarmShopConfig)
@@ -49,6 +50,17 @@ type MarketItemState = {
 type MarketSnapshot = {
 	Items: { MarketItemState }?,
 }
+type WeatherState = {
+	ActiveWeatherId: string?,
+	EndsAt: number,
+}
+type WeatherControllerDependency = {
+	GetState: () -> WeatherState,
+}
+type Dependencies = {
+	InterfaceVisualController: any,
+	WeatherController: WeatherControllerDependency,
+}
 type SelectedItemByMode = {
 	Seeds: string?,
 	Sell: string?,
@@ -59,6 +71,7 @@ local FarmShopController = {}
 local player = Players.LocalPlayer
 local initialized = false
 local InterfaceVisualController: any
+local WeatherController: WeatherControllerDependency? = nil
 local screenGui: ScreenGui? = nil
 local mainFrame: Frame? = nil
 local leftList: ScrollingFrame? = nil
@@ -435,7 +448,7 @@ local function formatRemaining(seconds: number): string
 end
 
 local function formatMarketRemaining(seconds: number): string
-	local wholeSeconds = math.max(0, math.floor(seconds))
+	local wholeSeconds = math.max(0, math.floor(seconds + 0.5))
 	local minutes = math.floor(wholeSeconds / 60)
 	local remainingSeconds = wholeSeconds % 60
 	if minutes > 0 then
@@ -696,6 +709,18 @@ local function updateMarketRefreshText()
 
 	local itemState = getMarketState(itemId)
 	if itemState and itemState.IsRefreshPaused == true then
+		local weatherController = WeatherController
+		local modifierId = itemState.ActiveModifierId
+		if weatherController and type(modifierId) == "string" then
+			local weatherState = weatherController.GetState()
+			local weatherEndsAt = weatherState.EndsAt
+			if weatherState.ActiveWeatherId == modifierId and weatherEndsAt > 0 then
+				local weatherRemaining = weatherEndsAt - Workspace:GetServerTimeNow()
+				label.Visible = true
+				label.Text = formatMarketRemaining(weatherRemaining)
+				return
+			end
+		end
 		local pausedRemaining = itemState.PausedRemainingSeconds
 		if type(pausedRemaining) == "number" and pausedRemaining >= 0 then
 			label.Visible = true
@@ -1516,13 +1541,14 @@ local function bindRemotes()
 	end)
 end
 
--- 初始化合并商店控制器，绑定 FarmShop UI、Sam/Steven Prompt、种子库存和出售结果事件。
-function FarmShopController.Init(dependencies: { InterfaceVisualController: any })
+-- 初始化合并商店控制器，并注入界面视觉与只读天气状态依赖。
+function FarmShopController.Init(dependencies: Dependencies)
 	if initialized then
 		return
 	end
 	initialized = true
 	InterfaceVisualController = dependencies.InterfaceVisualController
+	WeatherController = dependencies.WeatherController
 	if not FarmShopConfig.Enabled then
 		return
 	end

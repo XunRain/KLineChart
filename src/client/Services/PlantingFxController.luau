@@ -42,11 +42,21 @@ local DIRT_COLORS = {
 }
 
 local function verticalHalfExtent(part: BasePart): number
+	return math.abs(Vector3.yAxis:Dot(part.CFrame.RightVector)) * part.Size.X * 0.5
+		+ math.abs(Vector3.yAxis:Dot(part.CFrame.UpVector)) * part.Size.Y * 0.5
+		+ math.abs(Vector3.yAxis:Dot(part.CFrame.LookVector)) * part.Size.Z * 0.5
+end
+
+local function verticalHalfExtentForSize(part: BasePart, size: Vector3): number
 	local up = Vector3.new(0, 1, 0)
 	local cframe = part.CFrame
-	return math.abs(up:Dot(cframe.RightVector)) * part.Size.X * 0.5
-		+ math.abs(up:Dot(cframe.UpVector)) * part.Size.Y * 0.5
-		+ math.abs(up:Dot(cframe.LookVector)) * part.Size.Z * 0.5
+	return math.abs(up:Dot(cframe.RightVector)) * size.X * 0.5
+		+ math.abs(up:Dot(cframe.UpVector)) * size.Y * 0.5
+		+ math.abs(up:Dot(cframe.LookVector)) * size.Z * 0.5
+end
+
+local function getBottomAlignedPosition(part: BasePart, surfacePosition: Vector3, size: Vector3, offset: number): Vector3
+	return surfacePosition + Vector3.new(0, verticalHalfExtentForSize(part, size) + offset, 0)
 end
 
 local function getTemporaryFolder(): Folder
@@ -60,6 +70,31 @@ local function getTemporaryFolder(): Folder
 	return folder
 end
 
+local function getRuntimePlantAncestor(instance: Instance): Model?
+	local current: Instance? = instance
+	while current and current ~= Workspace do
+		if current:IsA("Model") and type(current:GetAttribute("PlantRecordId")) == "string" then
+			return current
+		end
+		current = current.Parent
+	end
+	return nil
+end
+
+local function isRuntimePlantDescendant(instance: Instance): boolean
+	return getRuntimePlantAncestor(instance) ~= nil
+end
+
+local function isPlantingHelperPart(part: BasePart): boolean
+	if string.find(part.Name, "PlantArea") ~= nil
+		or part.Name == "GardenTotalArea"
+		or part.Name == "PlotSizeReferenceVisual"
+	then
+		return true
+	end
+	return part.Transparency >= 0.8 or isRuntimePlantDescendant(part)
+end
+
 local function resolveVisibleSurfacePosition(position: Vector3): Vector3
 	local temporary = getTemporaryFolder()
 	local excluded: { Instance } = { temporary }
@@ -68,25 +103,21 @@ local function resolveVisibleSurfacePosition(position: Vector3): Vector3
 	end
 
 	local origin = position + Vector3.new(0, 5, 0)
-	local remainingDistance = 18
 	for _ = 1, 8 do
 		local params = RaycastParams.new()
 		params.FilterType = Enum.RaycastFilterType.Exclude
 		params.FilterDescendantsInstances = excluded
 		params.IgnoreWater = true
 
-		local result = Workspace:Raycast(origin, Vector3.new(0, -remainingDistance, 0), params)
+		local result = Workspace:Raycast(origin, Vector3.new(0, -24, 0), params)
 		if not result then
 			return position
 		end
 		local hit = result.Instance
-		if hit:IsA("BasePart") and hit.Transparency >= 0.95 then
-			table.insert(excluded, hit)
-			origin = result.Position - Vector3.new(0, 0.02, 0)
-			remainingDistance = math.max(0, remainingDistance - (position.Y + 5 - origin.Y))
-			if remainingDistance <= 0 then
-				return position
-			end
+		if hit:IsA("BasePart") and isPlantingHelperPart(hit) then
+			local runtimePlant = getRuntimePlantAncestor(hit)
+			table.insert(excluded, runtimePlant or hit)
+			origin = result.Position - Vector3.new(0, 0.05, 0)
 		else
 			return result.Position
 		end
@@ -294,13 +325,17 @@ local function createDirtMound(position: Vector3): BasePart
 	dirt.CanQuery = false
 	dirt.CanTouch = false
 	dirt.Orientation = Vector3.new(0, math.random(-180, 180), -90)
-	dirt.Size = Vector3.new(0.1, 0.8, 0.8)
-	dirt.Position = position + Vector3.new(0, 0.015 - verticalHalfExtent(dirt), 0)
+	local startSize = Vector3.new(0.1, 0.8, 0.8)
+	local targetSize = Vector3.new(0.1, 2, 2)
+	local surfaceOffset = 0.002
+	dirt.Size = startSize
+	dirt.Position = getBottomAlignedPosition(dirt, position, startSize, surfaceOffset)
 	dirt.Transparency = 1
 	dirt.Parent = getTemporaryFolder()
 
 	TweenService:Create(dirt, DIRT_APPEAR, {
-		Size = Vector3.new(0.1, 2, 2),
+		Size = targetSize,
+		Position = getBottomAlignedPosition(dirt, position, targetSize, surfaceOffset),
 		Transparency = 0,
 	}):Play()
 	return dirt
@@ -326,8 +361,10 @@ local function fadeDirtMound(recordId: string, dirt: BasePart)
 	if activeMounds[recordId] == dirt then
 		activeMounds[recordId] = nil
 	end
+	local targetSize = Vector3.new(0.1, 1.75, 1.75)
 	TweenService:Create(dirt, DIRT_FADE, {
-		Size = Vector3.new(0.1, 1.75, 1.75),
+		Size = targetSize,
+		Position = getBottomAlignedPosition(dirt, dirt.Position - Vector3.new(0, verticalHalfExtent(dirt), 0), targetSize, 0.002),
 		Transparency = 1,
 	}):Play()
 	Debris:AddItem(dirt, DIRT_FADE.Time + 0.05)
