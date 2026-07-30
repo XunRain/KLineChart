@@ -4,6 +4,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local HarvestPromptConfig = require(ReplicatedStorage.Shared.HarvestPromptConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local PlantGrowthService = require(script.Parent.PlantGrowthService)
 
@@ -26,6 +27,53 @@ local PlotService: any
 local PlayerDataService: any
 local modelsByRecord: { [string]: Model } = {}
 local ownerByRecord: { [string]: Player } = {}
+local MINIMUM_PLANT_TRUSS_HEIGHT = 0.05
+local PLANT_TRUSS_BASE_BAND_HEIGHT = 2
+local MINIMUM_PLANT_TRUSS_CROSS_SECTION = 0.05
+local PLANT_TRUSS_SIDE_MARGIN = 0.05
+local APPLE_TRUSS_CROSS_SECTION = 2
+local APPLE_TRUSS_HEIGHT_STEP = 2
+local MAXIMUM_APPLE_TRUSS_HEIGHT = 512
+local APPLE_EXPECTED_TRUSS_HEIGHT_ATTRIBUTE = "KLineExpectedTrussHeight"
+local APPLE_PLANT_TRUSS_NAMES = {
+	"PlantTrussPosX",
+	"PlantTrussNegX",
+	"PlantTrussPosZ",
+	"PlantTrussNegZ",
+}
+local APPLE_PLANT_TRUSS_NAME_SET = {
+	PlantTrussPosX = true,
+	PlantTrussNegX = true,
+	PlantTrussPosZ = true,
+	PlantTrussNegZ = true,
+} :: { [string]: boolean }
+
+type LocalGrowthPartBounds = {
+	Bottom: number,
+	Top: number,
+	MinX: number,
+	MaxX: number,
+	MinZ: number,
+	MaxZ: number,
+	CenterX: number,
+	CenterZ: number,
+	SpanX: number,
+	SpanZ: number,
+	CenterRadiusSquared: number,
+	VerticalSpan: number,
+}
+
+type PlantTrussGeometry = {
+	Height: number,
+	MinX: number,
+	MaxX: number,
+	MinZ: number,
+	MaxZ: number,
+	CenterX: number,
+	CenterZ: number,
+	SizeX: number,
+	SizeZ: number,
+}
 
 local function findFolder(parent: Instance, name: string): Folder?
 	local child = parent:FindFirstChild(name)
@@ -106,10 +154,428 @@ local function setModelCollisionVisible(model: Model, visible: boolean)
 	end
 end
 
-local function getInitialBodyScale(record: PlantRecord, definition: ItemConfig.ItemDefinition): number
+local function getInitialBodyScale(record: PlantRecord, definition: ItemConfig.ItemDefinition, now: number): number
 	local minimumScale = math.clamp(definition.MinimumVisualScale, 0.001, 1)
-	local progress = PlantGrowthService.GetGrowthAlpha(record.plantedAt, definition.GrowthTime, os.time())
+	local progress = PlantGrowthService.GetGrowthAlpha(record.plantedAt, definition.GrowthTime, now)
 	return minimumScale + (1 - minimumScale) * progress
+end
+
+-- 将单个旋转成长零件投影为 BodyRoot 本地轴对齐边界。
+local function getLocalGrowthPartBounds(part: BasePart, bodyRoot: BasePart): LocalGrowthPartBounds
+	local relativeCFrame = bodyRoot.CFrame:ToObjectSpace(part.CFrame)
+	local halfHeight = math.abs(relativeCFrame.RightVector.Y) * part.Size.X * 0.5
+		+ math.abs(relativeCFrame.UpVector.Y) * part.Size.Y * 0.5
+		+ math.abs(relativeCFrame.LookVector.Y) * part.Size.Z * 0.5
+	local halfWidth = math.abs(relativeCFrame.RightVector.X) * part.Size.X * 0.5
+		+ math.abs(relativeCFrame.UpVector.X) * part.Size.Y * 0.5
+		+ math.abs(relativeCFrame.LookVector.X) * part.Size.Z * 0.5
+	local halfDepth = math.abs(relativeCFrame.RightVector.Z) * part.Size.X * 0.5
+		+ math.abs(relativeCFrame.UpVector.Z) * part.Size.Y * 0.5
+		+ math.abs(relativeCFrame.LookVector.Z) * part.Size.Z * 0.5
+	local minX = relativeCFrame.Position.X - halfWidth
+	local maxX = relativeCFrame.Position.X + halfWidth
+	local minZ = relativeCFrame.Position.Z - halfDepth
+	local maxZ = relativeCFrame.Position.Z + halfDepth
+	local centerX = (minX + maxX) * 0.5
+	local centerZ = (minZ + maxZ) * 0.5
+	return {
+		Bottom = relativeCFrame.Position.Y - halfHeight,
+		Top = relativeCFrame.Position.Y + halfHeight,
+		MinX = minX,
+		MaxX = maxX,
+		MinZ = minZ,
+		MaxZ = maxZ,
+		CenterX = centerX,
+		CenterZ = centerZ,
+		SpanX = maxX - minX,
+		SpanZ = maxZ - minZ,
+		CenterRadiusSquared = centerX * centerX + centerZ * centerZ,
+		VerticalSpan = halfHeight * 2,
+	}
+end
+
+-- 投影旋转成长零件，并从近地面且最靠主轴的零件确定贴合主干的攀爬柱几何。
+local function getPlantTrussGeometry(body: Model, bodyRoot: BasePart): PlantTrussGeometry?
+	local boundsByPart: { LocalGrowthPartBounds } = {}
+	local highestPoint = 0
+	local lowestPoint = math.huge
+	for _, descendant in body:GetDescendants() do
+		if descendant:IsA("BasePart") and descendant ~= bodyRoot then
+			local stage = tonumber(descendant.Name)
+			if stage and stage == stage and math.abs(stage) < math.huge and stage > 0 then
+				local bounds = getLocalGrowthPartBounds(descendant, bodyRoot)
+				if bounds.Bottom == bounds.Bottom
+					and bounds.Top == bounds.Top
+					and bounds.MinX == bounds.MinX
+					and bounds.MaxX == bounds.MaxX
+					and bounds.MinZ == bounds.MinZ
+					and bounds.MaxZ == bounds.MaxZ
+					and bounds.SpanX == bounds.SpanX
+					and bounds.SpanZ == bounds.SpanZ
+					and bounds.CenterRadiusSquared == bounds.CenterRadiusSquared
+					and bounds.VerticalSpan == bounds.VerticalSpan
+					and math.abs(bounds.Bottom) < math.huge
+					and math.abs(bounds.Top) < math.huge
+					and math.abs(bounds.MinX) < math.huge
+					and math.abs(bounds.MaxX) < math.huge
+					and math.abs(bounds.MinZ) < math.huge
+					and math.abs(bounds.MaxZ) < math.huge
+					and math.abs(bounds.SpanX) < math.huge
+					and math.abs(bounds.SpanZ) < math.huge
+					and math.abs(bounds.CenterRadiusSquared) < math.huge
+					and math.abs(bounds.VerticalSpan) < math.huge
+					and bounds.SpanX > 0
+					and bounds.SpanZ > 0
+				then
+					table.insert(boundsByPart, bounds)
+					highestPoint = math.max(highestPoint, bounds.Top)
+					lowestPoint = math.min(lowestPoint, bounds.Bottom)
+				end
+			end
+		end
+	end
+	if #boundsByPart == 0
+		or highestPoint < MINIMUM_PLANT_TRUSS_HEIGHT
+		or highestPoint == math.huge
+		or lowestPoint == math.huge
+	then
+		return nil
+	end
+
+	local selectedBounds: LocalGrowthPartBounds? = nil
+	local selectedRadiusSquared = math.huge
+	local selectedVerticalSpan = 0
+	for _, bounds in boundsByPart do
+		if bounds.Bottom <= lowestPoint + PLANT_TRUSS_BASE_BAND_HEIGHT then
+			local closerToAxis = bounds.CenterRadiusSquared < selectedRadiusSquared
+			local sameAxisDistance = math.abs(bounds.CenterRadiusSquared - selectedRadiusSquared) <= 0.0001
+			if closerToAxis or (sameAxisDistance and bounds.VerticalSpan > selectedVerticalSpan) then
+				selectedBounds = bounds
+				selectedRadiusSquared = bounds.CenterRadiusSquared
+				selectedVerticalSpan = bounds.VerticalSpan
+			end
+		end
+	end
+	if not selectedBounds then
+		return nil
+	end
+	-- 运行时截面按主干 AABB 加极薄余量，不使用 Studio 编辑器默认的 2 stud 固定截面。
+	return {
+		Height = highestPoint,
+		MinX = selectedBounds.MinX,
+		MaxX = selectedBounds.MaxX,
+		MinZ = selectedBounds.MinZ,
+		MaxZ = selectedBounds.MaxZ,
+		CenterX = selectedBounds.CenterX,
+		CenterZ = selectedBounds.CenterZ,
+		SizeX = math.max(MINIMUM_PLANT_TRUSS_CROSS_SECTION, selectedBounds.SpanX + PLANT_TRUSS_SIDE_MARGIN * 2),
+		SizeZ = math.max(MINIMUM_PLANT_TRUSS_CROSS_SECTION, selectedBounds.SpanZ + PLANT_TRUSS_SIDE_MARGIN * 2),
+	}
+end
+
+-- 创建统一属性的运行时透明攀爬柱，并挂到外层植物容器而非 Body。
+local function createConfiguredPlantTruss(
+	parent: Instance,
+	name: string,
+	size: Vector3,
+	cframe: CFrame,
+	canCollide: boolean
+): TrussPart
+	local truss = Instance.new("TrussPart")
+	truss.Name = name
+	truss.Size = size
+	truss.CFrame = cframe
+	truss.Transparency = 1
+	truss.Anchored = true
+	truss.CanCollide = canCollide
+	truss.CanTouch = false
+	truss.CanQuery = false
+	truss.CastShadow = false
+	truss:SetAttribute("KLinePlantTruss", true)
+	truss:SetAttribute("KLineBaseCanCollide", true)
+	truss.Parent = parent
+	return truss
+end
+
+local function hasConfiguredPlantTrussProperties(truss: TrussPart): boolean
+	local size = truss.Size
+	return truss:GetAttribute("KLinePlantTruss") == true
+		and truss:GetAttribute("KLineBaseCanCollide") == true
+		and size.X == size.X
+		and size.Y == size.Y
+		and size.Z == size.Z
+		and math.abs(size.X) < math.huge
+		and math.abs(size.Y) < math.huge
+		and math.abs(size.Z) < math.huge
+		and size.X > 0
+		and size.Y > 0
+		and size.Z > 0
+		and truss.Transparency == 1
+		and truss.Anchored
+		and not truss.CanTouch
+		and not truss.CanQuery
+		and not truss.CastShadow
+end
+
+local function getValidatedSinglePlantTruss(model: Model): TrussPart?
+	local matched: TrussPart? = nil
+	for _, child in model:GetChildren() do
+		if child.Name == "PlantTrusses" then
+			return nil
+		elseif child.Name == "PlantTruss" then
+			if matched then
+				return nil
+			end
+			if not child:IsA("TrussPart") then
+				return nil
+			end
+			if not hasConfiguredPlantTrussProperties(child) then
+				return nil
+			end
+			matched = child
+		end
+	end
+	if not matched then
+		return nil
+	end
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart")
+			and descendant:GetAttribute("KLinePlantTruss") == true
+			and descendant ~= matched
+		then
+			return nil
+		end
+	end
+	return matched
+end
+
+-- 严格返回 Apple 固定四根攀爬柱；名称、数量、类型、标签或物理属性任一异常均失败。
+local function getValidatedApplePlantTrusses(model: Model, expectedHeight: number?): { TrussPart }?
+	local container: Folder? = nil
+	for _, child in model:GetChildren() do
+		if child.Name == "PlantTruss" then
+			return nil
+		elseif child.Name == "PlantTrusses" then
+			if container then
+				return nil
+			end
+			if not child:IsA("Folder") then
+				return nil
+			end
+			container = child
+		end
+	end
+	if not container then
+		return nil
+	end
+	local configuredHeight = container:GetAttribute(APPLE_EXPECTED_TRUSS_HEIGHT_ATTRIBUTE)
+	if type(configuredHeight) ~= "number" then
+		return nil
+	end
+	local resolvedHeight = configuredHeight
+	if resolvedHeight ~= resolvedHeight
+		or math.abs(resolvedHeight) == math.huge
+		or resolvedHeight <= 0
+		or resolvedHeight > MAXIMUM_APPLE_TRUSS_HEIGHT
+		or resolvedHeight % APPLE_TRUSS_HEIGHT_STEP ~= 0
+		or (expectedHeight ~= nil and resolvedHeight ~= expectedHeight)
+	then
+		return nil
+	end
+	local children = container:GetChildren()
+	if #children ~= #APPLE_PLANT_TRUSS_NAMES then
+		return nil
+	end
+	local byName: { [string]: TrussPart } = {}
+	for _, child in children do
+		if not child:IsA("TrussPart") then
+			return nil
+		end
+		if APPLE_PLANT_TRUSS_NAME_SET[child.Name] ~= true or byName[child.Name] ~= nil then
+			return nil
+		end
+		if not hasConfiguredPlantTrussProperties(child) then
+			return nil
+		end
+		local size = child.Size
+		if size.X ~= APPLE_TRUSS_CROSS_SECTION
+			or size.Z ~= APPLE_TRUSS_CROSS_SECTION
+			or size.Y ~= resolvedHeight
+		then
+			return nil
+		end
+		byName[child.Name] = child
+	end
+	local ordered: { TrussPart } = {}
+	local allowed: { [Instance]: boolean } = {}
+	for _, name in APPLE_PLANT_TRUSS_NAMES do
+		local truss = byName[name]
+		if not truss then
+			return nil
+		end
+		table.insert(ordered, truss)
+		allowed[truss] = true
+	end
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart")
+			and descendant:GetAttribute("KLinePlantTruss") == true
+			and allowed[descendant] ~= true
+		then
+			return nil
+		end
+	end
+	return ordered
+end
+
+-- 清理运行时克隆中的旧同名结构；源预制体不受影响。
+local function clearRuntimePlantTrussConflicts(model: Model)
+	for _, child in model:GetChildren() do
+		if child.Name == "PlantTruss" or child.Name == "PlantTrusses" then
+			child:Destroy()
+		end
+	end
+end
+
+local function disableInvalidPlantTrussCollisions(model: Model)
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart") and descendant:GetAttribute("KLinePlantTruss") == true then
+			descendant.CanCollide = false
+		end
+	end
+	for _, child in model:GetChildren() do
+		if child.Name == "PlantTruss" or child.Name == "PlantTrusses" then
+			if child:IsA("BasePart") then
+				child.CanCollide = false
+			end
+			for _, descendant in child:GetDescendants() do
+				if descendant:IsA("BasePart") then
+					descendant.CanCollide = false
+				end
+			end
+		end
+	end
+end
+
+-- 为 Apple 创建四面标准攀爬壳，其他植物继续使用单根自适应攀爬柱。
+local function createPlantTruss(
+	model: Model,
+	body: Model,
+	bodyRoot: BasePart,
+	definition: ItemConfig.ItemDefinition,
+	canCollide: boolean
+)
+	if definition.Id == "Apple" then
+		local geometry = getPlantTrussGeometry(body, bodyRoot)
+		if not geometry then
+			disableInvalidPlantTrussCollisions(model)
+			clearRuntimePlantTrussConflicts(model)
+			return
+		end
+		local height = math.ceil(geometry.Height / APPLE_TRUSS_HEIGHT_STEP) * APPLE_TRUSS_HEIGHT_STEP
+		if height <= 0 or height > MAXIMUM_APPLE_TRUSS_HEIGHT then
+			disableInvalidPlantTrussCollisions(model)
+			clearRuntimePlantTrussConflicts(model)
+			return
+		end
+		local existingTrusses = getValidatedApplePlantTrusses(model, height)
+		if existingTrusses then
+			for _, truss in existingTrusses do
+				truss.CanCollide = canCollide
+			end
+			return
+		end
+		disableInvalidPlantTrussCollisions(model)
+		clearRuntimePlantTrussConflicts(model)
+		local halfWidth = APPLE_TRUSS_CROSS_SECTION * 0.5
+		local container = Instance.new("Folder")
+		container.Name = "PlantTrusses"
+		container:SetAttribute(APPLE_EXPECTED_TRUSS_HEIGHT_ATTRIBUTE, height)
+		container.Parent = model
+		local size = Vector3.new(APPLE_TRUSS_CROSS_SECTION, height, APPLE_TRUSS_CROSS_SECTION)
+		createConfiguredPlantTruss(
+			container,
+			"PlantTrussPosX",
+			size,
+			bodyRoot.CFrame
+				* CFrame.new(geometry.MaxX + PLANT_TRUSS_SIDE_MARGIN - halfWidth, height * 0.5, geometry.CenterZ),
+			canCollide
+		)
+		createConfiguredPlantTruss(
+			container,
+			"PlantTrussNegX",
+			size,
+			bodyRoot.CFrame
+				* CFrame.new(geometry.MinX - PLANT_TRUSS_SIDE_MARGIN + halfWidth, height * 0.5, geometry.CenterZ),
+			canCollide
+		)
+		createConfiguredPlantTruss(
+			container,
+			"PlantTrussPosZ",
+			size,
+			bodyRoot.CFrame
+				* CFrame.new(geometry.CenterX, height * 0.5, geometry.MaxZ + PLANT_TRUSS_SIDE_MARGIN - halfWidth),
+			canCollide
+		)
+		createConfiguredPlantTruss(
+			container,
+			"PlantTrussNegZ",
+			size,
+			bodyRoot.CFrame
+				* CFrame.new(geometry.CenterX, height * 0.5, geometry.MinZ - PLANT_TRUSS_SIDE_MARGIN + halfWidth),
+			canCollide
+		)
+		if not getValidatedApplePlantTrusses(model, height) then
+			disableInvalidPlantTrussCollisions(model)
+		end
+		return
+	end
+	local existingTruss = getValidatedSinglePlantTruss(model)
+	if existingTruss then
+		existingTruss.CanCollide = canCollide
+		return
+	end
+	disableInvalidPlantTrussCollisions(model)
+	clearRuntimePlantTrussConflicts(model)
+	local geometry = getPlantTrussGeometry(body, bodyRoot)
+	if not geometry then
+		return
+	end
+	createConfiguredPlantTruss(
+		model,
+		"PlantTruss",
+		Vector3.new(geometry.SizeX, geometry.Height, geometry.SizeZ),
+		bodyRoot.CFrame * CFrame.new(geometry.CenterX, geometry.Height * 0.5, geometry.CenterZ),
+		canCollide
+	)
+	if not getValidatedSinglePlantTruss(model) then
+		disableInvalidPlantTrussCollisions(model)
+	end
+end
+
+-- 按服务端成长时间刷新单根或 Apple 四面攀爬柱碰撞，成熟前保持不可攀爬。
+local function updatePlantTrussCollision(model: Model, definition: ItemConfig.ItemDefinition, now: number)
+	local plantedAt = model:GetAttribute("PlantedAt")
+	local canCollide = false
+	if type(plantedAt) == "number" and plantedAt == plantedAt and math.abs(plantedAt) < math.huge then
+		canCollide = PlantGrowthService.GetGrowthAlpha(plantedAt, definition.GrowthTime, now) >= 1
+	end
+	if definition.Id == "Apple" then
+		local trusses = getValidatedApplePlantTrusses(model, nil)
+		if not trusses then
+			disableInvalidPlantTrussCollisions(model)
+			return
+		end
+		for _, truss in trusses do
+			truss.CanCollide = canCollide
+		end
+		return
+	end
+	local truss = getValidatedSinglePlantTruss(model)
+	if truss then
+		truss.CanCollide = canCollide
+	else
+		disableInvalidPlantTrussCollisions(model)
+	end
 end
 
 local function collectFruitSlots(bodyRoot: BasePart): { Attachment }
@@ -123,6 +589,32 @@ local function collectFruitSlots(bodyRoot: BasePart): { Attachment }
 		return a.Name < b.Name
 	end)
 	return slots
+end
+
+-- 将服务端收获 Prompt 统一配置为带稳定目标契约的全局排他透明交互。
+local function configureHarvestPrompt(
+	prompt: ProximityPrompt,
+	player: Player,
+	record: PlantRecord,
+	definition: ItemConfig.ItemDefinition,
+	targetKind: HarvestPromptConfig.HarvestTargetKind
+)
+	prompt.Name = HarvestPromptConfig.PromptName
+	prompt.Style = HarvestPromptConfig.Style
+	prompt.Exclusivity = HarvestPromptConfig.Exclusivity
+	prompt.KeyboardKeyCode = HarvestPromptConfig.KeyboardKeyCode
+	prompt.GamepadKeyCode = HarvestPromptConfig.GamepadKeyCode
+	prompt.ActionText = HarvestPromptConfig.ActionText
+	prompt.ObjectText = ""
+	prompt.HoldDuration = HarvestPromptConfig.HoldDuration
+	prompt.ClickablePrompt = true
+	prompt.MaxActivationDistance = ItemConfig.Limits.HarvestDistance
+	prompt.RequiresLineOfSight = false
+	prompt:SetAttribute("PlantRecordId", record.recordId)
+	prompt:SetAttribute(HarvestPromptConfig.OwnerUserIdAttribute, player.UserId)
+	prompt:SetAttribute(HarvestPromptConfig.PlantIdAttribute, definition.Id)
+	prompt:SetAttribute(HarvestPromptConfig.TargetKindAttribute, targetKind)
+	prompt:SetAttribute(HarvestPromptConfig.PromptMarkerAttribute, true)
 end
 
 local function ensureFruitPrompt(fruit: Model, player: Player, record: PlantRecord, definition: ItemConfig.ItemDefinition): ProximityPrompt?
@@ -140,17 +632,10 @@ local function ensureFruitPrompt(fruit: Model, player: Player, record: PlantReco
 		promptInstance = prompt
 	else
 		promptInstance = Instance.new("ProximityPrompt")
-		promptInstance.Name = "HarvestPrompt"
-		promptInstance.ActionText = "Harvest"
-		promptInstance.ObjectText = definition.DisplayName
-		promptInstance.HoldDuration = ItemConfig.Limits.PromptHoldDuration
-		promptInstance.MaxActivationDistance = ItemConfig.Limits.HarvestDistance
-		promptInstance.RequiresLineOfSight = false
 		promptInstance.Enabled = false
 		promptInstance.Parent = root
 	end
-	promptInstance:SetAttribute("PlantRecordId", record.recordId)
-	promptInstance:SetAttribute("OwnerUserId", player.UserId)
+	configureHarvestPrompt(promptInstance, player, record, definition, HarvestPromptConfig.TargetKinds.Fruit)
 	promptInstance:SetAttribute("FruitSlotIndex", fruit:GetAttribute("FruitSlotIndex"))
 	return promptInstance
 end
@@ -324,7 +809,10 @@ local function buildPrefab(player: Player, record: PlantRecord, worldPosition: V
 	local body = model:FindFirstChild("Body") :: Model
 	local bodyRoot = body.PrimaryPart :: BasePart
 	body:SetAttribute("KLinePlantBody", true)
-	body:ScaleTo(getInitialBodyScale(record, definition))
+	local now = os.time()
+	local growthProgress = PlantGrowthService.GetGrowthAlpha(record.plantedAt, definition.GrowthTime, now)
+	createPlantTruss(model, body, bodyRoot, definition, growthProgress >= 1)
+	body:ScaleTo(getInitialBodyScale(record, definition, now))
 	if fruitTemplate then
 		local added, fruitReason = addRuntimeFruits(model, bodyRoot, fruitTemplate, player, record, definition)
 		if not added then
@@ -341,19 +829,12 @@ local function buildPrefab(player: Player, record: PlantRecord, worldPosition: V
 	end
 
 	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "HarvestPrompt"
-	prompt.ActionText = "Harvest"
-	prompt.ObjectText = definition.DisplayName
-	prompt.HoldDuration = ItemConfig.Limits.PromptHoldDuration
-	prompt.MaxActivationDistance = ItemConfig.Limits.HarvestDistance
-	prompt.RequiresLineOfSight = false
+	configureHarvestPrompt(prompt, player, record, definition, HarvestPromptConfig.TargetKinds.Plant)
 	if definition.HarvestType == "Repeat" then
 		prompt.Enabled = false
 	else
 		prompt.Enabled = PlantGrowthService.IsHarvestable(record.nextHarvestAt, os.time())
 	end
-	prompt:SetAttribute("PlantRecordId", record.recordId)
-	prompt:SetAttribute("OwnerUserId", player.UserId)
 	prompt.Parent = root
 
 	return model
@@ -493,6 +974,9 @@ function PlantService.Start()
 				local prompt = model.PrimaryPart and model.PrimaryPart:FindFirstChild("HarvestPrompt")
 				local plantId = model:GetAttribute("PlantId")
 				local definition = if type(plantId) == "string" then ItemConfig.Get(plantId) else nil
+				if definition then
+					updatePlantTrussCollision(model, definition, now)
+				end
 				if prompt and prompt:IsA("ProximityPrompt") and definition then
 					if definition.HarvestType == "Repeat" then
 						local slotCount = getFruitSlotCount(model)

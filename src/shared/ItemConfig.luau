@@ -54,8 +54,6 @@ ItemConfig.Limits = {
 	PlacementCooldown = 0.15,
 	-- 客户端命中点相对种植区域在竖直方向允许的额外误差，单位为 stud。
 	AreaVerticalTolerance = 12,
-	-- 收获 ProximityPrompt 需要持续按住的时间，单位为秒。
-	PromptHoldDuration = 0.25,
 	-- 服务端刷新收获 Prompt 可用状态的时间间隔，单位为秒。
 	PromptRefreshInterval = 0.5,
 	-- 客户端从摄像机检测种植面的最大射线长度，单位为 stud；服务端仍会独立校验位置。
@@ -148,7 +146,7 @@ ItemConfig.Items = {
 		FruitModelName = nil,
 		MinimumVisualScale = 0.05,
 		FruitGrowthStartAlpha = 1,
-		PlacementOffsetY = 0,
+		PlacementOffsetY = -0.4,
 		MinSpacing = 3.5,
 	},
 	-- 番茄沿用模板重复收获规则；模板 10..50 秒随机结果区间固定映射为保守上限 50 秒。
@@ -167,7 +165,7 @@ ItemConfig.Items = {
 		FruitModelName = "Tomato",
 		MinimumVisualScale = 0.05,
 		FruitGrowthStartAlpha = 1,
-		PlacementOffsetY = 0,
+		PlacementOffsetY = -0.4,
 		MinSpacing = 5,
 	},
 	-- 苹果沿用模板重复收获规则；模板 10..200 秒随机结果区间固定映射为保守上限 200 秒，大型树冠按约 22x23 stud 占地留距。
@@ -186,7 +184,7 @@ ItemConfig.Items = {
 		FruitModelName = "Apple",
 		MinimumVisualScale = 0.05,
 		FruitGrowthStartAlpha = 1,
-		PlacementOffsetY = 0,
+		PlacementOffsetY = -0.4,
 		MinSpacing = 24,
 	},
 } :: { [string]: ItemDefinition }
