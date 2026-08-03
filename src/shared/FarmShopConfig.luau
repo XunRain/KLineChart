@@ -24,18 +24,24 @@ return {
 	SellTabName = "SellTab",
 	-- 右侧数量输入的最小值；购买和出售都会按当前选中物品重新夹取到合法范围。
 	MinimumAmount = 1,
-	-- 左侧商品行展开时显示的第一个市场属性占位标签；真实天气/事件尚未实现，后续改为服务端同步的市场标签。
+	-- 左侧商品行展开时显示的第一个市场属性文案；仅负责展示，天气行情规则仍以 MarketConfig 为准。
 	MarketPrimaryTagText = "Rain Demand",
-	-- 左侧商品行展开时显示的第二个市场属性占位标签；只提示价格会波动，不参与真实定价或结算。
+	-- 左侧商品行展开时保留的第二个市场属性文案；不参与真实定价或结算。
 	MarketSecondaryTagText = "Price Swings",
+	-- 展开栏 TrendTag 在最近价格高于前一个价格时显示的简短英文文案。
+	TrendTagRisingText = "Price Up",
+	-- 展开栏 TrendTag 在最近价格低于前一个价格时显示的简短英文文案。
+	TrendTagFallingText = "Price Down",
+	-- 展开栏 TrendTag 在最近价格持平或历史不足两个有效点时显示的简短英文文案。
+	TrendTagStableText = "Stable",
 	-- 左侧商品行购买页展开时的价格标题；价格数字来自当前 ItemConfig 的种子价格。
 	SeedPriceLabelText = "Seed Price",
-	-- 左侧商品行出售页展开时的价格标题；当前仍展示固定基础当前价，动态市场尚未实现。
+	-- 左侧商品行出售页展开时的价格标题；价格数字来自当前服务器同步的动态市场行情。
 	ProducePriceLabelText = "Current Price",
-	-- 右侧价格曲线图标题；真实价格历史尚未实现，本字段只用于当前占位 UI。
+	-- 右侧价格曲线图标题；曲线数据来自当前服务器同步的近期价格历史。
 	TrendTitleText = "Recent Price",
-	-- 右侧价格曲线图状态文案；真实涨跌状态尚未实现，后续由市场服务同步。
+	-- 右侧未选中商品时的涨跌状态兜底文案；选中后由近期价格历史覆盖。
 	TrendStatusText = "Rising",
-	-- 右侧价格曲线图涨跌幅占位；暂不参与出售结算或真实价格判断。
+	-- 右侧未选中商品时的涨跌幅兜底文案；选中后由近期价格历史计算，仅用于展示。
 	TrendPercentText = "+30% ↑",
 }

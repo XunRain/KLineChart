@@ -35,14 +35,14 @@ HarvestPromptConfig.HoldDuration = 0.25
 -- 透明交互行唯一显示的动作文本；不得追加植物名、目标类型、数量或状态。
 HarvestPromptConfig.ActionText = "Harvest"
 
--- 收获高亮只使用透明填充与白色置顶轮廓，独立命名避免修改铲子的红色 Highlight。
+-- 收获高亮只使用透明填充与受遮挡深度的白色轮廓，不穿透玩家或场景遮挡，并独立命名以免修改铲子的红色 Highlight。
 HarvestPromptConfig.Highlight = {
 	Name = "HarvestPromptHighlight",
 	FillColor = Color3.fromRGB(255, 255, 255),
 	FillTransparency = 1,
 	OutlineColor = Color3.fromRGB(255, 255, 255),
 	OutlineTransparency = 0,
-	DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
+	DepthMode = Enum.HighlightDepthMode.Occluded,
 }
 
 -- 透明交互 UI 的尺寸、定位、字体和 Roblox 内置 Controls 纹理；不依赖 Studio 或外部 AssetId。

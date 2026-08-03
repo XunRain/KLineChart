@@ -6,6 +6,7 @@ local Services = script.Services
 
 local PlayerDataService = require(Services.PlayerDataService)
 local RemoteService = require(Services.RemoteService)
+local DeveloperProductService = require(Services.DeveloperProductService)
 local PlotService = require(Services.PlotService)
 local InventoryService = require(Services.InventoryService)
 local PlantService = require(Services.PlantService)
@@ -34,6 +35,11 @@ WeatherService.Init({
 TimeCycleService.Init()
 PlotService.Init()
 InventoryService.Init({ PlayerDataService = PlayerDataService, RemoteService = RemoteService })
+DeveloperProductService.Init({
+	PlayerDataService = PlayerDataService,
+	InventoryService = InventoryService,
+	RemoteService = RemoteService,
+})
 PlantService.Init({
 	PlotService = PlotService,
 	PlayerDataService = PlayerDataService,

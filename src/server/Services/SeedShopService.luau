@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local SeedIAPConfig = require(ReplicatedStorage.Shared.SeedIAPConfig)
 local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
 local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
 local NpcPromptService = require(script.Parent.NpcPromptService)
@@ -17,6 +18,7 @@ local PlayerDataService: any
 local InventoryService: any
 local RemoteService: any
 local lastRequestAt: { [Player]: number } = {}
+local lastProductRequestAt: { [Player]: number } = {}
 local lastRestockRequestAt: { [Player]: number } = {}
 local stockTemplate: { [string]: number } = {}
 local playerStockByUserId: { [number]: { [string]: number } } = {}
@@ -169,6 +171,18 @@ local function getPurchasePayload(payload: any): (string?, number?)
 	return nil, nil
 end
 
+local function getProductPurchasePayload(payload: any): (string?, number?)
+	if type(payload) ~= "table" then
+		return nil, nil
+	end
+	local itemId = payload.ItemId
+	local amount = payload.Amount
+	if type(itemId) ~= "string" or type(amount) ~= "number" then
+		return nil, nil
+	end
+	return itemId, amount
+end
+
 local function broadcastState()
 	for _, player in Players:GetPlayers() do
 		fireState(player)
@@ -278,6 +292,76 @@ local function handleRequest(player: Player, payload: any)
 	)
 end
 
+-- 校验固定种子包请求；测试模式直接发货，正式模式只向客户端下发权威商品 ID 打开官方弹窗。
+local function handleProductRequest(player: Player, payload: any)
+	if not SeedShopConfig.Enabled then
+		return
+	end
+	local now = os.clock()
+	local previous = lastProductRequestAt[player]
+	if previous and now - previous < math.max(0, SeedIAPConfig.RequestCooldown) then
+		RemoteService.Notify(player, "You are buying too fast. Please try again soon.", "Warning")
+		return
+	end
+	lastProductRequestAt[player] = now
+
+	if not PlayerDataService.IsLoaded(player) then
+		RemoteService.Notify(player, "Player data is still loading. You cannot buy yet.", "Warning")
+		return
+	end
+	local itemId, requestedAmount = getProductPurchasePayload(payload)
+	local definition = itemId and ItemConfig.Get(itemId)
+	if not itemId or not definition or not SeedIAPConfig.IsPackAmount(requestedAmount) then
+		RemoteService.Notify(player, "Invalid seed product.", "Warning")
+		return
+	end
+	local amount = requestedAmount :: number
+	if not isPlayerNearShop(player) then
+		RemoteService.Notify(player, "Please stand closer to a shop.", "Warning")
+		return
+	end
+	local snapshot = PlayerDataService.GetSnapshot(player)
+	local seedCount = snapshot and snapshot.Inventory.Seeds[itemId]
+	if type(seedCount) ~= "number" or seedCount + amount > EconomyConfig.MaximumSeedInventory then
+		RemoteService.Notify(player, "Seed inventory is full.", "Warning")
+		return
+	end
+
+	if SeedIAPConfig.UseMarketplacePurchases then
+		local productId = SeedIAPConfig.GetProductId(itemId, amount)
+		if not productId then
+			RemoteService.Notify(player, "This product is not configured yet.", "Warning")
+			return
+		end
+		RemoteService.GetEvent("PromptSeedProductPurchase"):FireClient(player, productId)
+		return
+	end
+
+	local changed, reason = PlayerDataService.Update(player, function(data)
+		local currentSeedCount = data.Inventory.Seeds[itemId]
+		if type(currentSeedCount) ~= "number" then
+			return false, "InvalidInventoryData"
+		end
+		if currentSeedCount + amount > EconomyConfig.MaximumSeedInventory then
+			return false, "SeedInventoryLimit"
+		end
+		data.Inventory.Seeds[itemId] = currentSeedCount + amount
+		return true, ""
+	end)
+	if not changed then
+		local message = if reason == "SeedInventoryLimit" then "Seed inventory is full." else "Purchase failed. Please try again."
+		RemoteService.Notify(player, message, "Warning")
+		return
+	end
+	PlayerDataService.RequestSave(player)
+	InventoryService.Sync(player)
+	RemoteService.Notify(
+		player,
+		string.format("Test purchase granted %d %s Seed.", amount, definition.DisplayName),
+		"Success"
+	)
+end
+
 local function handleManualRestock(player: Player)
 	if not SeedShopConfig.Enabled then
 		return
@@ -321,6 +405,15 @@ function SeedShopService.Init(dependencies: {
 			warn(string.format("[SeedShopService] 购买请求处理失败 %s：%s", player.Name, tostring(err)))
 		end
 	end)
+	RemoteService.GetEvent("RequestSeedProductPurchase").OnServerEvent:Connect(function(player, payload)
+		local ok, err = pcall(function()
+			handleProductRequest(player, payload)
+			return true
+		end)
+		if not ok then
+			warn(string.format("[SeedShopService] 种子内购请求处理失败 %s：%s", player.Name, tostring(err)))
+		end
+	end)
 	RemoteService.GetEvent("RequestSeedShopState").OnServerEvent:Connect(function(player)
 		local ok, err = pcall(function()
 			fireState(player)
@@ -341,6 +434,7 @@ function SeedShopService.Init(dependencies: {
 	end)
 	Players.PlayerRemoving:Connect(function(player)
 		lastRequestAt[player] = nil
+		lastProductRequestAt[player] = nil
 		lastRestockRequestAt[player] = nil
 		playerStockByUserId[player.UserId] = nil
 	end)

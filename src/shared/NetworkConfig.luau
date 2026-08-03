@@ -16,6 +16,10 @@ return {
 		RequestTestAction = "RequestTestAction",
 		-- 客户端到服务端：唯一参数为稳定植物 itemId 字符串；服务端从配置读取价格和每次数量，并重新验证距离、余额、库存上限与请求冷却。
 		RequestBuySeed = "RequestBuySeed",
+		-- 客户端到服务端：参数为 ItemId 与固定包量 Amount；服务端重新校验品种、包量、距离、数据、冷却和背包上限，绝不接受商品 ID。
+		RequestSeedProductPurchase = "RequestSeedProductPurchase",
+		-- 服务端到单个客户端：参数为权威正数商品 ID；仅用于打开 Roblox 官方购买弹窗，弹窗结果不参与发货。
+		PromptSeedProductPurchase = "PromptSeedProductPurchase",
 		-- 客户端到服务端：无参数请求当前玩家的种子商店库存与下次刷新时间；服务端只返回该玩家可见的个人库存快照。
 		RequestSeedShopState = "RequestSeedShopState",
 		-- 客户端到服务端：无参数请求立即跳过当前服务器本轮种子商店等待；服务端重新校验距离、冷却和状态后刷新库存。

@@ -762,8 +762,8 @@ local function watchForeignHarvestPrompt(prompt: ProximityPrompt)
 	suppressForeignHarvestPrompt(prompt)
 end
 
--- 判断给定屏幕坐标是否落在当前本地收获交互区域及其外扩范围内，仅供其他客户端表现避让。
-function HarvestPromptController.IsMouseNearActiveUi(mousePosition: Vector2, padding: number): boolean
+-- 判断给定指针屏幕坐标是否落在当前本地收获交互区域及其外扩范围内，仅供其他客户端表现避让。
+function HarvestPromptController.IsPointerNearActiveUi(pointerPosition: Vector2, padding: number): boolean
 	local actionButton = activeActionButton
 	if not activePrompt or not actionButton or not actionButton.Parent or not actionButton.Visible then
 		return false
@@ -771,10 +771,15 @@ function HarvestPromptController.IsMouseNearActiveUi(mousePosition: Vector2, pad
 	local resolvedPadding = if padding == padding and math.abs(padding) < math.huge then math.max(0, padding) else 0
 	local absolutePosition = actionButton.AbsolutePosition
 	local absoluteSize = actionButton.AbsoluteSize
-	return mousePosition.X >= absolutePosition.X - resolvedPadding
-		and mousePosition.X <= absolutePosition.X + absoluteSize.X + resolvedPadding
-		and mousePosition.Y >= absolutePosition.Y - resolvedPadding
-		and mousePosition.Y <= absolutePosition.Y + absoluteSize.Y + resolvedPadding
+	return pointerPosition.X >= absolutePosition.X - resolvedPadding
+		and pointerPosition.X <= absolutePosition.X + absoluteSize.X + resolvedPadding
+		and pointerPosition.Y >= absolutePosition.Y - resolvedPadding
+		and pointerPosition.Y <= absolutePosition.Y + absoluteSize.Y + resolvedPadding
+end
+
+-- 保留旧鼠标命名兼容现有客户端调用，查询本身同时适用于 Touch 屏幕坐标。
+function HarvestPromptController.IsMouseNearActiveUi(mousePosition: Vector2, padding: number): boolean
+	return HarvestPromptController.IsPointerNearActiveUi(mousePosition, padding)
 end
 
 -- 初始化透明收获 Prompt，只为本地有效目标生成单活动 UI/高亮并隔离外玩家候选。

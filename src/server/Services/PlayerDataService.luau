@@ -31,6 +31,7 @@ type PlayerData = {
 	Version: number,
 	Sheckles: number,
 	OwnedExpansions: number,
+	ProcessedDeveloperProductReceipts: { [string]: number },
 	Inventory: {
 		Seeds: { [string]: number },
 		Produce: { [string]: number },
@@ -74,6 +75,7 @@ local function defaultData(): PlayerData
 		Version = DataStoreConfig.SchemaVersion,
 		Sheckles = EconomyConfig.StartingSheckles,
 		OwnedExpansions = 0,
+		ProcessedDeveloperProductReceipts = {},
 		Inventory = {
 			Seeds = ItemConfig.GetStartingSeeds(),
 			Produce = {},
@@ -127,6 +129,16 @@ local function normalize(raw: any): PlayerData
 		0,
 		maxExpansionLevel()
 	)
+	if type(raw.ProcessedDeveloperProductReceipts) == "table" then
+		for purchaseId, processedAt in raw.ProcessedDeveloperProductReceipts do
+			if type(purchaseId) == "string" and #purchaseId > 0 and #purchaseId <= 256 then
+				normalized.ProcessedDeveloperProductReceipts[purchaseId] = math.max(
+					0,
+					math.floor(finiteNumber(processedAt, 0))
+				)
+			end
+		end
+	end
 
 	if type(raw.Inventory) == "table" then
 		for itemId, definition in ItemConfig.Items do

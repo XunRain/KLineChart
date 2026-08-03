@@ -1,7 +1,8 @@
 --!strict
 
--- 本控制器仅在桌面鼠标悬浮花园植物时显示品种名与首次成长剩余时间。
+-- 本控制器通过桌面鼠标或单根未被 UI 消费的触摸指针显示植物名与首次成长剩余时间。
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -15,7 +16,8 @@ local HarvestPromptController = require(script.Parent.HarvestPromptController)
 
 local TOOLTIP_NAME = "PlantHoverTooltip"
 local TOOLTIP_SIZE = Vector2.new(220, 64)
-local TOOLTIP_CURSOR_OFFSET = 28
+local MOUSE_TOOLTIP_OFFSET = 28
+local TOUCH_TOOLTIP_OFFSET = 42
 local TOOLTIP_SAFE_MARGIN = 8
 local HARVEST_PROMPT_PADDING = 12
 local RAYCAST_INTERVAL = 0.1
@@ -24,10 +26,15 @@ local MAX_RAYCAST_SKIPS = 32
 local RAYCAST_SKIP_DISTANCE = 0.02
 local TIMER_COLOR = Color3.fromRGB(60, 220, 80)
 
+type PointerMode = "Mouse" | "Touch" | "None"
+
 local PlantHoverTooltipController = {}
 local player = Players.LocalPlayer
 local initialized = false
-local mouseModeEnabled = false
+local pointerMode: PointerMode = "None"
+local activeTouch: InputObject? = nil
+local activeTouchPosition: Vector2? = nil
+local activeTouchConnections: { RBXScriptConnection } = {}
 local raycastAccumulator = RAYCAST_INTERVAL
 local tooltipGui: ScreenGui? = nil
 local tooltipGroup: CanvasGroup? = nil
@@ -444,19 +451,20 @@ local function updateTimer(now: number)
 	resolvedTimerLabel.Visible = true
 end
 
-local function updateTooltipPosition(mousePosition: Vector2, camera: Camera)
+local function updateTooltipPosition(pointerPosition: Vector2, camera: Camera)
 	local group = tooltipGroup
 	if not group or not tooltipRequestedVisible then
 		return
 	end
 	local viewportSize = camera.ViewportSize
-	local x = mousePosition.X + TOOLTIP_CURSOR_OFFSET
+	local pointerOffset = if pointerMode == "Touch" then TOUCH_TOOLTIP_OFFSET else MOUSE_TOOLTIP_OFFSET
+	local x = pointerPosition.X + pointerOffset
 	if x + TOOLTIP_SIZE.X > viewportSize.X - TOOLTIP_SAFE_MARGIN then
-		x = mousePosition.X - TOOLTIP_CURSOR_OFFSET - TOOLTIP_SIZE.X
+		x = pointerPosition.X - pointerOffset - TOOLTIP_SIZE.X
 	end
 	x = math.clamp(x, TOOLTIP_SAFE_MARGIN, math.max(TOOLTIP_SAFE_MARGIN, viewportSize.X - TOOLTIP_SIZE.X - TOOLTIP_SAFE_MARGIN))
 	local y = math.clamp(
-		mousePosition.Y - TOOLTIP_SIZE.Y * 0.5,
+		pointerPosition.Y - TOOLTIP_SIZE.Y * 0.5,
 		TOOLTIP_SAFE_MARGIN,
 		math.max(TOOLTIP_SAFE_MARGIN, viewportSize.Y - TOOLTIP_SIZE.Y - TOOLTIP_SAFE_MARGIN)
 	)
@@ -467,21 +475,115 @@ local function isGamepadInput(inputType: Enum.UserInputType): boolean
 	return string.match(inputType.Name, "^Gamepad%d+$") ~= nil
 end
 
+local function disconnectActiveTouchConnections()
+	for _, connection in activeTouchConnections do
+		connection:Disconnect()
+	end
+	table.clear(activeTouchConnections)
+end
+
+-- Touch Position 使用非 IgnoreGuiInset 坐标；每次从原始值重算并只叠加一次左上角 Inset。
+local function resolveTouchScreenPosition(input: InputObject): Vector2
+	local topLeftInset = GuiService:GetGuiInset()
+	return Vector2.new(input.Position.X, input.Position.Y) + topLeftInset
+end
+
+local function updateActiveTouchPosition(input: InputObject)
+	if activeTouch == input then
+		activeTouchPosition = resolveTouchScreenPosition(input)
+	end
+end
+
+local function clearActiveTouch()
+	disconnectActiveTouchConnections()
+	activeTouch = nil
+	activeTouchPosition = nil
+	if pointerMode == "Touch" then
+		pointerMode = "None"
+	end
+	clearActivePlant()
+end
+
+local function finishActiveTouch(input: InputObject)
+	if activeTouch == input then
+		clearActiveTouch()
+	end
+end
+
+local function beginActiveTouch(input: InputObject, gameProcessedEvent: boolean)
+	if gameProcessedEvent
+		or activeTouch
+		or input.UserInputType ~= Enum.UserInputType.Touch
+		or input.UserInputState ~= Enum.UserInputState.Begin
+	then
+		return
+	end
+	clearActivePlant()
+	activeTouch = input
+	pointerMode = "Touch"
+	updateActiveTouchPosition(input)
+	table.insert(activeTouchConnections, input:GetPropertyChangedSignal("Position"):Connect(function()
+		updateActiveTouchPosition(input)
+	end))
+	table.insert(activeTouchConnections, input:GetPropertyChangedSignal("UserInputState"):Connect(function()
+		if activeTouch == input
+			and (input.UserInputState == Enum.UserInputState.End
+				or input.UserInputState == Enum.UserInputState.Cancel)
+		then
+			finishActiveTouch(input)
+		end
+	end))
+	raycastAccumulator = RAYCAST_INTERVAL
+end
+
 local function applyLastInputType(inputType: Enum.UserInputType)
 	if inputType == Enum.UserInputType.MouseMovement then
-		mouseModeEnabled = true
-	elseif inputType == Enum.UserInputType.Touch or isGamepadInput(inputType) then
-		mouseModeEnabled = false
+		if activeTouch then
+			clearActiveTouch()
+		end
+		pointerMode = "Mouse"
+		raycastAccumulator = RAYCAST_INTERVAL
+	elseif inputType == Enum.UserInputType.Touch then
+		if activeTouch then
+			pointerMode = "Touch"
+		else
+			pointerMode = "None"
+			clearActivePlant()
+		end
+	elseif isGamepadInput(inputType) then
+		clearActiveTouch()
+		pointerMode = "None"
 		clearActivePlant()
 	end
 end
 
-local function refreshHoveredPlant(mousePosition: Vector2)
-	if not mouseModeEnabled or HarvestPromptController.IsMouseNearActiveUi(mousePosition, HARVEST_PROMPT_PADDING) then
+local function getPointerPosition(): Vector2?
+	if pointerMode == "Mouse" then
+		return UserInputService:GetMouseLocation()
+	elseif pointerMode == "Touch" then
+		local touch = activeTouch
+		if touch then
+			updateActiveTouchPosition(touch)
+			return activeTouchPosition
+		end
+	end
+	return nil
+end
+
+local function resetPointer()
+	clearActiveTouch()
+	pointerMode = "None"
+	clearActivePlant()
+end
+
+local function refreshHoveredPlant(pointerPosition: Vector2)
+	if pointerMode == "None"
+		or HarvestPromptController.IsPointerNearActiveUi(pointerPosition, HARVEST_PROMPT_PADDING)
+	then
 		clearActivePlant()
 		return
 	end
-	local model, definition = raycastPlant(mousePosition)
+	local model, definition = raycastPlant(pointerPosition)
 	if not model or not definition then
 		clearActivePlant()
 		return
@@ -489,7 +591,7 @@ local function refreshHoveredPlant(mousePosition: Vector2)
 	setActivePlant(model, definition)
 end
 
--- 初始化桌面鼠标悬浮查询与代码生成 UI；该控制器只读运行时植物属性。
+-- 初始化鼠标/首根未被 UI 消费的 Touch 悬浮查询与代码生成 UI；该控制器只读运行时植物属性。
 function PlantHoverTooltipController.Init()
 	if initialized then
 		return
@@ -498,14 +600,29 @@ function PlantHoverTooltipController.Init()
 	ensureTooltipUi()
 	applyLastInputType(UserInputService:GetLastInputType())
 	UserInputService.LastInputTypeChanged:Connect(applyLastInputType)
-	player.CharacterAdded:Connect(clearActivePlant)
-	player.CharacterRemoving:Connect(clearActivePlant)
+	UserInputService.TouchStarted:Connect(beginActiveTouch)
+	UserInputService.TouchMoved:Connect(function(input)
+		updateActiveTouchPosition(input)
+	end)
+	UserInputService.TouchEnded:Connect(finishActiveTouch)
+	player.CharacterAdded:Connect(resetPointer)
+	player.CharacterRemoving:Connect(resetPointer)
 	RunService.RenderStepped:Connect(function(deltaTime)
 		if not ensureTooltipUi() then
+			resetPointer()
 			return
 		end
 		local camera = Workspace.CurrentCamera
-		if not camera or not mouseModeEnabled then
+		if not camera or not getGardens() then
+			if pointerMode == "Touch" then
+				clearActiveTouch()
+			else
+				clearActivePlant()
+			end
+			return
+		end
+		local pointerPosition = getPointerPosition()
+		if not pointerPosition then
 			clearActivePlant()
 			return
 		end
@@ -514,18 +631,16 @@ function PlantHoverTooltipController.Init()
 		if model and plantId and not isPlantStillValid(model, plantId) then
 			clearActivePlant()
 		end
-		local mousePosition = UserInputService:GetMouseLocation()
-		if HarvestPromptController.IsMouseNearActiveUi(mousePosition, HARVEST_PROMPT_PADDING) then
+		if HarvestPromptController.IsPointerNearActiveUi(pointerPosition, HARVEST_PROMPT_PADDING) then
 			clearActivePlant()
 		end
-		updateTooltipPosition(mousePosition, camera)
-		updateTimer(Workspace:GetServerTimeNow())
-
 		raycastAccumulator += deltaTime
 		if raycastAccumulator >= RAYCAST_INTERVAL then
 			raycastAccumulator %= RAYCAST_INTERVAL
-			refreshHoveredPlant(mousePosition)
+			refreshHoveredPlant(pointerPosition)
 		end
+		updateTooltipPosition(pointerPosition, camera)
+		updateTimer(Workspace:GetServerTimeNow())
 	end)
 end
 

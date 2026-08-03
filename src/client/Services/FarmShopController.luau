@@ -2,6 +2,7 @@
 
 -- 本模块绑定合并农场商店 UI，让 Sam 打开买种子页、Steven 打开卖产物页，并只提交受限 Remote 请求。
 local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -15,12 +16,18 @@ local MarketConfig = require(ReplicatedStorage.Shared.MarketConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
+local SeedIAPConfig = require(ReplicatedStorage.Shared.SeedIAPConfig)
 local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
 local NpcPromptVisualController = require(script.Parent.NpcPromptVisualController)
 local PriceCurveGraph = require(script.Parent.Parent.Components.PriceCurveGraph)
 local ViewportPreviewCamera = require(script.Parent.Parent.Components.ViewportPreviewCamera)
 
 type ShopMode = "Seeds" | "Sell"
+type PurchaseMode = "Coins" | "Robux"
+type LayeredButtonText = {
+	Base: TextLabel,
+	Face: TextLabel,
+}
 type ShopItem = {
 	ItemId: string,
 	Definition: ItemConfig.ItemDefinition,
@@ -81,13 +88,20 @@ local rightDetail: Frame? = nil
 local seedsTabButton: GuiButton? = nil
 local sellTabButton: GuiButton? = nil
 local closeButton: GuiButton? = nil
+local switchToRobuxButton: GuiButton? = nil
+local switchToCoinsButton: GuiButton? = nil
+local robuxPurchaseButtons: GuiObject? = nil
+local robuxButtonByAmount: { [number]: GuiButton } = {}
+local robuxButtonTextByAmount: { [number]: LayeredButtonText } = {}
 local marketRefreshLabel: TextLabel? = nil
 local requestBuyRemote: RemoteEvent? = nil
+local requestSeedProductPurchaseRemote: RemoteEvent? = nil
 local requestSeedStateRemote: RemoteEvent? = nil
 local requestSeedRestockRemote: RemoteEvent? = nil
 local requestSellRemote: RemoteEvent? = nil
 local requestMarketStateRemote: RemoteEvent? = nil
 local selectedMode: ShopMode = "Seeds"
+local purchaseMode: PurchaseMode = "Coins"
 local selectedItemId: string? = nil
 local selectedItemByMode: SelectedItemByMode = {}
 local selectedAmount = FarmShopConfig.MinimumAmount
@@ -103,6 +117,13 @@ local suppressedPromptStates: { [ProximityPrompt]: boolean } = {}
 local refreshQueued = false
 local rebuildRows: (() -> ())? = nil
 local priceCurveRenderSerial = 0
+local robuxUiReady = false
+local pendingProductId: number? = nil
+local lastProductRequestAt = 0
+local robuxPriceByProductId: { [number]: number | false } = {}
+local robuxPriceFetchInFlight: { [number]: boolean } = {}
+local robuxHoveredByAmount: { [number]: boolean } = {}
+local robuxTextContextKey = ""
 local MARKET_PRICE_UNCHANGED_COLOR = Color3.fromRGB(52, 160, 212)
 local MARKET_PRICE_RISING_COLOR = Color3.fromRGB(65, 184, 88)
 local MARKET_PRICE_FALLING_COLOR = Color3.fromRGB(220, 86, 72)
@@ -134,6 +155,31 @@ local function setLabelText(root: Instance?, text: string)
 			descendant.Text = text
 		end
 	end
+end
+
+-- 严格解析按钮中 Studio 约定的底层加粗字与前景字，避免只更新一层产生重影。
+local function getLayeredButtonText(button: GuiButton, containerName: string): LayeredButtonText?
+	local container = button:FindFirstChild(containerName)
+	local base = container and container:FindFirstChild("TextLabel")
+	if not base or not base:IsA("TextLabel") then
+		warn(string.format("[FarmShopController] %s.%s.TextLabel must be a TextLabel.", button:GetFullName(), containerName))
+		return nil
+	end
+	local face = base:FindFirstChild("TextLabel")
+	if not face or not face:IsA("TextLabel") then
+		warn(string.format("[FarmShopController] %s.%s.TextLabel.TextLabel must be a TextLabel.", button:GetFullName(), containerName))
+		return nil
+	end
+	return {
+		Base = base,
+		Face = face,
+	}
+end
+
+-- 同步按钮的两层文字，保证描边底字和前景字始终一致。
+local function setLayeredButtonText(textLayers: LayeredButtonText, text: string)
+	textLayers.Base.Text = text
+	textLayers.Face.Text = text
 end
 
 local function setTextColor(root: Instance?, color: Color3)
@@ -574,6 +620,9 @@ local function refreshRowSelection()
 end
 
 local function clampSelectedAmount()
+	if selectedMode == "Seeds" and purchaseMode == "Robux" then
+		return
+	end
 	local itemId = selectedItemId
 	local definition = itemId and ItemConfig.Get(itemId)
 	if not itemId or not definition then
@@ -753,6 +802,175 @@ local function requestMarketState()
 	end
 end
 
+local function getRobuxUnknownPriceText(): string
+	return string.format("%s %s", SeedIAPConfig.RobuxCurrencyIconText, SeedIAPConfig.UnknownPriceText)
+end
+
+local function setRobuxPackText(amount: number)
+	local textLayers = robuxButtonTextByAmount[amount]
+	if textLayers then
+		setLayeredButtonText(textLayers, string.format("x%d", amount))
+	end
+end
+
+local function resetRobuxHoverText()
+	table.clear(robuxHoveredByAmount)
+	for amount in robuxButtonTextByAmount do
+		setRobuxPackText(amount)
+	end
+end
+
+local function setHoveredProductPrice(productId: number, price: number?)
+	if selectedMode ~= "Seeds" or purchaseMode ~= "Robux" then
+		return
+	end
+	local itemId = selectedItemId
+	if not itemId then
+		return
+	end
+	for amount, isHovered in robuxHoveredByAmount do
+		if isHovered and SeedIAPConfig.GetProductId(itemId, amount) == productId then
+			local textLayers = robuxButtonTextByAmount[amount]
+			if textLayers then
+				local targetPrice = SeedIAPConfig.GetTargetPrice(itemId, amount)
+				local displayText = if price then
+					string.format("%s %d", SeedIAPConfig.RobuxCurrencyIconText, price)
+					elseif targetPrice then
+					string.format("%s %d", SeedIAPConfig.RobuxCurrencyIconText, targetPrice)
+					else getRobuxUnknownPriceText()
+				setLayeredButtonText(textLayers, displayText)
+			end
+		end
+	end
+end
+
+-- 异步读取并按商品 ID 缓存 Roblox 权威价格；失败和非法价格只缓存未知状态。
+local function requestProductPrice(productId: number)
+	if robuxPriceFetchInFlight[productId] or robuxPriceByProductId[productId] ~= nil then
+		return
+	end
+	robuxPriceFetchInFlight[productId] = true
+	task.spawn(function()
+		local succeeded, productInfo = pcall(function()
+			return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
+		end)
+		local resolvedPrice: number? = nil
+		if succeeded and type(productInfo) == "table" then
+			local price = productInfo.PriceInRobux
+			if type(price) == "number"
+				and price == price
+				and math.abs(price) < math.huge
+				and price == math.floor(price)
+				and price > 0
+			then
+				resolvedPrice = price
+			end
+		end
+		robuxPriceFetchInFlight[productId] = nil
+		robuxPriceByProductId[productId] = resolvedPrice or false
+		setHoveredProductPrice(productId, resolvedPrice)
+	end)
+end
+
+local function beginRobuxPriceHover(amount: number)
+	if selectedMode ~= "Seeds" or purchaseMode ~= "Robux" then
+		return
+	end
+	robuxHoveredByAmount[amount] = true
+	local textLayers = robuxButtonTextByAmount[amount]
+	local itemId = selectedItemId
+	local productId = if itemId then SeedIAPConfig.GetProductId(itemId, amount) else nil
+	if not textLayers then
+		return
+	end
+	local targetPrice = if itemId then SeedIAPConfig.GetTargetPrice(itemId, amount) else nil
+	if targetPrice then
+		setLayeredButtonText(
+			textLayers,
+			string.format("%s %d", SeedIAPConfig.RobuxCurrencyIconText, targetPrice)
+		)
+	else
+		setLayeredButtonText(textLayers, getRobuxUnknownPriceText())
+	end
+	if not SeedIAPConfig.UseMarketplacePurchases then
+		return
+	end
+	if not productId then
+		return
+	end
+	local cachedPrice = robuxPriceByProductId[productId]
+	if type(cachedPrice) == "number" then
+		setLayeredButtonText(
+			textLayers,
+			string.format("%s %d", SeedIAPConfig.RobuxCurrencyIconText, cachedPrice)
+		)
+		return
+	elseif cachedPrice == false then
+		return
+	end
+	requestProductPrice(productId)
+end
+
+local function endRobuxPriceHover(amount: number)
+	robuxHoveredByAmount[amount] = nil
+	setRobuxPackText(amount)
+end
+
+-- 根据页签和购买币种切换 Studio 已提供的节点；节点合同不完整时不改动原金币界面。
+local function updatePurchaseModeUi()
+	if not robuxUiReady then
+		return
+	end
+	local enterRobuxButton = switchToRobuxButton
+	local returnCoinsButton = switchToCoinsButton
+	local productButtons = robuxPurchaseButtons
+	if not enterRobuxButton or not returnCoinsButton or not productButtons then
+		return
+	end
+	local isSeedsPage = selectedMode == "Seeds"
+	if not isSeedsPage then
+		purchaseMode = "Coins"
+	end
+	local isRobuxMode = isSeedsPage and purchaseMode == "Robux"
+	local textContextKey = string.format("%s|%s|%s", selectedMode, purchaseMode, selectedItemId or "")
+	if robuxTextContextKey ~= textContextKey then
+		robuxTextContextKey = textContextKey
+		resetRobuxHoverText()
+	end
+	enterRobuxButton.Visible = isSeedsPage and not isRobuxMode
+	productButtons.Visible = isRobuxMode
+	returnCoinsButton.Visible = isRobuxMode
+
+	local itemId = selectedItemId
+	local ownedSeeds = if itemId then getInventoryCount("Seeds", itemId) else EconomyConfig.MaximumSeedInventory
+	local inventorySpace = math.max(0, EconomyConfig.MaximumSeedInventory - ownedSeeds)
+	for amount, button in robuxButtonByAmount do
+		local enabled = isRobuxMode and itemId ~= nil and inventorySpace >= amount and pendingProductId == nil
+		button.Visible = isRobuxMode
+		button.Active = enabled
+		button.AutoButtonColor = enabled
+	end
+
+	local quantity = getDetailChild("Quantity")
+	local estimateTitle = getDetailChild("EstimateTitle")
+	local estimateValue = getDetailChild("EstimateValue")
+	local primary = getDetailChild("PrimaryButton")
+	local sellAll = getDetailChild("SellAllButton")
+	setGuiObjectVisible(quantity, not isRobuxMode and itemId ~= nil)
+	setGuiObjectVisible(estimateTitle, not isRobuxMode)
+	setGuiObjectVisible(estimateValue, not isRobuxMode)
+	setGuiObjectVisible(primary, not isRobuxMode)
+	setGuiObjectVisible(sellAll, not isRobuxMode)
+	local bottomBar = rightDetail and rightDetail:FindFirstChild("BottomBar")
+	if bottomBar then
+		setNamedGuiObjectsVisible(
+			bottomBar,
+			{ "Coin", "CoinIcon", "CoinImage", "CoinsIcon", "PrimaryButtonCoin", "SellAllButtonCoin" },
+			not isRobuxMode
+		)
+	end
+end
+
 local function updateDetail()
 	updateTabVisuals()
 	updateRestockText()
@@ -816,6 +1034,7 @@ local function updateDetail()
 				sellAllButton.AutoButtonColor = false
 			end
 		end
+		updatePurchaseModeUi()
 		return
 	end
 
@@ -880,6 +1099,7 @@ local function updateDetail()
 			end
 		end
 	end
+	updatePurchaseModeUi()
 end
 
 local function clearRows()
@@ -948,8 +1168,6 @@ local function updateExpansionMarketVisuals(expansion: Frame, itemId: string, de
 	)
 	local marketPriceValue = expansion:FindFirstChild("MarketPriceValue", true)
 	setLabelText(marketPriceValue, formatPriceNumber(price))
-	local itemState = getMarketState(itemId)
-	local modifierId = itemState and itemState.ActiveModifierId
 	local rainTag: GuiObject? = nil
 	local trendTag: GuiObject? = nil
 	local trendTextLabel: TextLabel? = nil
@@ -979,16 +1197,19 @@ local function updateExpansionMarketVisuals(expansion: Frame, itemId: string, de
 			end
 		end
 	end
-	local hasRainRule = MarketConfig.GetWeatherModifier("Rain", "Strawberry") ~= nil
-	local showRainTag = itemId == "Strawberry"
-		and modifierId == "Rain"
-		and hasRainRule
+	local showRainTag = MarketConfig.GetWeatherModifier("Rain", itemId) ~= nil
 	setGuiObjectVisible(rainTag, showRainTag)
 	local priceHistory = getProducePriceHistory(itemId, price)
-	local trendPercent = getTrendPercent(priceHistory)
-	local trendArrow = if trendPercent > 0 then "↑" elseif trendPercent < 0 then "↓" else "-"
+	local currentHistoryPrice = priceHistory[#priceHistory]
+	local previousHistoryPrice = priceHistory[math.max(1, #priceHistory - 1)]
+	local trendText = FarmShopConfig.TrendTagStableText
+	if currentHistoryPrice > previousHistoryPrice then
+		trendText = FarmShopConfig.TrendTagRisingText
+	elseif currentHistoryPrice < previousHistoryPrice then
+		trendText = FarmShopConfig.TrendTagFallingText
+	end
 	if trendTextLabel then
-		trendTextLabel.Text = string.format("%+.0f%% %s", trendPercent, trendArrow)
+		trendTextLabel.Text = trendText
 	end
 	setGuiObjectVisible(trendTag, true)
 	local priceColor = MARKET_PRICE_UNCHANGED_COLOR
@@ -1179,6 +1400,7 @@ end
 local function closeShop()
 	disconnect(activeConnections)
 	activeRoot = nil
+	purchaseMode = "Coins"
 	local gui = screenGui
 	if gui then
 		gui.Enabled = false
@@ -1193,6 +1415,7 @@ local function openShop(mode: ShopMode, root: BasePart)
 		return
 	end
 	selectedMode = mode
+	purchaseMode = "Coins"
 	selectedItemId = getSelectedItemForMode(mode)
 	selectedAmount = FarmShopConfig.MinimumAmount
 	activeRoot = root
@@ -1208,6 +1431,44 @@ local function openShop(mode: ShopMode, root: BasePart)
 		rebuild()
 	end
 	table.insert(activeConnections, player.CharacterAdded:Connect(closeShop))
+end
+
+local function enterRobuxPurchaseMode()
+	if not robuxUiReady or selectedMode ~= "Seeds" then
+		return
+	end
+	purchaseMode = "Robux"
+	updateDetail()
+end
+
+local function returnToCoinsPurchaseMode()
+	if not robuxUiReady or selectedMode ~= "Seeds" then
+		return
+	end
+	purchaseMode = "Coins"
+	updateDetail()
+end
+
+local function submitSeedProductPurchase(amount: number)
+	if not robuxUiReady or selectedMode ~= "Seeds" or purchaseMode ~= "Robux" then
+		return
+	end
+	local itemId = selectedItemId
+	if not itemId or not ItemConfig.Get(itemId) or not SeedIAPConfig.IsPackAmount(amount) or pendingProductId ~= nil then
+		return
+	end
+	local now = os.clock()
+	if now - lastProductRequestAt < math.max(0.1, SeedIAPConfig.RequestCooldown) then
+		return
+	end
+	lastProductRequestAt = now
+	local remote = requestSeedProductPurchaseRemote
+	if remote then
+		remote:FireServer({
+			ItemId = itemId,
+			Amount = amount,
+		})
+	end
 end
 
 local function submitPrimaryAction()
@@ -1397,6 +1658,58 @@ local function bindGui(): boolean
 	if not expansionTemplate or not expansionTemplate:IsA("Frame") then
 		warn("[FarmShopController] FarmShop missing ExpansionTemplate; selected rows will not show market preview gap.")
 	end
+	local bottomBar = detail:FindFirstChild("BottomBar")
+	local enterRobuxCandidate = bottomBar and bottomBar:FindFirstChild(SeedIAPConfig.SwitchToRobuxButtonName)
+	local buttonsCandidate = bottomBar and bottomBar:FindFirstChild(SeedIAPConfig.PurchaseButtonsContainerName)
+	local returnCoinsCandidate = buttonsCandidate and buttonsCandidate:FindFirstChild(SeedIAPConfig.SwitchToCoinsButtonName)
+	local completeIapUi = enterRobuxCandidate ~= nil
+		and enterRobuxCandidate:IsA("GuiButton")
+		and buttonsCandidate ~= nil
+		and buttonsCandidate:IsA("GuiObject")
+		and returnCoinsCandidate ~= nil
+		and returnCoinsCandidate:IsA("GuiButton")
+	table.clear(robuxButtonByAmount)
+	table.clear(robuxButtonTextByAmount)
+	robuxTextContextKey = ""
+	if completeIapUi and buttonsCandidate and buttonsCandidate:IsA("GuiObject") then
+		for buttonName, amount in SeedIAPConfig.PurchaseButtonAmounts do
+			local button = buttonsCandidate:FindFirstChild(buttonName)
+			if not button or not button:IsA("GuiButton") then
+				completeIapUi = false
+				break
+			end
+			local resolvedButtonText = getLayeredButtonText(button, "TextDisplay")
+			if not resolvedButtonText then
+				completeIapUi = false
+				break
+			end
+			setLayeredButtonText(resolvedButtonText, string.format("x%d", amount))
+			robuxButtonByAmount[amount] = button
+			robuxButtonTextByAmount[amount] = resolvedButtonText
+		end
+	end
+	if completeIapUi
+		and enterRobuxCandidate and enterRobuxCandidate:IsA("GuiButton")
+		and buttonsCandidate and buttonsCandidate:IsA("GuiObject")
+		and returnCoinsCandidate and returnCoinsCandidate:IsA("GuiButton")
+	then
+		switchToRobuxButton = enterRobuxCandidate
+		switchToCoinsButton = returnCoinsCandidate
+		robuxPurchaseButtons = buttonsCandidate
+		robuxUiReady = true
+	else
+		setGuiObjectVisible(enterRobuxCandidate, false)
+		setGuiObjectVisible(buttonsCandidate, false)
+		switchToRobuxButton = nil
+		switchToCoinsButton = nil
+		robuxPurchaseButtons = nil
+		robuxUiReady = false
+		table.clear(robuxButtonByAmount)
+		table.clear(robuxButtonTextByAmount)
+		warn(
+			"[FarmShopController] IAP UI requires BottomBar.SwitchToRobux plus BottomBar.RobuxPurchaseButtons.SwitchToCoin and Buy1/Buy3/Buy10 with two-layer purchase text; keeping the original coin purchase UI."
+		)
+	end
 	return true
 end
 
@@ -1407,6 +1720,7 @@ local function bindGuiActions()
 	if seedsTabButton then
 		seedsTabButton.Activated:Connect(function()
 			selectedMode = "Seeds"
+			purchaseMode = "Coins"
 			selectedItemId = getSelectedItemForMode("Seeds")
 			selectedAmount = FarmShopConfig.MinimumAmount
 			requestSeedState()
@@ -1420,6 +1734,7 @@ local function bindGuiActions()
 	if sellTabButton then
 		sellTabButton.Activated:Connect(function()
 			selectedMode = "Sell"
+			purchaseMode = "Coins"
 			selectedItemId = getSelectedItemForMode("Sell")
 			selectedAmount = FarmShopConfig.MinimumAmount
 			requestMarketState()
@@ -1436,6 +1751,24 @@ local function bindGuiActions()
 	local primary = getButton(rightDetail, "PrimaryButton")
 	local sellAll = getButton(rightDetail, "SellAllButton")
 	local restock = getButton(mainFrame, "RestockButton")
+	if switchToRobuxButton then
+		switchToRobuxButton.Activated:Connect(enterRobuxPurchaseMode)
+	end
+	if switchToCoinsButton then
+		switchToCoinsButton.Activated:Connect(returnToCoinsPurchaseMode)
+	end
+	for amount, button in robuxButtonByAmount do
+		local packAmount = amount
+		button.Activated:Connect(function()
+			submitSeedProductPurchase(packAmount)
+		end)
+		button.MouseEnter:Connect(function()
+			beginRobuxPriceHover(packAmount)
+		end)
+		button.MouseLeave:Connect(function()
+			endRobuxPriceHover(packAmount)
+		end)
+	end
 	if minus then
 		minus.Activated:Connect(function()
 			selectedAmount -= 1
@@ -1517,17 +1850,40 @@ local function bindPrompts()
 	end)
 end
 
+local function handlePromptSeedProductPurchase(productId: any)
+	if type(productId) ~= "number"
+		or productId ~= math.floor(productId)
+		or productId <= 0
+		or pendingProductId ~= nil
+	then
+		return
+	end
+	pendingProductId = productId
+	updatePurchaseModeUi()
+	local prompted, promptError = pcall(function()
+		MarketplaceService:PromptProductPurchase(player, productId)
+	end)
+	if not prompted then
+		pendingProductId = nil
+		updatePurchaseModeUi()
+		warn(string.format("[FarmShopController] PromptProductPurchase failed: %s", tostring(promptError)))
+	end
+end
+
 local function bindRemotes()
 	local folder = ReplicatedStorage:WaitForChild(NetworkConfig.FolderName)
 	requestBuyRemote = folder:WaitForChild(NetworkConfig.Events.RequestBuySeed) :: RemoteEvent
+	requestSeedProductPurchaseRemote = folder:WaitForChild(NetworkConfig.Events.RequestSeedProductPurchase) :: RemoteEvent
 	requestSeedStateRemote = folder:WaitForChild(NetworkConfig.Events.RequestSeedShopState) :: RemoteEvent
 	requestSeedRestockRemote = folder:WaitForChild(NetworkConfig.Events.RequestSeedShopRestock) :: RemoteEvent
 	requestSellRemote = folder:WaitForChild(NetworkConfig.Events.RequestSellProduce) :: RemoteEvent
 	requestMarketStateRemote = folder:WaitForChild(NetworkConfig.Events.RequestMarketState) :: RemoteEvent
 	local seedStateChanged = folder:WaitForChild(NetworkConfig.Events.SeedShopStateChanged) :: RemoteEvent
+	local promptSeedProductPurchase = folder:WaitForChild(NetworkConfig.Events.PromptSeedProductPurchase) :: RemoteEvent
 	local sellResult = folder:WaitForChild(NetworkConfig.Events.SellProduceResult) :: RemoteEvent
 	local marketStateChanged = folder:WaitForChild(NetworkConfig.Events.MarketStateChanged) :: RemoteEvent
 	seedStateChanged.OnClientEvent:Connect(applySeedState)
+	promptSeedProductPurchase.OnClientEvent:Connect(handlePromptSeedProductPurchase)
 	marketStateChanged.OnClientEvent:Connect(applyMarketState)
 	sellResult.OnClientEvent:Connect(function(payload)
 		if type(payload) ~= "table" then
@@ -1538,6 +1894,12 @@ local function bindRemotes()
 			return
 		end
 		queueRefreshRows()
+	end)
+	MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, _isPurchased)
+		if userId == player.UserId and pendingProductId == productId then
+			pendingProductId = nil
+			updatePurchaseModeUi()
+		end
 	end)
 end
 
