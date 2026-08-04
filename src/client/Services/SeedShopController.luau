@@ -296,7 +296,7 @@ local function formatRemaining(seconds: number): string
 	local wholeSeconds = math.max(0, math.floor(seconds))
 	local minutes = math.floor(wholeSeconds / 60)
 	local remainingSeconds = wholeSeconds % 60
-	return string.format("Restock in %dm %02ds", minutes, remainingSeconds)
+	return string.format("New stock in %d:%02d", minutes, remainingSeconds)
 end
 
 local function updateRestockText()

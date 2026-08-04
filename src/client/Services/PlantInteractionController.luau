@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块监听本地种子 Tool 输入，射线检测自有种植区并向服务端提交种植意图。
+-- 本模块监听本地种子 Tool 输入，以自有植物或种植面的第一可见命中决定是否提交种植意图。
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,15 +13,22 @@ local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local PlantInteractionController = {}
 local player = Players.LocalPlayer
 local toolConnections: { [Tool]: RBXScriptConnection } = {}
+local MAX_RAYCAST_HITS = 32
+local RAYCAST_EPSILON = 0.02
 
-local function getOwnPlantingAreas(): { Instance }
-	local areas = {}
+local function getOwnPlantingTargets(): ({ BasePart }, Folder?)
+	local areas: { BasePart } = {}
+	local plantsFolder: Folder? = nil
 	local gardens = Workspace:FindFirstChild("Gardens")
 	if not gardens then
-		return areas
+		return areas, nil
 	end
 	for _, plot in gardens:GetChildren() do
 		if plot:IsA("Model") and plot:GetAttribute("OwnerUserId") == player.UserId then
+			local plants = plot:FindFirstChild("Plants")
+			if plants and plants:IsA("Folder") then
+				plantsFolder = plants
+			end
 			local visual = plot:FindFirstChild("Visual")
 			if visual then
 				for _, name in { "PlantAreaColumn1", "PlantAreaColumn2" } do
@@ -40,7 +47,42 @@ local function getOwnPlantingAreas(): { Instance }
 			break
 		end
 	end
-	return areas
+	return areas, plantsFolder
+end
+
+local function isPlantingArea(part: BasePart, areas: { BasePart }): boolean
+	for _, area in areas do
+		if part == area then
+			return true
+		end
+	end
+	return false
+end
+
+local function isPlantTruss(part: BasePart): boolean
+	if part:GetAttribute("KLinePlantTruss") == true or string.match(part.Name, "^PlantTruss") then
+		return true
+	end
+	local current = part.Parent
+	while current do
+		if current.Name == "PlantTrusses" then
+			return true
+		end
+		if current:IsA("Model") and type(current:GetAttribute("PlantRecordId")) == "string" then
+			break
+		end
+		current = current.Parent
+	end
+	return false
+end
+
+local function canSkipPlantPart(part: BasePart): boolean
+	return part.Transparency >= 1
+		or part.LocalTransparencyModifier >= 1
+		or part.Name == "Root"
+		or part.Name == "BodyRoot"
+		or part.Name == "VisualRoot"
+		or isPlantTruss(part)
 end
 
 local function raycastPlantingArea(): RaycastResult?
@@ -48,17 +90,50 @@ local function raycastPlantingArea(): RaycastResult?
 	if not camera then
 		return nil
 	end
-	local areas = getOwnPlantingAreas()
+	local areas, plantsFolder = getOwnPlantingTargets()
 	if #areas == 0 then
 		return nil
+	end
+	local targets: { Instance } = {}
+	for _, area in areas do
+		table.insert(targets, area)
+	end
+	if plantsFolder then
+		table.insert(targets, plantsFolder)
 	end
 	local mousePosition = UserInputService:GetMouseLocation()
 	local ray = camera:ViewportPointToRay(mousePosition.X, mousePosition.Y)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = areas
+	params.FilterDescendantsInstances = targets
 	params.IgnoreWater = true
-	return Workspace:Raycast(ray.Origin, ray.Direction * ItemConfig.Limits.PlantRaycastDistance, params)
+	local direction = ray.Direction.Unit
+	local origin = ray.Origin
+	local remainingDistance = ItemConfig.Limits.PlantRaycastDistance
+	for _ = 1, MAX_RAYCAST_HITS do
+		local result = Workspace:Raycast(origin, direction * remainingDistance, params)
+		if not result then
+			return nil
+		end
+		local hit = result.Instance
+		if not hit:IsA("BasePart") then
+			return nil
+		end
+		if isPlantingArea(hit, areas) then
+			return result
+		end
+		if not plantsFolder or not hit:IsDescendantOf(plantsFolder) or not canSkipPlantPart(hit) then
+			-- 自有 Plants 下任何可见几何都静默阻挡种植；客户端不提交经济或库存结果。
+			return nil
+		end
+		local traveled = (result.Position - origin).Magnitude + RAYCAST_EPSILON
+		if traveled >= remainingDistance then
+			return nil
+		end
+		origin = result.Position + direction * RAYCAST_EPSILON
+		remainingDistance -= traveled
+	end
+	return nil
 end
 
 local function bindTool(tool: Tool, requestPlant: RemoteEvent)

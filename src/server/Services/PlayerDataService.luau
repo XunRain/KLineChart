@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local PlantGrowthIAPConfig = require(ReplicatedStorage.Shared.PlantGrowthIAPConfig)
 local PlotExpansionConfig = require(ReplicatedStorage.Shared.PlotExpansionConfig)
 local DataStoreConfig = require(script.Parent.Parent.Config.DataStoreConfig)
 
@@ -32,6 +33,22 @@ type PlayerData = {
 	Sheckles: number,
 	OwnedExpansions: number,
 	ProcessedDeveloperProductReceipts: { [string]: number },
+	SeedShopRefreshGeneration: number,
+	SeedShopPaidStockSnapshot: {
+		RefreshGeneration: number,
+		NaturalRefreshAt: number,
+		Stock: { [string]: number },
+	}?,
+	PendingPlantGrowthPurchases: { [string]: {
+		Scope: "Single" | "All",
+		ProductId: number,
+		RecordIds: { string },
+		RequestedAt: number,
+	} },
+	GrowthSkipCredits: {
+		Single: number,
+		All: number,
+	},
 	Inventory: {
 		Seeds: { [string]: number },
 		Produce: { [string]: number },
@@ -76,6 +93,13 @@ local function defaultData(): PlayerData
 		Sheckles = EconomyConfig.StartingSheckles,
 		OwnedExpansions = 0,
 		ProcessedDeveloperProductReceipts = {},
+		SeedShopRefreshGeneration = 0,
+		SeedShopPaidStockSnapshot = nil,
+		PendingPlantGrowthPurchases = {},
+		GrowthSkipCredits = {
+			Single = 0,
+			All = 0,
+		},
 		Inventory = {
 			Seeds = ItemConfig.GetStartingSeeds(),
 			Produce = {},
@@ -129,6 +153,41 @@ local function normalize(raw: any): PlayerData
 		0,
 		maxExpansionLevel()
 	)
+	normalized.SeedShopRefreshGeneration = math.clamp(
+		math.floor(finiteNumber(raw.SeedShopRefreshGeneration, 0)),
+		0,
+		9007199254740991
+	)
+	if type(raw.SeedShopPaidStockSnapshot) == "table" then
+		local refreshGeneration = math.clamp(
+			math.floor(finiteNumber(raw.SeedShopPaidStockSnapshot.RefreshGeneration, 0)),
+			0,
+			9007199254740991
+		)
+		local naturalRefreshAt = math.max(
+			0,
+			math.floor(finiteNumber(raw.SeedShopPaidStockSnapshot.NaturalRefreshAt, 0))
+		)
+		if refreshGeneration > 0
+			and refreshGeneration == normalized.SeedShopRefreshGeneration
+			and naturalRefreshAt > 0
+			and type(raw.SeedShopPaidStockSnapshot.Stock) == "table"
+		then
+			local stock: { [string]: number } = {}
+			for itemId in ItemConfig.Items do
+				stock[itemId] = math.clamp(
+					math.floor(finiteNumber(raw.SeedShopPaidStockSnapshot.Stock[itemId], 0)),
+					0,
+					EconomyConfig.MaximumSeedInventory
+				)
+			end
+			normalized.SeedShopPaidStockSnapshot = {
+				RefreshGeneration = refreshGeneration,
+				NaturalRefreshAt = naturalRefreshAt,
+				Stock = stock,
+			}
+		end
+	end
 	if type(raw.ProcessedDeveloperProductReceipts) == "table" then
 		for purchaseId, processedAt in raw.ProcessedDeveloperProductReceipts do
 			if type(purchaseId) == "string" and #purchaseId > 0 and #purchaseId <= 256 then
@@ -136,6 +195,50 @@ local function normalize(raw: any): PlayerData
 					0,
 					math.floor(finiteNumber(processedAt, 0))
 				)
+			end
+		end
+	end
+	if type(raw.GrowthSkipCredits) == "table" then
+		normalized.GrowthSkipCredits.Single = math.max(0, math.floor(finiteNumber(raw.GrowthSkipCredits.Single, 0)))
+		normalized.GrowthSkipCredits.All = math.max(0, math.floor(finiteNumber(raw.GrowthSkipCredits.All, 0)))
+	end
+	if type(raw.PendingPlantGrowthPurchases) == "table" then
+		for intentKey, intent in raw.PendingPlantGrowthPurchases do
+			if type(intentKey) == "string"
+				and #intentKey > 0
+				and #intentKey <= 128
+				and type(intent) == "table"
+				and PlantGrowthIAPConfig.IsScope(intent.Scope)
+				and type(intent.ProductId) == "number"
+				and intent.ProductId > 0
+				and math.abs(intent.ProductId) < math.huge
+				and intent.ProductId == math.floor(intent.ProductId)
+				and type(intent.RecordIds) == "table"
+			then
+				local recordIds: { string } = {}
+				local seenRecordIds: { [string]: boolean } = {}
+				for _, recordId in intent.RecordIds do
+					if #recordIds >= ItemConfig.Limits.MaxPlantsPerPlot then
+						break
+					end
+					if type(recordId) == "string"
+						and #recordId > 0
+						and #recordId <= 128
+						and not seenRecordIds[recordId]
+					then
+						seenRecordIds[recordId] = true
+						table.insert(recordIds, recordId)
+					end
+				end
+				local scope = intent.Scope :: "Single" | "All"
+				if (scope == "All" and #recordIds > 0) or (scope == "Single" and #recordIds == 1) then
+					normalized.PendingPlantGrowthPurchases[intentKey] = {
+						Scope = scope,
+						ProductId = intent.ProductId,
+						RecordIds = recordIds,
+						RequestedAt = math.max(0, math.floor(finiteNumber(intent.RequestedAt, 0))),
+					}
+				end
 			end
 		end
 	end

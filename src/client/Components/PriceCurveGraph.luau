@@ -549,6 +549,13 @@ local function renderGuides(container: Frame, data: { number }, chartTheme: Reso
 	configureGuide(container, 3, height * 0.75, height, resolved.Min, chartTheme)
 end
 
+local function hidePlottrAxisBaseline(canvas: GuiObject)
+	local axisBaseline = canvas:FindFirstChild("AxisBaseline", true)
+	if axisBaseline and axisBaseline:IsA("GuiObject") then
+		axisBaseline.Visible = false
+	end
+end
+
 local function renderWithPlottr(container: Frame, data: { number }, chartTheme: ResolvedTheme, guideValues: GuideValues?): boolean
 	local absoluteSize = container.AbsoluteSize
 	if absoluteSize.X < PLOTTR_MIN_CANVAS_SIZE or absoluteSize.Y < PLOTTR_MIN_CANVAS_SIZE then
@@ -635,6 +642,7 @@ local function renderWithPlottr(container: Frame, data: { number }, chartTheme: 
 			canvas.ZIndex = container.ZIndex + 1
 			canvas.BackgroundTransparency = chartTheme.BackgroundTransparency
 			canvas.ClipsDescendants = true
+			hidePlottrAxisBaseline(canvas)
 		end
 		renderGuides(container, data, chartTheme, guideValues)
 	end)

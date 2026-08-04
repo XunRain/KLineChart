@@ -17,8 +17,10 @@ local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
 local SeedIAPConfig = require(ReplicatedStorage.Shared.SeedIAPConfig)
+local SeedShopRestockIAPConfig = require(ReplicatedStorage.Shared.SeedShopRestockIAPConfig)
 local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
 local NpcPromptVisualController = require(script.Parent.NpcPromptVisualController)
+local DeveloperProductPromptController = require(script.Parent.DeveloperProductPromptController)
 local PriceCurveGraph = require(script.Parent.Parent.Components.PriceCurveGraph)
 local ViewportPreviewCamera = require(script.Parent.Parent.Components.ViewportPreviewCamera)
 
@@ -118,15 +120,23 @@ local refreshQueued = false
 local rebuildRows: (() -> ())? = nil
 local priceCurveRenderSerial = 0
 local robuxUiReady = false
-local pendingProductId: number? = nil
 local lastProductRequestAt = 0
+local lastRestockRequestAt = 0
 local robuxPriceByProductId: { [number]: number | false } = {}
 local robuxPriceFetchInFlight: { [number]: boolean } = {}
 local robuxHoveredByAmount: { [number]: boolean } = {}
 local robuxTextContextKey = ""
-local MARKET_PRICE_UNCHANGED_COLOR = Color3.fromRGB(52, 160, 212)
-local MARKET_PRICE_RISING_COLOR = Color3.fromRGB(65, 184, 88)
-local MARKET_PRICE_FALLING_COLOR = Color3.fromRGB(220, 86, 72)
+local restockButtonText: LayeredButtonText? = nil
+local restockDefaultBaseText = ""
+local restockDefaultFaceText = ""
+local restockHovered = false
+local MARKET_PRICE_UNCHANGED_COLOR = Color3.fromRGB(34, 111, 174)
+local MARKET_PRICE_RISING_COLOR = Color3.fromRGB(41, 116, 55)
+local MARKET_PRICE_FALLING_COLOR = Color3.fromRGB(180, 66, 52)
+local MARKET_REFRESH_TEXT_COLOR = Color3.fromRGB(114, 82, 56)
+local MARKET_PANEL_PRICE_COLOR = Color3.fromRGB(227, 172, 43)
+local invalidSelectedOverlayWarned: { [GuiButton]: boolean } = {}
+local costTextWarningsShown: { [string]: boolean } = {}
 
 local function disconnect(connections: { RBXScriptConnection })
 	for _, connection in connections do
@@ -168,6 +178,23 @@ local function getLayeredButtonText(button: GuiButton, containerName: string): L
 	local face = base:FindFirstChild("TextLabel")
 	if not face or not face:IsA("TextLabel") then
 		warn(string.format("[FarmShopController] %s.%s.TextLabel.TextLabel must be a TextLabel.", button:GetFullName(), containerName))
+		return nil
+	end
+	return {
+		Base = base,
+		Face = face,
+	}
+end
+
+local function getDirectLayeredButtonText(button: GuiButton): LayeredButtonText?
+	local base = button:FindFirstChild("TextLabel")
+	if not base or not base:IsA("TextLabel") then
+		warn(string.format("[FarmShopController] %s.TextLabel must be a TextLabel.", button:GetFullName()))
+		return nil
+	end
+	local face = base:FindFirstChild("TextLabel")
+	if not face or not face:IsA("TextLabel") then
+		warn(string.format("[FarmShopController] %s.TextLabel.TextLabel must be a TextLabel.", button:GetFullName()))
 		return nil
 	end
 	return {
@@ -458,13 +485,13 @@ local function renderPriceCurve(values: { number }, guideValues: PriceCurveGraph
 	local renderSerial = priceCurveRenderSerial
 
 	local theme = {
-		GridColor = Color3.fromRGB(204, 166, 105),
-		GridTransparency = 0.52,
+		GridColor = Color3.fromRGB(200, 163, 107),
+		GridTransparency = 0.48,
 		LineColor = MARKET_PRICE_UNCHANGED_COLOR,
 		RisingLineColor = MARKET_PRICE_RISING_COLOR,
 		FallingLineColor = MARKET_PRICE_FALLING_COLOR,
 		DotColor = MARKET_PRICE_UNCHANGED_COLOR,
-		DotStrokeColor = Color3.fromRGB(149, 96, 49),
+		DotStrokeColor = Color3.fromRGB(122, 73, 42),
 	}
 	local function draw()
 		if renderSerial ~= priceCurveRenderSerial then
@@ -490,7 +517,7 @@ local function formatRemaining(seconds: number): string
 	local wholeSeconds = math.max(0, math.floor(seconds))
 	local minutes = math.floor(wholeSeconds / 60)
 	local remainingSeconds = wholeSeconds % 60
-	return string.format("Restock in %dm %02ds", minutes, remainingSeconds)
+	return string.format("New stock in %d:%02d", minutes, remainingSeconds)
 end
 
 local function formatMarketRemaining(seconds: number): string
@@ -608,8 +635,7 @@ local function setRowSelected(row: Frame, selected: boolean)
 	local main = row:FindFirstChild("Main_Frame")
 	local stroke = main and main:FindFirstChild("UIStroke")
 	if stroke and stroke:IsA("UIStroke") then
-		stroke.Color = Color3.fromRGB(65, 49, 32)
-		stroke.Thickness = 1
+		stroke.Color = if selected then Color3.fromRGB(75, 157, 224) else Color3.fromRGB(91, 58, 39)
 	end
 end
 
@@ -637,6 +663,39 @@ local function clampSelectedAmount()
 	end
 end
 
+local function getOrCreateSelectedOverlay(button: GuiButton): Frame?
+	local candidate = button:FindFirstChild("SelectedOverlay")
+	if candidate and not candidate:IsA("Frame") then
+		if not invalidSelectedOverlayWarned[button] then
+			invalidSelectedOverlayWarned[button] = true
+			warn(string.format("[FarmShopController] %s.SelectedOverlay must be a Frame; skipping tab overlay.", button:GetFullName()))
+		end
+		return nil
+	end
+
+	local overlay: Frame
+	if candidate and candidate:IsA("Frame") then
+		overlay = candidate
+	else
+		overlay = Instance.new("Frame")
+		overlay.Name = "SelectedOverlay"
+	end
+	overlay.BackgroundColor3 = Color3.fromRGB(36, 23, 15)
+	overlay.BackgroundTransparency = 0.68
+	overlay.Size = UDim2.fromScale(1, 1)
+	overlay.Position = UDim2.fromScale(0, 0)
+	overlay.AnchorPoint = Vector2.new(0, 0)
+	overlay.BorderSizePixel = 0
+	overlay.ZIndex = 2
+	overlay.Active = false
+	overlay.Selectable = false
+	overlay.Interactable = false
+	if not overlay.Parent then
+		overlay.Parent = button
+	end
+	return overlay
+end
+
 local function updateTabVisuals()
 	local seedsTab = seedsTabButton
 	local sellTab = sellTabButton
@@ -645,14 +704,45 @@ local function updateTabVisuals()
 		{ Button = sellTab, Active = selectedMode == "Sell" },
 	} do
 		local button = pair.Button
-		if button and button:IsA("GuiObject") then
-			button.BackgroundColor3 = if pair.Active then Color3.fromRGB(78, 139, 46) else Color3.fromRGB(212, 172, 101)
+		if button then
+			local overlay = getOrCreateSelectedOverlay(button)
+			if overlay then
+				overlay.Visible = pair.Active
+			end
 		end
 	end
 end
 
+local function getStockBar(): GuiObject?
+	local frame = mainFrame
+	local body = frame and frame:FindFirstChild("Body")
+	local stockBar = body and body:FindFirstChild("StockBar")
+	return if stockBar and stockBar:IsA("GuiObject") then stockBar else nil
+end
+
+local function getRestockButton(): GuiButton?
+	local frame = mainFrame
+	local stockBar = getStockBar()
+	local stockBarButton = stockBar and stockBar:FindFirstChild("RestockButton")
+	if stockBarButton and stockBarButton:IsA("GuiButton") then
+		return stockBarButton
+	end
+	local header = frame and frame:FindFirstChild("Header")
+	local headerButton = header and header:FindFirstChild("RestockButton")
+	if headerButton and headerButton:IsA("GuiButton") then
+		return headerButton
+	end
+	return getButton(frame, "RestockButton")
+end
+
 local function getRestockTimerLabel(): TextLabel?
 	local frame = mainFrame
+	local stockBar = getStockBar()
+	local stockBarRefreshIn = stockBar and stockBar:FindFirstChild("RefreshIn")
+	local stockBarTimer = stockBarRefreshIn and stockBarRefreshIn:FindFirstChild("Timer")
+	if stockBarTimer and stockBarTimer:IsA("TextLabel") then
+		return stockBarTimer
+	end
 	local header = frame and frame:FindFirstChild("Header")
 	local refreshIn = header and header:FindFirstChild("RefreshIn")
 	local timer = refreshIn and refreshIn:FindFirstChild("Timer")
@@ -664,18 +754,37 @@ end
 
 local function setRestockWidgetsVisible(visible: boolean)
 	local frame = mainFrame
+	local stockBar = getStockBar()
+	if stockBar then
+		stockBar.Visible = true
+		local stockBarRefreshIn = stockBar:FindFirstChild("RefreshIn")
+		if stockBarRefreshIn and stockBarRefreshIn:IsA("GuiObject") then
+			stockBarRefreshIn.Visible = true
+		end
+		local stockBarRestockButton = stockBar:FindFirstChild("RestockButton")
+		if stockBarRestockButton and stockBarRestockButton:IsA("GuiObject") then
+			stockBarRestockButton.Visible = true
+		end
+	end
+	local legacyVisible = stockBar == nil and visible
 	local header = frame and frame:FindFirstChild("Header")
 	local refreshIn = header and header:FindFirstChild("RefreshIn")
 	if refreshIn and refreshIn:IsA("GuiObject") then
-		refreshIn.Visible = visible
+		refreshIn.Visible = legacyVisible
+	end
+	local headerRestockButton = header and header:FindFirstChild("RestockButton")
+	if headerRestockButton and headerRestockButton:IsA("GuiObject") then
+		headerRestockButton.Visible = legacyVisible
 	end
 	local fallbackLabel = getLabel(frame, "RestockText")
 	if fallbackLabel then
-		fallbackLabel.Visible = visible
+		fallbackLabel.Visible = legacyVisible
 	end
-	local restockButton = getButton(frame, "RestockButton")
-	if restockButton then
-		restockButton.Visible = visible
+	if not stockBar then
+		local restockButton = getRestockButton()
+		if restockButton then
+			restockButton.Visible = legacyVisible
+		end
 	end
 end
 
@@ -685,7 +794,7 @@ local function updateRestockText()
 	if not label then
 		return
 	end
-	if selectedMode ~= "Seeds" then
+	if selectedMode ~= "Seeds" and not getStockBar() then
 		return
 	end
 	if currentRefreshAt <= 0 then
@@ -698,6 +807,7 @@ end
 local function getMarketRefreshLabel(): TextLabel?
 	local cached = marketRefreshLabel
 	if cached and cached.Parent then
+		cached.TextColor3 = MARKET_REFRESH_TEXT_COLOR
 		return cached
 	end
 
@@ -709,6 +819,7 @@ local function getMarketRefreshLabel(): TextLabel?
 	for _, name in { "MarketRefreshTimer", "PriceRefreshTimer", "RefreshTimer", "RefreshCountdown" } do
 		local label = getLabel(detail, name)
 		if label then
+			label.TextColor3 = MARKET_REFRESH_TEXT_COLOR
 			marketRefreshLabel = label
 			return label
 		end
@@ -732,7 +843,7 @@ local function getMarketRefreshLabel(): TextLabel?
 	label.Position = UDim2.new(1, -10, itemName.Position.Y.Scale, itemName.Position.Y.Offset + math.max(8, itemName.AbsoluteSize.Y * 0.5))
 	label.Size = UDim2.fromOffset(130, 18)
 	label.Text = ""
-	label.TextColor3 = Color3.fromRGB(85, 63, 38)
+	label.TextColor3 = MARKET_REFRESH_TEXT_COLOR
 	label.TextScaled = true
 	label.TextStrokeColor3 = Color3.fromRGB(255, 242, 194)
 	label.TextStrokeTransparency = 0.35
@@ -820,7 +931,19 @@ local function resetRobuxHoverText()
 	end
 end
 
+local requestProductPrice: (number) -> ()
+
 local function setHoveredProductPrice(productId: number, price: number?)
+	local restockText = restockButtonText
+	if restockHovered and restockText and SeedShopRestockIAPConfig.GetProductId() == productId then
+		local displayPrice = price or SeedShopRestockIAPConfig.GetDisplayPrice()
+		if displayPrice then
+			setLayeredButtonText(
+				restockText,
+				string.format("%s %d", SeedShopRestockIAPConfig.RobuxCurrencyIconText, displayPrice)
+			)
+		end
+	end
 	if selectedMode ~= "Seeds" or purchaseMode ~= "Robux" then
 		return
 	end
@@ -844,8 +967,42 @@ local function setHoveredProductPrice(productId: number, price: number?)
 	end
 end
 
+local function beginRestockPriceHover()
+	restockHovered = true
+	local textLayers = restockButtonText
+	local displayPrice = SeedShopRestockIAPConfig.GetDisplayPrice()
+	if textLayers and displayPrice then
+		setLayeredButtonText(
+			textLayers,
+			string.format("%s %d", SeedShopRestockIAPConfig.RobuxCurrencyIconText, displayPrice)
+		)
+	end
+	if not SeedShopRestockIAPConfig.UseMarketplacePurchases then
+		return
+	end
+	local productId = SeedShopRestockIAPConfig.GetProductId()
+	if not productId then
+		return
+	end
+	local cachedPrice = robuxPriceByProductId[productId]
+	if type(cachedPrice) == "number" then
+		setHoveredProductPrice(productId, cachedPrice)
+	elseif cachedPrice == nil then
+		requestProductPrice(productId)
+	end
+end
+
+local function endRestockPriceHover()
+	restockHovered = false
+	local textLayers = restockButtonText
+	if textLayers then
+		textLayers.Base.Text = restockDefaultBaseText
+		textLayers.Face.Text = restockDefaultFaceText
+	end
+end
+
 -- 异步读取并按商品 ID 缓存 Roblox 权威价格；失败和非法价格只缓存未知状态。
-local function requestProductPrice(productId: number)
+requestProductPrice = function(productId: number)
 	if robuxPriceFetchInFlight[productId] or robuxPriceByProductId[productId] ~= nil then
 		return
 	end
@@ -945,7 +1102,7 @@ local function updatePurchaseModeUi()
 	local ownedSeeds = if itemId then getInventoryCount("Seeds", itemId) else EconomyConfig.MaximumSeedInventory
 	local inventorySpace = math.max(0, EconomyConfig.MaximumSeedInventory - ownedSeeds)
 	for amount, button in robuxButtonByAmount do
-		local enabled = isRobuxMode and itemId ~= nil and inventorySpace >= amount and pendingProductId == nil
+		local enabled = isRobuxMode and itemId ~= nil and inventorySpace >= amount and not DeveloperProductPromptController.IsPending()
 		button.Visible = isRobuxMode
 		button.Active = enabled
 		button.AutoButtonColor = enabled
@@ -1118,6 +1275,60 @@ local function clearRows()
 	end
 end
 
+local function warnCostTextOnce(key: string, message: string)
+	if costTextWarningsShown[key] then
+		return
+	end
+	costTextWarningsShown[key] = true
+	warn("[FarmShopController] " .. message)
+end
+
+-- 同步模板明确约定的 Cost_Text 底字/前景字，并互斥切换正常与缺货渐变。
+local function configureRowCostText(main: Frame, itemId: string, definition: ItemConfig.ItemDefinition)
+	local stockAvailable = selectedMode == "Sell" or getSeedStock(itemId) > 0
+	local price = if selectedMode == "Seeds"
+		then definition.SeedBuyPrice
+		else getProduceMarketPrice(itemId, definition)
+	local displayText = if stockAvailable then formatPriceNumber(price) .. "$" else "NO STOCK"
+	local costRoot = main:FindFirstChild("Cost_Text")
+	if not costRoot then
+		warnCostTextOnce("MissingRoot", "Main_Frame.Cost_Text is missing; row price cannot be displayed.")
+		return
+	end
+	if costRoot:IsA("GuiObject") then
+		costRoot.Visible = true
+	else
+		warnCostTextOnce("InvalidRootGui", "Main_Frame.Cost_Text must be a GuiObject to be shown.")
+	end
+	if costRoot:IsA("TextLabel") then
+		costRoot.Text = displayText
+	else
+		warnCostTextOnce("InvalidRootText", "Main_Frame.Cost_Text must be a TextLabel for layered price text.")
+	end
+	local faceCandidate = costRoot:FindFirstChild("TextLabel")
+	local face: TextLabel? = nil
+	if faceCandidate and faceCandidate:IsA("TextLabel") then
+		face = faceCandidate
+		face.Text = displayText
+	else
+		warnCostTextOnce("MissingFace", "Main_Frame.Cost_Text.TextLabel must be a direct TextLabel child.")
+	end
+	if face then
+		local normalGradient = face:FindFirstChild("UIGradient")
+		if normalGradient and normalGradient:IsA("UIGradient") then
+			normalGradient.Enabled = stockAvailable
+		else
+			warnCostTextOnce("MissingNormalGradient", "Main_Frame.Cost_Text.TextLabel.UIGradient must be a direct UIGradient child.")
+		end
+		local noStockGradient = face:FindFirstChild("NoStock")
+		if noStockGradient and noStockGradient:IsA("UIGradient") then
+			noStockGradient.Enabled = not stockAvailable
+		else
+			warnCostTextOnce("MissingNoStockGradient", "Main_Frame.Cost_Text.TextLabel.NoStock must be a direct UIGradient child.")
+		end
+	end
+end
+
 local function configureRow(row: Frame, itemId: string, definition: ItemConfig.ItemDefinition, order: number)
 	row.Name = "FarmShopItem_" .. itemId
 	row.LayoutOrder = order
@@ -1131,9 +1342,8 @@ local function configureRow(row: Frame, itemId: string, definition: ItemConfig.I
 	local displayName = if selectedMode == "Seeds" then definition.DisplayName .. " Seed" else string.format("%s x%d", definition.DisplayName, ownedProduce)
 	local stockText = string.format("x%d in stock", getSeedStock(itemId))
 	setLabelText(main:FindFirstChild("Seed_Text"), displayName)
-	local costText = main:FindFirstChild("Cost_Text")
-	setLabelText(costText, "")
-	setNamedGuiObjectsVisible(main, { "Cost", "Cost_Text", "Price", "Price_Text", "CoinIcon", "CoinsIcon" }, false)
+	setNamedGuiObjectsVisible(main, { "Cost", "Price", "Price_Text", "CoinIcon", "CoinsIcon" }, false)
+	configureRowCostText(main, itemId, definition)
 	local stockLabel = main:FindFirstChild("Stock_Text")
 	setLabelText(stockLabel, stockText)
 	setGuiObjectVisible(stockLabel, selectedMode == "Seeds")
@@ -1212,11 +1422,7 @@ local function updateExpansionMarketVisuals(expansion: Frame, itemId: string, de
 		trendTextLabel.Text = trendText
 	end
 	setGuiObjectVisible(trendTag, true)
-	local priceColor = MARKET_PRICE_UNCHANGED_COLOR
-	if selectedMode == "Sell" then
-		priceColor = getPriceTrendColor(priceHistory)
-	end
-	setTextColor(marketPriceValue, priceColor)
+	setTextColor(marketPriceValue, MARKET_PANEL_PRICE_COLOR)
 end
 
 local function configureExpansion(expansion: Frame, itemId: string, definition: ItemConfig.ItemDefinition, order: number)
@@ -1295,6 +1501,23 @@ local function queueRefreshRows()
 			rebuild()
 		end
 	end)
+end
+
+-- Sell 行价格随完整市场快照原地刷新，保留当前列表实例、选择与滚动位置。
+local function refreshExistingSellRowCosts()
+	local gui = screenGui
+	if selectedMode ~= "Sell" or not gui or not gui.Enabled then
+		return
+	end
+	for itemId, row in rowByItem do
+		if row.Parent then
+			local main = row:FindFirstChild("Main_Frame")
+			local definition = ItemConfig.Get(itemId)
+			if main and main:IsA("Frame") and definition then
+				configureRowCostText(main, itemId, definition)
+			end
+		end
+	end
 end
 
 -- 市场快照只原地更新现有展开栏和详情，避免改变列表实例、滚动位置或重播展开动画。
@@ -1387,6 +1610,7 @@ local function applyMarketState(snapshot: MarketSnapshot)
 			end
 		end
 	end
+	refreshExistingSellRowCosts()
 	local nextSelectedState = if itemId then marketByItem[itemId] else nil
 	if hasSameMarketVisualState(previousSelectedState, nextSelectedState) then
 		return
@@ -1454,7 +1678,7 @@ local function submitSeedProductPurchase(amount: number)
 		return
 	end
 	local itemId = selectedItemId
-	if not itemId or not ItemConfig.Get(itemId) or not SeedIAPConfig.IsPackAmount(amount) or pendingProductId ~= nil then
+	if not itemId or not ItemConfig.Get(itemId) or not SeedIAPConfig.IsPackAmount(amount) or DeveloperProductPromptController.IsPending() then
 		return
 	end
 	local now = os.clock()
@@ -1535,9 +1759,17 @@ local function submitSellAll()
 end
 
 local function submitManualRestock()
-	if selectedMode ~= "Seeds" then
+	if selectedMode ~= "Seeds" and not getStockBar() then
 		return
 	end
+	if DeveloperProductPromptController.IsPending() then
+		return
+	end
+	local now = os.clock()
+	if now - lastRestockRequestAt < math.max(0.1, SeedShopRestockIAPConfig.RequestCooldown) then
+		return
+	end
+	lastRestockRequestAt = now
 	local remote = requestSeedRestockRemote
 	if remote then
 		remote:FireServer()
@@ -1750,7 +1982,7 @@ local function bindGuiActions()
 	local amountInput = getTextBox(rightDetail, "AmountText")
 	local primary = getButton(rightDetail, "PrimaryButton")
 	local sellAll = getButton(rightDetail, "SellAllButton")
-	local restock = getButton(mainFrame, "RestockButton")
+	local restock = getRestockButton()
 	if switchToRobuxButton then
 		switchToRobuxButton.Activated:Connect(enterRobuxPurchaseMode)
 	end
@@ -1796,7 +2028,15 @@ local function bindGuiActions()
 		sellAll.Activated:Connect(submitSellAll)
 	end
 	if restock then
+		restockButtonText = getDirectLayeredButtonText(restock)
+		local textLayers = restockButtonText
+		if textLayers then
+			restockDefaultBaseText = textLayers.Base.Text
+			restockDefaultFaceText = textLayers.Face.Text
+		end
 		restock.Activated:Connect(submitManualRestock)
+		restock.MouseEnter:Connect(beginRestockPriceHover)
+		restock.MouseLeave:Connect(endRestockPriceHover)
 	end
 end
 
@@ -1850,22 +2090,15 @@ local function bindPrompts()
 	end)
 end
 
-local function handlePromptSeedProductPurchase(productId: any)
+local function handlePromptProductPurchase(productId: any)
 	if type(productId) ~= "number"
 		or productId ~= math.floor(productId)
 		or productId <= 0
-		or pendingProductId ~= nil
 	then
 		return
 	end
-	pendingProductId = productId
-	updatePurchaseModeUi()
-	local prompted, promptError = pcall(function()
-		MarketplaceService:PromptProductPurchase(player, productId)
-	end)
+	local prompted, promptError = DeveloperProductPromptController.Prompt(productId)
 	if not prompted then
-		pendingProductId = nil
-		updatePurchaseModeUi()
 		warn(string.format("[FarmShopController] PromptProductPurchase failed: %s", tostring(promptError)))
 	end
 end
@@ -1880,10 +2113,12 @@ local function bindRemotes()
 	requestMarketStateRemote = folder:WaitForChild(NetworkConfig.Events.RequestMarketState) :: RemoteEvent
 	local seedStateChanged = folder:WaitForChild(NetworkConfig.Events.SeedShopStateChanged) :: RemoteEvent
 	local promptSeedProductPurchase = folder:WaitForChild(NetworkConfig.Events.PromptSeedProductPurchase) :: RemoteEvent
+	local promptSeedShopRestockPurchase = folder:WaitForChild(NetworkConfig.Events.PromptSeedShopRestockPurchase) :: RemoteEvent
 	local sellResult = folder:WaitForChild(NetworkConfig.Events.SellProduceResult) :: RemoteEvent
 	local marketStateChanged = folder:WaitForChild(NetworkConfig.Events.MarketStateChanged) :: RemoteEvent
 	seedStateChanged.OnClientEvent:Connect(applySeedState)
-	promptSeedProductPurchase.OnClientEvent:Connect(handlePromptSeedProductPurchase)
+	promptSeedProductPurchase.OnClientEvent:Connect(handlePromptProductPurchase)
+	promptSeedShopRestockPurchase.OnClientEvent:Connect(handlePromptProductPurchase)
 	marketStateChanged.OnClientEvent:Connect(applyMarketState)
 	sellResult.OnClientEvent:Connect(function(payload)
 		if type(payload) ~= "table" then
@@ -1895,12 +2130,7 @@ local function bindRemotes()
 		end
 		queueRefreshRows()
 	end)
-	MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, _isPurchased)
-		if userId == player.UserId and pendingProductId == productId then
-			pendingProductId = nil
-			updatePurchaseModeUi()
-		end
-	end)
+	DeveloperProductPromptController.ConnectChanged(updatePurchaseModeUi)
 end
 
 -- 初始化合并商店控制器，并注入界面视觉与只读天气状态依赖。

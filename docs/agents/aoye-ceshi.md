@@ -29,7 +29,7 @@ KLineChart 已实现首版种植与存档代码，但尚未完成 Studio Play �
 - 应分别验证可用 DataStore、Studio API 不可用时的内存降级、会话锁、自动保存和退出释放；没有实际证据时不得写成持久化已通过。
 - 已接入 Carrot、Strawberry、Blueberry 植株预制体和 Strawberry、Blueberry 果实预制体；应验收 Strawberry/Blueberry 的成熟果实保留显示、只有第一个空 FruitSlot 处于生长中、玩家不收获时也会逐颗补满、满槽后暂停、收获一颗后只消耗一颗产物并从空位重新计时、恢复阶段、资源缺失退种和客户端中途加入表现。定制 UI 仍未接入。
 - 已实现代码测试菜单；当前 `TestMenuConfig.AllowAllPlayers=true` 时应验证所有玩家都能看到并使用测试菜单，改回 false 后再验证非白名单完全不创建 UI 且伪造 Remote 无奖励。玩家打开后先看到“种子 / 金币 / 天气”一级菜单，点击后展开对应二级动作；种子动作每次只增加配置指定的 5 个种子，金币动作只增加配置指定的 1K/1M/1B Sheckles，天气动作只允许开始 Rain、清空当前天气、强制 Day/Sunset/Night 或恢复自动昼夜，并覆盖冷却、未知动作、重生去重和移动端布局。
-- 已实现 Schema v2 的 Sheckles 和首版种子商店刷新；客户端克隆 `SeedShop.Frame.NormalShop.ItemTemplate`/合并商店模板行，应验证 v1/缺字段档案补 20 且原植物库存保留，库存数量以 `SeedShopConfig` 当前规则为准、5 分钟 Restock 倒计时、合并商店刷新按钮会免费跳过当前服务器本轮等待并广播新库存、按数量购买后库存按数量减少、售罄后不能继续购买，以及余额不足、远距、未知 itemId、高频和伪造价格/数量/库存请求完全不变更数据。
+- 已实现 Schema v5 的 Sheckles、成长权益及个人种子商店刷新代次/剩余库存快照；客户端克隆 `SeedShop.Frame.NormalShop.ItemTemplate`/合并商店模板行，应验证旧档货币、植物和库存完整保留，库存数量以 `SeedShopConfig` 当前规则为准、5 分钟 Restock 倒计时、39 R$ 商品只刷新购买者个人库存、同一有效期重连恢复已扣余量而非满库存、到期回到自然库存、按数量购买后库存按数量减少、售罄后不能继续购买，以及余额不足、远距、未知 itemId、高频和伪造价格/数量/库存请求完全不变更数据。
 - 应验证 `PlayerGui.HUD.Currencies.CoinsCounter.TextLabel` 及其子级 `TextLabel` 启动后都不再停留在 Studio 模板假值，会同步显示 `KLineInventory.Sheckles`；购买种子、出售产物、重生和 HUD 重新克隆后都应实时更新，客户端手改 HUD 文本或 `KLineInventory.Sheckles` 不得影响服务端结算。
 - 应验证种子商店 `ViewportFrame` 预览强制使用 `ReplicatedStorage.Assets.Seeds.Carrot`、`Seeds.Strawberry` 与 `Seeds.Blueberry`，缺资源时留空告警，不得继续显示模板红色占位块。
 - 应验证 SeedShop 与测试面板重叠时 Blur/FOV 只开启一次，最后一个 owner 关闭才恢复；覆盖 CurrentCamera 切换、重生、owner 销毁和缺 UI/Prompt 安全降级。

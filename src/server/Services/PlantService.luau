@@ -923,27 +923,50 @@ function PlantService.RemoveRecord(recordId: string)
 	end
 end
 
--- 将重复结果植物的果实槽状态同步到运行时模型，并按成熟果实数刷新收获提示。
-function PlantService.UpdateRepeatRecord(record: PlantRecord)
+-- 将权威成长记录同步到运行时属性、果实槽、收获 Prompt 与攀爬碰撞，不在事务外修改存档记录。
+function PlantService.SyncGrowthRecord(record: PlantRecord): boolean
 	local model = modelsByRecord[record.recordId]
 	if not model then
-		return
+		return false
 	end
 	local definition = ItemConfig.Get(record.plantId)
+	if not definition then
+		return false
+	end
+	model:SetAttribute("PlantedAt", record.plantedAt)
+	model:SetAttribute("NextHarvestAt", record.nextHarvestAt)
+	model:SetAttribute("HarvestCount", record.harvestCount)
 	local slotCount = getFruitSlotCount(model)
-	if definition and definition.HarvestType == "Repeat" and slotCount then
-		setRepeatAttributes(model, record, definition, slotCount, os.time())
-	else
-		model:SetAttribute("NextHarvestAt", record.nextHarvestAt)
-		model:SetAttribute("HarvestCount", record.harvestCount)
+	if definition.HarvestType == "Repeat" and slotCount then
+		local visualRecord: PlantRecord = {
+			recordId = record.recordId,
+			plantId = record.plantId,
+			position = record.position,
+			rotationY = record.rotationY,
+			plantedAt = record.plantedAt,
+			nextHarvestAt = record.nextHarvestAt,
+			harvestCount = record.harvestCount,
+			fruitCount = record.fruitCount,
+			nextFruitAt = record.nextFruitAt,
+			fruitSlots = if record.fruitSlots then table.clone(record.fruitSlots) else nil,
+			fruitGrowingSlot = record.fruitGrowingSlot,
+		}
+		setRepeatAttributes(model, visualRecord, definition, slotCount, os.time())
 	end
 	local root = model.PrimaryPart
 	local prompt = root and root:FindFirstChild("HarvestPrompt")
 	if prompt and prompt:IsA("ProximityPrompt") then
-		prompt.Enabled = if definition and definition.HarvestType == "Repeat"
+		prompt.Enabled = if definition.HarvestType == "Repeat"
 			then false
 			else PlantGrowthService.IsHarvestable(record.nextHarvestAt, os.time())
 	end
+	updatePlantTrussCollision(model, definition, os.time())
+	return true
+end
+
+-- 将重复结果植物变化同步到运行时模型；保留旧调用入口并委托通用成长同步。
+function PlantService.UpdateRepeatRecord(record: PlantRecord)
+	PlantService.SyncGrowthRecord(record)
 end
 
 -- 清理指定玩家拥有的全部运行时植物模型与映射。

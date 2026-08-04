@@ -106,17 +106,8 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 			return false, "NoSeeds"
 		end
 		local plantCount = 0
-		for _, existing in data.Plants do
+		for _ in data.Plants do
 			plantCount += 1
-			local existingDefinition = ItemConfig.Get(existing.plantId)
-			if existingDefinition then
-				local dx = existing.position.x - localPosition.X
-				local dz = existing.position.z - localPosition.Z
-				local required = math.max(definition.MinSpacing, existingDefinition.MinSpacing)
-				if dx * dx + dz * dz < required * required then
-					return false, "TooClose"
-				end
-			end
 		end
 		if plantCount >= ItemConfig.Limits.MaxPlantsPerPlot then
 			return false, "PlotFull"
@@ -129,7 +120,6 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 	if not changed then
 		local messages: { [string]: string } = {
 			NoSeeds = "You have no seeds left.",
-			TooClose = "Leave more room between plants.",
 			PlotFull = "Your plot is full.",
 			DataBusy = "Please try again.",
 		}

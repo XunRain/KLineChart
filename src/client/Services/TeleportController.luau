@@ -4,6 +4,8 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local TeleportConfig = require(ReplicatedStorage.Shared.TeleportConfig)
@@ -11,6 +13,59 @@ local TeleportConfig = require(ReplicatedStorage.Shared.TeleportConfig)
 local TeleportController = {}
 local initialized = false
 local boundButtons: { [GuiButton]: boolean } = {}
+local cameraResetVersion = 0
+
+local CAMERA_RESET_FRAME_COUNT = 6
+local CAMERA_BACK_DISTANCE = 12
+local CAMERA_HEIGHT = 5
+local CAMERA_LOOK_AHEAD = 8
+
+local function getLocalHumanoid(): Humanoid?
+	local character = Players.LocalPlayer.Character
+	if not character then
+		return nil
+	end
+	return character:FindFirstChildOfClass("Humanoid")
+end
+
+-- 根据服务端确认的落点朝向，把本地摄像机短暂摆到角色背后并看向角色前方。
+local function resetCameraToTeleportCFrame(finalCFrame: CFrame)
+	cameraResetVersion += 1
+	local currentVersion = cameraResetVersion
+	local stepName = string.format("KLineTeleportCameraReset_%d", currentVersion)
+	local framesLeft = CAMERA_RESET_FRAME_COUNT
+
+	RunService:BindToRenderStep(stepName, Enum.RenderPriority.Camera.Value + 1, function()
+		if currentVersion ~= cameraResetVersion then
+			RunService:UnbindFromRenderStep(stepName)
+			return
+		end
+
+		local camera = Workspace.CurrentCamera
+		if not camera then
+			RunService:UnbindFromRenderStep(stepName)
+			return
+		end
+
+		local lookVector = finalCFrame.LookVector
+		local focusPosition = finalCFrame.Position + Vector3.new(0, 2.5, 0)
+		local cameraPosition = focusPosition - lookVector * CAMERA_BACK_DISTANCE + Vector3.new(0, CAMERA_HEIGHT, 0)
+		local targetPosition = focusPosition + lookVector * CAMERA_LOOK_AHEAD
+
+		local humanoid = getLocalHumanoid()
+		if humanoid then
+			camera.CameraSubject = humanoid
+		end
+		camera.CameraType = Enum.CameraType.Custom
+		camera.Focus = CFrame.new(focusPosition)
+		camera.CFrame = CFrame.lookAt(cameraPosition, targetPosition)
+
+		framesLeft -= 1
+		if framesLeft <= 0 then
+			RunService:UnbindFromRenderStep(stepName)
+		end
+	end)
+end
 
 local function bindScreen(screen: Instance, requestTeleport: RemoteEvent)
 	if not screen:IsA("ScreenGui") then
@@ -61,6 +116,13 @@ function TeleportController.Init()
 	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui") :: PlayerGui
 	local remoteFolder = ReplicatedStorage:WaitForChild(NetworkConfig.FolderName)
 	local requestTeleport = remoteFolder:WaitForChild(NetworkConfig.Events.RequestTeleport) :: RemoteEvent
+	local teleportCompleted = remoteFolder:WaitForChild(NetworkConfig.Events.TeleportCompleted) :: RemoteEvent
+
+	teleportCompleted.OnClientEvent:Connect(function(_destinationId: any, finalCFrame: any)
+		if typeof(finalCFrame) == "CFrame" then
+			resetCameraToTeleportCFrame(finalCFrame)
+		end
+	end)
 
 	local existing = playerGui:FindFirstChild(TeleportConfig.ScreenGuiName)
 	if existing then

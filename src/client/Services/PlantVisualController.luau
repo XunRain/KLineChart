@@ -438,6 +438,7 @@ local function track(instance: Instance)
 		state.Done = false
 	end
 	table.insert(state.Connections, instance:GetAttributeChangedSignal("NextHarvestAt"):Connect(markDirty))
+	table.insert(state.Connections, instance:GetAttributeChangedSignal("PlantedAt"):Connect(markDirty))
 	table.insert(state.Connections, instance:GetAttributeChangedSignal("HarvestCount"):Connect(markDirty))
 	table.insert(state.Connections, instance:GetAttributeChangedSignal("FruitCount"):Connect(markDirty))
 	table.insert(state.Connections, instance:GetAttributeChangedSignal("FruitNextReadyAt"):Connect(markDirty))

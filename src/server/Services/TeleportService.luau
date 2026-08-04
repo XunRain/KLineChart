@@ -63,13 +63,18 @@ local function withLandingOffset(targetPivot: CFrame): CFrame
 	return CFrame.new(targetPivot.Position + Vector3.new(0, TeleportConfig.LandingOffset, 0)) * targetPivot.Rotation
 end
 
-local function teleportCharacterToGarden(player: Player, character: Model): boolean
+local function fireTeleportCompleted(player: Player, destinationId: string, finalCFrame: CFrame)
+	RemoteService.GetEvent("TeleportCompleted"):FireClient(player, destinationId, finalCFrame)
+end
+
+local function teleportCharacterToGarden(player: Player, character: Model): CFrame?
 	local targetPivot = getDestinationPivot(player, TeleportConfig.Destinations.Garden)
 	if not targetPivot then
-		return false
+		return nil
 	end
-	character:PivotTo(withLandingOffset(targetPivot))
-	return true
+	local finalCFrame = withLandingOffset(targetPivot)
+	character:PivotTo(finalCFrame)
+	return finalCFrame
 end
 
 local function handleRequest(player: Player, destinationId: any)
@@ -104,7 +109,9 @@ local function handleRequest(player: Player, destinationId: any)
 		return
 	end
 
-	character:PivotTo(withLandingOffset(targetPivot))
+	local finalCFrame = withLandingOffset(targetPivot)
+	character:PivotTo(finalCFrame)
+	fireTeleportCompleted(player, definition.DestinationId, finalCFrame)
 end
 
 local function getPlayerFromTouchedPart(touchedPart: BasePart): Player?
@@ -136,7 +143,10 @@ local function handleBoundaryReturnTouched(touchedPart: BasePart)
 	if not character then
 		return
 	end
-	teleportCharacterToGarden(player, character)
+	local finalCFrame = teleportCharacterToGarden(player, character)
+	if finalCFrame then
+		fireTeleportCompleted(player, TeleportConfig.Destinations.Garden.DestinationId, finalCFrame)
+	end
 end
 
 local function disconnectBoundaryPart(part: BasePart)

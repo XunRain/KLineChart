@@ -29,6 +29,53 @@ local function normalizeSlotIndex(value: any, slotCount: number): number?
 	return if index >= 1 and index <= slotCount then index else nil
 end
 
+-- 返回记录首次植株成长的权威完成时间；非法字段使用当前时刻安全降级。
+function PlantGrowthService.GetInitialGrowthFinishAt(record: any, growthTime: number, now: number): number
+	local plantedAt = finiteNumber(record.plantedAt, now)
+	return plantedAt + math.max(0, growthTime)
+end
+
+-- 返回记录在当前时刻是否仍处于首次植株成长；重复植物后续果实 Regrow 不属于本状态。
+function PlantGrowthService.IsInitialGrowthPending(record: any, growthTime: number, now: number): boolean
+	return now < PlantGrowthService.GetInitialGrowthFinishAt(record, growthTime, now)
+end
+
+-- 原地跳过一次首次植株成长；Single 立即可收获，Repeat 只开始第一颗果实的完整 Regrow。
+function PlantGrowthService.SkipInitialGrowth(
+	record: any,
+	harvestType: string,
+	growthTime: number,
+	regrowTime: number?,
+	now: number
+): boolean
+	if not PlantGrowthService.IsInitialGrowthPending(record, growthTime, now) then
+		return false
+	end
+	if harvestType ~= "Single" and (harvestType ~= "Repeat" or type(regrowTime) ~= "number") then
+		return false
+	end
+	local safeGrowthTime = math.max(0, growthTime)
+	record.plantedAt = now - safeGrowthTime
+	if harvestType == "Single" then
+		record.nextHarvestAt = now
+		return true
+	elseif harvestType == "Repeat" then
+		local resolvedRegrowTime = regrowTime :: number
+		local firstFruitAt = now + math.max(0, resolvedRegrowTime)
+		record.fruitCount = 0
+		if type(record.fruitSlots) == "table" then
+			for index in record.fruitSlots do
+				record.fruitSlots[index] = false
+			end
+		end
+		record.fruitGrowingSlot = nil
+		record.nextFruitAt = firstFruitAt
+		record.nextHarvestAt = firstFruitAt
+		return true
+	end
+	return false
+end
+
 local function countMatureSlots(slots: { [number]: boolean }, slotCount: number): number
 	local count = 0
 	for index = 1, slotCount do

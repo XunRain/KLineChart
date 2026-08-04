@@ -37,8 +37,6 @@ export type ItemDefinition = {
 	FruitGrowthStartAlpha: number,
 	-- 预制体 Root 相对服务端权威种植面基准的竖直偏移，单位为 stud；负值下沉、正值抬高，影响新生成与恢复但不写入存档坐标，修改会改变该品种整体落地高度。
 	PlacementOffsetY: number,
-	-- 与任一已有植物中心点之间允许的最小水平间距，单位为 stud，由服务端复核。
-	MinSpacing: number,
 }
 
 local ItemConfig = {}
@@ -90,7 +88,6 @@ ItemConfig.Items = {
 		MinimumVisualScale = 0.05,
 		FruitGrowthStartAlpha = 1,
 		PlacementOffsetY = 0,
-		MinSpacing = 3.5,
 	},
 	-- 草莓用于验证重复收获流程：首次成熟后植株保留，有空果实槽时按 RegrowTime 逐颗补果，满槽时暂停。
 	Strawberry = {
@@ -109,7 +106,6 @@ ItemConfig.Items = {
 		MinimumVisualScale = 0.05,
 		FruitGrowthStartAlpha = 1,
 		PlacementOffsetY = -0.4,
-		MinSpacing = 4.5,
 	},
 	-- 蓝莓用于扩展重复收获品种：灌木保留，四个果实槽按 RegrowTime 逐颗补果。
 	Blueberry = {
@@ -128,9 +124,8 @@ ItemConfig.Items = {
 		MinimumVisualScale = 0.05,
 		FruitGrowthStartAlpha = 1,
 		PlacementOffsetY = 0,
-		MinSpacing = 5,
 	},
-	-- 郁金香沿用模板单次收获规则；烘焙模型已按地面归零，约 1x1 stud 的占地使用基础小型植物间距。
+	-- 郁金香沿用模板单次收获规则；烘焙模型已按地面归零。
 	Tulip = {
 		Id = "Tulip",
 		DisplayName = "Tulip",
@@ -147,7 +142,6 @@ ItemConfig.Items = {
 		MinimumVisualScale = 0.05,
 		FruitGrowthStartAlpha = 1,
 		PlacementOffsetY = -0.4,
-		MinSpacing = 3.5,
 	},
 	-- 番茄沿用模板重复收获规则；模板 10..50 秒随机结果区间固定映射为保守上限 50 秒。
 	Tomato = {
@@ -166,9 +160,8 @@ ItemConfig.Items = {
 		MinimumVisualScale = 0.05,
 		FruitGrowthStartAlpha = 1,
 		PlacementOffsetY = -0.4,
-		MinSpacing = 5,
 	},
-	-- 苹果沿用模板重复收获规则；模板 10..200 秒随机结果区间固定映射为保守上限 200 秒，大型树冠按约 22x23 stud 占地留距。
+	-- 苹果沿用模板重复收获规则；模板 10..200 秒随机结果区间固定映射为保守上限 200 秒。
 	Apple = {
 		Id = "Apple",
 		DisplayName = "Apple",
@@ -185,7 +178,6 @@ ItemConfig.Items = {
 		MinimumVisualScale = 0.05,
 		FruitGrowthStartAlpha = 1,
 		PlacementOffsetY = -0.4,
-		MinSpacing = 24,
 	},
 } :: { [string]: ItemDefinition }
 

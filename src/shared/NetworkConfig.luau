@@ -6,7 +6,7 @@ return {
 	-- ReplicatedStorage 下承载全部项目 RemoteEvent 的文件夹名称，服务端负责创建和校正类型。
 	FolderName = "KLineRemotes",
 	Events = {
-		-- 客户端到服务端：参数依次为世界命中点 Vector3、seedId 字符串和种子 Tool；服务端不信任任何参数并重新验证位置、所有权、库存、间距与频率。
+		-- 客户端到服务端：参数依次为世界命中点 Vector3、seedId 字符串和种子 Tool；服务端重新验证位置及自有地块区域、Tool/种子所有权、库存、角色距离、容量与频率。
 		RequestPlant = "RequestPlant",
 		-- 客户端到服务端：唯一参数为植物 recordId 字符串；服务端重新校验铲子、所有权、距离、冷却和存档记录后才删除整株植物。
 		RequestShovelPlant = "RequestShovelPlant",
@@ -20,10 +20,22 @@ return {
 		RequestSeedProductPurchase = "RequestSeedProductPurchase",
 		-- 服务端到单个客户端：参数为权威正数商品 ID；仅用于打开 Roblox 官方购买弹窗，弹窗结果不参与发货。
 		PromptSeedProductPurchase = "PromptSeedProductPurchase",
+		-- 客户端到服务端：只提交 Single+recordId 或 All 稳定范围；服务端快照并校验当前玩家尚未完成首次成长的记录。
+		RequestPlantGrowthProductPurchase = "RequestPlantGrowthProductPurchase",
+		-- 服务端到单个客户端：参数为权威成长商品 ID；只用于打开官方弹窗，弹窗结果不参与发货。
+		PromptPlantGrowthProductPurchase = "PromptPlantGrowthProductPurchase",
+		-- 客户端到服务端：官方弹窗明确取消或本地打开失败时回报商品 ID；服务端仅清理匹配 pending，迟到收据仍转 credit。
+		CancelPlantGrowthProductPurchase = "CancelPlantGrowthProductPurchase",
+		-- 客户端到服务端：无参数请求当前玩家仍处于首次成长中的植物权威快照。
+		RequestGrowthState = "RequestGrowthState",
+		-- 服务端到单个客户端：返回首次成长植物列表；不包含重复植物后续果实再生状态。
+		GrowthStateChanged = "GrowthStateChanged",
 		-- 客户端到服务端：无参数请求当前玩家的种子商店库存与下次刷新时间；服务端只返回该玩家可见的个人库存快照。
 		RequestSeedShopState = "RequestSeedShopState",
-		-- 客户端到服务端：无参数请求立即跳过当前服务器本轮种子商店等待；服务端重新校验距离、冷却和状态后刷新库存。
+		-- 客户端到服务端：无参数请求购买一次个人种子商店刷新；服务端重新校验距离、数据、冷却与商品配置，绝不刷新他人库存。
 		RequestSeedShopRestock = "RequestSeedShopRestock",
+		-- 服务端到单个客户端：参数为权威个人刷新商品 ID；只用于打开官方弹窗，弹窗完成事件绝不发货。
+		PromptSeedShopRestockPurchase = "PromptSeedShopRestockPurchase",
 		-- 服务端到单个客户端：参数为种子商店状态表，包含下次刷新 Unix 秒和每个商品当前库存；客户端只能展示，不能据此结算。
 		SeedShopStateChanged = "SeedShopStateChanged",
 		-- 客户端到服务端：唯一参数为 SellAll 稳定动作或植物 itemId；数量、价格和总额均由服务端权威读取与计算。
@@ -40,6 +52,8 @@ return {
 		WeatherStateChanged = "WeatherStateChanged",
 		-- 客户端到服务端：唯一参数为 Seeds、Garden 或 Sell 稳定标识；服务端按白名单自行解析目标，不接受坐标或 Instance。
 		RequestTeleport = "RequestTeleport",
+		-- 服务端到单个客户端：传送成功后回传最终落点 CFrame，客户端仅用于重置摄像机视角。
+		TeleportCompleted = "TeleportCompleted",
 		-- 客户端到服务端：参数为 1..10 热栏槽位到稳定 ToolKey 或空槽标记的表；服务端只保存布局偏好，不据此增减库存或装备物品。
 		SaveHotbarLayout = "SaveHotbarLayout",
 		-- 客户端到服务端：无参数请求当前玩家已保存的热栏布局；服务端只返回该玩家存档中的偏好快照。

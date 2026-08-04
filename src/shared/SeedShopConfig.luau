@@ -9,8 +9,6 @@ return {
 	PurchaseAmount = 1,
 	-- 同一玩家两次购买请求之间的最短间隔，单位为秒；服务端用于限制高频点击和 Remote 滥用。
 	PurchaseCooldown = 0.35,
-	-- 同一玩家两次手动刷新请求之间的最短间隔，单位为秒；本轮为免费跳过等待，服务端仍限制 Remote 滥用。
-	ManualRestockCooldown = 1,
 	-- 玩家 HumanoidRootPart 到任一商店 NPC 根节点的最大服务端购买距离，单位为 stud；客户端 Prompt 不能替代该校验。
 	MaximumInteractionDistance = 10,
 	-- 种子商店每轮自动补货间隔，单位为秒；服务端以 os.time 维护同一服务器统一刷新时刻，客户端只展示倒计时。
@@ -57,7 +55,7 @@ return {
 	-- 仅用于模板商店视觉兼容的种子稀有度文案；当前不参与解锁、权重、售价、库存或服务端购买校验。
 	VisualRarityText = "Common",
 	-- 客户端尚未收到服务端商店状态时显示的刷新占位文案；收到状态后会改为真实剩余时间。
-	VisualRestockText = "Restock in --m --s",
+	VisualRestockText = "New stock in --:--",
 	-- 是否输出种子商店 ViewportFrame 预览调试日志；定位资源路径、模板遮罩和渲染结果时可临时开启，上线前建议关闭。
 	DebugSeedPreview = false,
 	-- ReplicatedStorage 下承载 Plants、Fruits、Seeds 与 NpcUIs 的资源 Folder 稳定名称；客户端只读取 Seeds 用于 ViewportFrame 展示。

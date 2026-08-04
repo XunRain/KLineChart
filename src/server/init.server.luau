@@ -11,6 +11,7 @@ local PlotService = require(Services.PlotService)
 local InventoryService = require(Services.InventoryService)
 local PlantService = require(Services.PlantService)
 local PlantingService = require(Services.PlantingService)
+local PlantGrowthPurchaseService = require(Services.PlantGrowthPurchaseService)
 local HarvestService = require(Services.HarvestService)
 local ShovelService = require(Services.ShovelService)
 local SeedShopService = require(Services.SeedShopService)
@@ -35,14 +36,14 @@ WeatherService.Init({
 TimeCycleService.Init()
 PlotService.Init()
 InventoryService.Init({ PlayerDataService = PlayerDataService, RemoteService = RemoteService })
-DeveloperProductService.Init({
-	PlayerDataService = PlayerDataService,
-	InventoryService = InventoryService,
-	RemoteService = RemoteService,
-})
 PlantService.Init({
 	PlotService = PlotService,
 	PlayerDataService = PlayerDataService,
+})
+PlantGrowthPurchaseService.Init({
+	PlayerDataService = PlayerDataService,
+	PlantService = PlantService,
+	RemoteService = RemoteService,
 })
 PlantingService.Init({
 	PlayerDataService = PlayerDataService,
@@ -69,6 +70,13 @@ SeedShopService.Init({
 	PlayerDataService = PlayerDataService,
 	InventoryService = InventoryService,
 	RemoteService = RemoteService,
+})
+DeveloperProductService.Init({
+	PlayerDataService = PlayerDataService,
+	InventoryService = InventoryService,
+	RemoteService = RemoteService,
+	PlantGrowthPurchaseService = PlantGrowthPurchaseService,
+	SeedShopService = SeedShopService,
 })
 SellShopService.Init({
 	PlayerDataService = PlayerDataService,

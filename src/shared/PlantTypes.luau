@@ -37,10 +37,34 @@ export type InventoryData = {
 	HotbarLayout: { [string]: string },
 }
 
+export type PendingPlantGrowthPurchase = {
+	Scope: "Single" | "All",
+	ProductId: number,
+	RecordIds: { string },
+	RequestedAt: number,
+}
+
+export type SeedShopPaidStockSnapshot = {
+	RefreshGeneration: number,
+	NaturalRefreshAt: number,
+	Stock: { [string]: number },
+}
+
 -- 当前 Schema 的完整玩家存档契约，包含版本、权威货币、库存和以记录标识索引的植物。
 export type PlayerData = {
 	Version: number,
 	Sheckles: number,
+	OwnedExpansions: number,
+	ProcessedDeveloperProductReceipts: { [string]: number },
+	-- 每次已保存的个人种子商店刷新权益递增一次；运行时库存缓存以该代次防止串发给其他玩家。
+	SeedShopRefreshGeneration: number,
+	-- 只持久化当前仍有效的付费/测试个人刷新余量；自然补货轮次变化后忽略并延后清理。
+	SeedShopPaidStockSnapshot: SeedShopPaidStockSnapshot?,
+	PendingPlantGrowthPurchases: { [string]: PendingPlantGrowthPurchase },
+	GrowthSkipCredits: {
+		Single: number,
+		All: number,
+	},
 	Inventory: InventoryData,
 	Plants: { [string]: PlantRecord },
 }
