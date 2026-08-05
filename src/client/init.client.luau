@@ -4,8 +4,8 @@
 
 local Services = script.Services
 
+local AudioController = require(Services.AudioController)
 local BackpackController = require(Services.BackpackController)
-local FarmShopController = require(Services.FarmShopController)
 local DeveloperProductPromptController = require(Services.DeveloperProductPromptController)
 local GardenVisualController = require(Services.GardenVisualController)
 local GardenOwnerSignController = require(Services.GardenOwnerSignController)
@@ -13,6 +13,7 @@ local GrowingListController = require(Services.GrowingListController)
 local HarvestPromptController = require(Services.HarvestPromptController)
 local HudCurrencyController = require(Services.HudCurrencyController)
 local InterfaceVisualController = require(Services.InterfaceVisualController)
+local LeaderboardController = require(Services.LeaderboardController)
 local LightingStateController = require(Services.LightingStateController)
 local NotificationController = require(Services.NotificationController)
 local PlotExpansionController = require(Services.PlotExpansionController)
@@ -21,22 +22,31 @@ local PlantInteractionController = require(Services.PlantInteractionController)
 local PlantHoverTooltipController = require(Services.PlantHoverTooltipController)
 local PlantVisualController = require(Services.PlantVisualController)
 local ShovelController = require(Services.ShovelController)
+local SeedShopController = require(Services.SeedShopController)
+local SellShopController = require(Services.SellShopController)
 local TeleportController = require(Services.TeleportController)
 local TestMenuController = require(Services.TestMenuController)
 local TimeCycleBarController = require(Services.TimeCycleBarController)
 local TimeCycleController = require(Services.TimeCycleController)
 local ToolVisualController = require(Services.ToolVisualController)
 local TopbarController = require(Services.TopbarController)
+local TutorialController = require(Services.TutorialController)
 local WeatherController = require(Services.WeatherController)
 
 InterfaceVisualController.Init()
+AudioController.Init()
 DeveloperProductPromptController.Init()
+SeedShopController.Init({
+	InterfaceVisualController = InterfaceVisualController,
+	DeveloperProductPromptController = DeveloperProductPromptController,
+})
 BackpackController.Init({ InterfaceVisualController = InterfaceVisualController })
 LightingStateController.Init()
 HudCurrencyController.Init()
 NotificationController.Init()
 GardenVisualController.Init()
 GardenOwnerSignController.Init()
+LeaderboardController.Init()
 HarvestPromptController.Init()
 PlotExpansionController.Init()
 PlantingFxController.Init()
@@ -50,14 +60,13 @@ TeleportController.Init()
 TimeCycleController.Init()
 TimeCycleBarController.Init()
 WeatherController.Init()
+SellShopController.Init({
+	InterfaceVisualController = InterfaceVisualController,
+	WeatherController = WeatherController,
+})
+TutorialController.Init()
 TestMenuController.Init({ InterfaceVisualController = InterfaceVisualController })
 TopbarController.Init({
 	BackpackController = BackpackController,
 	TestMenuController = TestMenuController,
 })
-task.spawn(function()
-	FarmShopController.Init({
-		InterfaceVisualController = InterfaceVisualController,
-		WeatherController = WeatherController,
-	})
-end)

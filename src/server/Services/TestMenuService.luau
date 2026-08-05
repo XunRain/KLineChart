@@ -15,6 +15,7 @@ local InventoryService: any
 local RemoteService: any
 local WeatherService: any
 local TimeCycleService: any
+local TutorialService: any
 local lastRequestAt: { [Player]: number } = {}
 
 local function isSafeAction(action: TestMenuConfig.TestAction): boolean
@@ -43,6 +44,8 @@ local function isSafeAction(action: TestMenuConfig.TestAction): boolean
 		return type(action.TimePhaseId) == "string" and TimeCycleService ~= nil
 	elseif action.Kind == "ResumeTimeCycle" then
 		return TimeCycleService ~= nil
+	elseif action.Kind == "ResetTutorial" then
+		return TutorialService ~= nil
 	end
 	return false
 end
@@ -154,6 +157,13 @@ local function handleRequest(player: Player, actionId: any)
 		RemoteService.Notify(player, "玩家数据尚未加载，测试奖励未发放。", "Warning")
 		return
 	end
+	if action.Kind == "ResetTutorial" then
+		local changed, reason = TutorialService.Reset(player)
+		if not changed then
+			RemoteService.Notify(player, string.format("教程重置失败：%s", tostring(reason)), "Warning")
+		end
+		return
+	end
 
 	local changed: boolean
 	local reason: string?
@@ -185,12 +195,14 @@ function TestMenuService.Init(dependencies: {
 	RemoteService: any,
 	WeatherService: any?,
 	TimeCycleService: any?,
+	TutorialService: any?,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	InventoryService = dependencies.InventoryService
 	RemoteService = dependencies.RemoteService
 	WeatherService = dependencies.WeatherService
 	TimeCycleService = dependencies.TimeCycleService
+	TutorialService = dependencies.TutorialService
 
 	RemoteService.GetEvent("RequestTestAction").OnServerEvent:Connect(function(player, actionId)
 		local ok, err = pcall(function()

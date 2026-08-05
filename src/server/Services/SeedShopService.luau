@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块维护种子商店个人库存刷新，并在玩家靠近任一商店 NPC 时权威处理种子购买。
+-- 本模块维护种子商店个人库存刷新，并只在玩家靠近 Sam 时权威处理种子购买。
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,13 +12,13 @@ local PlantGrowthIAPConfig = require(ReplicatedStorage.Shared.PlantGrowthIAPConf
 local SeedIAPConfig = require(ReplicatedStorage.Shared.SeedIAPConfig)
 local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
 local SeedShopRestockIAPConfig = require(ReplicatedStorage.Shared.SeedShopRestockIAPConfig)
-local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
 local NpcPromptService = require(script.Parent.NpcPromptService)
 
 local SeedShopService = {}
 local PlayerDataService: any
 local InventoryService: any
 local RemoteService: any
+local TutorialService: any
 local lastRequestAt: { [Player]: number } = {}
 local lastProductRequestAt: { [Player]: number } = {}
 local lastRestockRequestAt: { [Player]: number } = {}
@@ -59,10 +59,6 @@ end
 
 local function getSeedShopRoot(): BasePart?
 	return getNpcRoot(SeedShopConfig.NpcModelName, SeedShopConfig.NpcRootName)
-end
-
-local function getSellShopRoot(): BasePart?
-	return getNpcRoot(SellShopConfig.NpcModelName, SellShopConfig.NpcRootName)
 end
 
 local function isSafePositiveInteger(value: any, maximum: number): boolean
@@ -284,8 +280,8 @@ local function getPurchasePayload(payload: any): (string?, number?)
 	if type(payload) == "table" then
 		local itemId = payload.ItemId
 		local amount = payload.Amount
-		if type(itemId) == "string" then
-			return itemId, if type(amount) == "number" then amount else nil
+		if type(itemId) == "string" and amount == SeedShopConfig.PurchaseAmount then
+			return itemId, SeedShopConfig.PurchaseAmount
 		end
 	end
 	return nil, nil
@@ -318,18 +314,14 @@ local function broadcastState()
 	end
 end
 
-local function isPlayerNearShop(player: Player): boolean
+local function isPlayerNearSeedShop(player: Player): boolean
 	local characterRoot = getBasePart(player.Character, "HumanoidRootPart")
 	if not characterRoot then
 		return false
 	end
 	local seedRoot = getSeedShopRoot()
-	if seedRoot and (seedRoot.Position - characterRoot.Position).Magnitude <= SeedShopConfig.MaximumInteractionDistance then
-		return true
-	end
-	local sellRoot = getSellShopRoot()
-	return sellRoot ~= nil
-		and (sellRoot.Position - characterRoot.Position).Magnitude <= SellShopConfig.MaximumInteractionDistance
+	return seedRoot ~= nil
+		and (seedRoot.Position - characterRoot.Position).Magnitude <= SeedShopConfig.MaximumInteractionDistance
 end
 
 local function handleRequest(player: Player, payload: any)
@@ -363,7 +355,7 @@ local function handleRequest(player: Player, payload: any)
 		return
 	end
 	amount = math.floor(amount)
-	if not isPlayerNearShop(player) then
+	if not isPlayerNearSeedShop(player) then
 		RemoteService.Notify(player, "Please stand closer to a shop.", "Warning")
 		return
 	end
@@ -431,11 +423,13 @@ local function handleRequest(player: Player, payload: any)
 	PlayerDataService.RequestSave(player)
 	InventoryService.Sync(player)
 	fireState(player)
+	RemoteService.GetEvent("AudioCue"):FireClient(player, "Purchase")
 	RemoteService.Notify(
 		player,
 		string.format("Bought %d %s Seed for %d %s.", amount, definition.DisplayName, totalPrice, EconomyConfig.CurrencyName),
 		"Success"
 	)
+	TutorialService.OnSeedPurchased(player, itemId, amount)
 end
 
 -- 校验固定种子包请求；测试模式直接发货，正式模式只向客户端下发权威商品 ID 打开官方弹窗。
@@ -462,7 +456,7 @@ local function handleProductRequest(player: Player, payload: any)
 		return
 	end
 	local amount = requestedAmount :: number
-	if not isPlayerNearShop(player) then
+	if not isPlayerNearSeedShop(player) then
 		RemoteService.Notify(player, "Please stand closer to a shop.", "Warning")
 		return
 	end
@@ -616,7 +610,7 @@ local function handleManualRestock(player: Player)
 		RemoteService.Notify(player, "Player data is still loading. You cannot restock yet.", "Warning")
 		return
 	end
-	if not isPlayerNearShop(player) then
+	if not isPlayerNearSeedShop(player) then
 		RemoteService.Notify(player, "Please stand closer to a shop.", "Warning")
 		return
 	end
@@ -679,10 +673,12 @@ function SeedShopService.Init(dependencies: {
 	PlayerDataService: any,
 	InventoryService: any,
 	RemoteService: any,
+	TutorialService: any,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	InventoryService = dependencies.InventoryService
 	RemoteService = dependencies.RemoteService
+	TutorialService = dependencies.TutorialService
 
 	RemoteService.GetEvent("RequestBuySeed").OnServerEvent:Connect(function(player, payload)
 		local ok, err = pcall(function()
@@ -740,8 +736,8 @@ function SeedShopService.Init(dependencies: {
 		SeedShopConfig.MaximumInteractionDistance
 	)
 
-	if not getSeedShopRoot() and not getSellShopRoot() then
-		warn("[SeedShopService] 缺少 Workspace.NPCS 下任一商店 NPC 根节点，购买将安全拒绝")
+	if not getSeedShopRoot() then
+		warn("[SeedShopService] 缺少 Sam 的商店根节点，种子购买将安全拒绝")
 	end
 	nextRefreshTime = 0
 	ensureFreshStock()

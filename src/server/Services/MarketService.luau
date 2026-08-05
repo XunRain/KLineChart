@@ -165,7 +165,7 @@ local function startRefreshLoop()
 	end)
 end
 
--- 切换服务端权威天气行情；相同天气重复设置只延长天气本身，不重复改价或写入历史。
+-- 切换服务端权威天气行情；无价格规则的视觉天气仍会广播 ActiveWeatherId，但不会改价或写入历史。
 function MarketService.SetActiveWeather(weatherId: string?)
 	if activeWeatherId == weatherId then
 		return
@@ -173,7 +173,6 @@ function MarketService.SetActiveWeather(weatherId: string?)
 
 	local previousWeatherId = activeWeatherId
 	local timeNow = os.time()
-	local didChange = false
 	if previousWeatherId then
 		for itemId, itemState in stateByItem do
 			local modifier = MarketConfig.GetWeatherModifier(previousWeatherId, itemId)
@@ -186,7 +185,6 @@ function MarketService.SetActiveWeather(weatherId: string?)
 				else
 					itemState.NextRefreshAt = timeNow + itemState.RefreshInterval
 				end
-				didChange = true
 			end
 		end
 	end
@@ -204,14 +202,12 @@ function MarketService.SetActiveWeather(weatherId: string?)
 					else 0
 				itemState.CurrentPrice = getForcedPrice(definition, modifier.PriceMultiplier)
 				pushHistory(itemState, itemState.CurrentPrice, timeNow)
-				didChange = true
 			end
 		end
 	end
 
-	if didChange then
-		broadcastSnapshot()
-	end
+	-- weatherId 的变化本身也是市场展示快照的一部分，因此无价格规则时也需要通知客户端。
+	broadcastSnapshot()
 end
 
 -- 返回指定品种当前服务器权威售价，未纳入市场时回退到基础售价。
@@ -247,6 +243,7 @@ function MarketService.GetSnapshot(): { [string]: any }
 	end
 	return {
 		ServerTime = os.time(),
+		ActiveWeatherId = activeWeatherId,
 		HistoryLimit = MarketConfig.HistoryLimit,
 		Items = items,
 	}

@@ -7,6 +7,7 @@ export type DestinationKind = "Fixed" | "PlayerGarden"
 
 -- 单个传送入口的跨端契约，关联稳定标识、Studio 按钮和服务端目标解析方式。
 export type DestinationDefinition = {
+	Enabled: boolean,
 	-- 跨端请求使用的稳定白名单标识；客户端只能提交该字符串，不能提交坐标或 Instance。
 	DestinationId: string,
 	-- PlayerGui.TeleportButtons.TeleportButtons 下由 Studio 创建的按钮名称，代码只绑定 Activated 而不修改布局。
@@ -48,6 +49,7 @@ TeleportConfig.BoundaryReturn = {
 TeleportConfig.Destinations = {
 	-- 种子商店入口：SeedsButton 请求后由服务端解析 Workspace.Teleports.Seeds。
 	Seeds = {
+		Enabled = true,
 		DestinationId = "Seeds",
 		ButtonName = "SeedsButton",
 		Kind = "Fixed",
@@ -55,6 +57,7 @@ TeleportConfig.Destinations = {
 	},
 	-- 玩家花园入口：GardenButton 请求后只使用当前玩家已分配地块的 SpawnPoint。
 	Garden = {
+		Enabled = true,
 		DestinationId = "Garden",
 		ButtonName = "GardenButton",
 		Kind = "PlayerGarden",
@@ -62,6 +65,7 @@ TeleportConfig.Destinations = {
 	},
 	-- 出售区域入口：SellButton 请求后由服务端解析 Workspace.Teleports.Sell。
 	Sell = {
+		Enabled = true,
 		DestinationId = "Sell",
 		ButtonName = "SellButton",
 		Kind = "Fixed",
@@ -75,7 +79,7 @@ function TeleportConfig.GetDestination(destinationId: any): DestinationDefinitio
 		return nil
 	end
 	local definition = TeleportConfig.Destinations[destinationId]
-	return if definition and definition.DestinationId == destinationId then definition else nil
+	return if definition and definition.Enabled and definition.DestinationId == destinationId then definition else nil
 end
 
 return TeleportConfig

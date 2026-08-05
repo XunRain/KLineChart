@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块集中合成昼夜基础光照与 Rain 叠加光照，避免多个控制器互相覆盖 Lighting 状态。
+-- 本模块集中合成昼夜基础光照与 Rain、Lightning、Snowfall 天气叠加，避免控制器互相覆盖 Lighting。
 
 local Lighting = game:GetService("Lighting")
 local TweenService = game:GetService("TweenService")
@@ -44,12 +44,16 @@ local LightingStateController = {}
 local initialized = false
 local defaultTarget: LightingTarget? = nil
 local baseTarget: LightingTarget? = nil
+local activeWeatherId: string? = nil
 local lightingTween: Tween? = nil
 local rainEffectTween: Tween? = nil
 local cloudsTween: Tween? = nil
+local lightningFlashTween: Tween? = nil
 local rainEffect: ColorCorrectionEffect? = nil
+local lightningEffect: ColorCorrectionEffect? = nil
 local cloudSnapshot: CloudSnapshot? = nil
-local rainActive = false
+local cloudLifecycle = 0
+local flashLifecycle = 0
 
 local DEFAULT_TWEEN_TIME = 0.3
 local WEATHER_TWEEN_TIME = 3
@@ -105,22 +109,47 @@ end
 
 local function buildCombinedTarget(): LightingTarget
 	local base = getBaseTarget()
-	if not rainActive then
-		return base
+	if activeWeatherId == "Rain" then
+		return {
+			Brightness = base.Brightness * 0.7,
+			Ambient = Color3.fromRGB(180, 190, 210),
+			OutdoorAmbient = Color3.fromRGB(70, 75, 85),
+			FogEnd = 350,
+			FogColor = Color3.fromRGB(140, 145, 155),
+			ExposureCompensation = 0.3,
+			ColorShift_Bottom = base.ColorShift_Bottom,
+			ColorShift_Top = base.ColorShift_Top,
+			EnvironmentDiffuseScale = base.EnvironmentDiffuseScale,
+			ClockTime = base.ClockTime,
+		}
+	elseif activeWeatherId == "Lightning" then
+		return {
+			Brightness = base.Brightness * 0.4,
+			Ambient = Color3.fromRGB(90, 95, 115),
+			OutdoorAmbient = Color3.fromRGB(40, 45, 60),
+			FogEnd = 300,
+			FogColor = Color3.fromRGB(70, 75, 90),
+			ExposureCompensation = 0.2,
+			ColorShift_Bottom = base.ColorShift_Bottom,
+			ColorShift_Top = base.ColorShift_Top,
+			EnvironmentDiffuseScale = base.EnvironmentDiffuseScale,
+			ClockTime = base.ClockTime,
+		}
+	elseif activeWeatherId == "Snowfall" then
+		return {
+			Brightness = 2,
+			Ambient = Color3.fromRGB(57, 121, 131),
+			OutdoorAmbient = Color3.fromRGB(74, 139, 180),
+			FogEnd = base.FogEnd,
+			FogColor = base.FogColor,
+			ExposureCompensation = base.ExposureCompensation,
+			ColorShift_Bottom = Color3.fromRGB(35, 135, 171),
+			ColorShift_Top = Color3.fromRGB(59, 158, 250),
+			EnvironmentDiffuseScale = 1,
+			ClockTime = 0,
+		}
 	end
-
-	return {
-		Brightness = base.Brightness * 0.7,
-		Ambient = Color3.fromRGB(180, 190, 210),
-		OutdoorAmbient = Color3.fromRGB(70, 75, 85),
-		FogEnd = 350,
-		FogColor = Color3.fromRGB(140, 145, 155),
-		ExposureCompensation = 0.3,
-		ColorShift_Bottom = base.ColorShift_Bottom,
-		ColorShift_Top = base.ColorShift_Top,
-		EnvironmentDiffuseScale = base.EnvironmentDiffuseScale,
-		ClockTime = base.ClockTime,
-	}
+	return base
 end
 
 local function cancelTween(tween: Tween?)
@@ -175,6 +204,12 @@ local function ensureRainEffect(): ColorCorrectionEffect
 end
 
 local function applyRainEffect(active: boolean)
+	if not active and not rainEffect then
+		local existing = Lighting:FindFirstChild("RainEffect")
+		if not existing or not existing:IsA("ColorCorrectionEffect") then
+			return
+		end
+	end
 	local effect = ensureRainEffect()
 	cancelTween(rainEffectTween)
 	rainEffectTween = TweenService:Create(effect, TweenInfo.new(WEATHER_TWEEN_TIME, Enum.EasingStyle.Sine), {
@@ -191,12 +226,15 @@ local function applyRainEffect(active: boolean)
 	activeTween:Play()
 end
 
-local function applyRainClouds()
-	if cloudSnapshot then
-		return
+local function ensureCloudSnapshot(): (CloudSnapshot, Clouds)
+	local snapshot = cloudSnapshot
+	local clouds = if snapshot then snapshot.Clouds else nil
+	if snapshot and clouds and clouds.Parent then
+		return snapshot, clouds
 	end
-	local clouds = Workspace.Terrain:FindFirstChildOfClass("Clouds")
-	cloudSnapshot = {
+
+	clouds = Workspace.Terrain:FindFirstChildOfClass("Clouds")
+	snapshot = {
 		Clouds = clouds,
 		CloudsEnabled = if clouds then clouds.Enabled else nil,
 		CloudsCover = if clouds then clouds.Cover else nil,
@@ -209,39 +247,35 @@ local function applyRainClouds()
 		createdClouds.Density = 0
 		createdClouds.Parent = Workspace.Terrain
 		clouds = createdClouds
-		local snapshot = cloudSnapshot
-		if snapshot then
-			snapshot.Clouds = createdClouds
-		end
+		snapshot.Clouds = createdClouds
 	end
-	local resolvedClouds = clouds
-	if not resolvedClouds then
-		return
-	end
-	resolvedClouds.Enabled = true
-	cancelTween(cloudsTween)
-	cloudsTween = TweenService:Create(resolvedClouds, TweenInfo.new(WEATHER_TWEEN_TIME, Enum.EasingStyle.Sine), {
-		Cover = 0.85,
-		Density = 0.15,
-	})
-	local activeTween = cloudsTween :: Tween
-	activeTween.Completed:Once(function()
-		if cloudsTween == activeTween then
-			cloudsTween = nil
-		end
-		activeTween:Destroy()
-	end)
-	activeTween:Play()
+	cloudSnapshot = snapshot
+	return snapshot, clouds :: Clouds
 end
 
-local function restoreRainClouds()
+local function applyWeatherClouds(weatherId: string?)
+	local usesStormClouds = weatherId == "Rain" or weatherId == "Lightning"
+	cloudLifecycle += 1
+	local lifecycle = cloudLifecycle
+	if usesStormClouds then
+		local _, clouds = ensureCloudSnapshot()
+		clouds.Enabled = true
+		cancelTween(cloudsTween)
+		cloudsTween = TweenService:Create(clouds, TweenInfo.new(WEATHER_TWEEN_TIME, Enum.EasingStyle.Sine), {
+			Cover = if weatherId == "Lightning" then 1 else 0.85,
+			Density = if weatherId == "Lightning" then 0.35 else 0.15,
+		})
+		cloudsTween:Play()
+		return
+	end
+
 	local snapshot = cloudSnapshot
 	if not snapshot then
 		return
 	end
-	cloudSnapshot = nil
 	local clouds = snapshot.Clouds
 	if not clouds or not clouds.Parent then
+		cloudSnapshot = nil
 		return
 	end
 	cancelTween(cloudsTween)
@@ -249,24 +283,53 @@ local function restoreRainClouds()
 		Cover = snapshot.CloudsCover or 0,
 		Density = snapshot.CloudsDensity or 0,
 	})
-	local activeTween = cloudsTween :: Tween
-	activeTween.Completed:Once(function()
-		if cloudsTween == activeTween then
-			cloudsTween = nil
-		end
-		activeTween:Destroy()
-	end)
-	activeTween:Play()
+	cloudsTween:Play()
 	task.delay(WEATHER_TWEEN_TIME, function()
-		if not clouds.Parent then
+		if lifecycle ~= cloudLifecycle or activeWeatherId == "Rain" or activeWeatherId == "Lightning" then
 			return
 		end
-		if snapshot.CreatedClouds then
-			clouds:Destroy()
-		else
-			clouds.Enabled = snapshot.CloudsEnabled or false
+		if clouds.Parent then
+			if snapshot.CreatedClouds then
+				clouds:Destroy()
+			else
+				clouds.Enabled = snapshot.CloudsEnabled or false
+			end
+		end
+		if cloudSnapshot == snapshot then
+			cloudSnapshot = nil
 		end
 	end)
+end
+
+local function ensureLightningEffect(): ColorCorrectionEffect
+	if lightningEffect and lightningEffect.Parent then
+		return lightningEffect
+	end
+	local existing = Lighting:FindFirstChild("LightningEffect")
+	if existing and existing:IsA("ColorCorrectionEffect") then
+		lightningEffect = existing
+	else
+		local effect = Instance.new("ColorCorrectionEffect")
+		effect.Name = "KLineLightningEffect"
+		effect.Parent = Lighting
+		lightningEffect = effect
+	end
+	local resolvedEffect = lightningEffect :: ColorCorrectionEffect
+	resolvedEffect.Enabled = true
+	return resolvedEffect
+end
+
+local function resetLightningFlash()
+	flashLifecycle += 1
+	cancelTween(lightningFlashTween)
+	lightningFlashTween = nil
+	local effect = lightningEffect
+	if effect and effect.Parent then
+		effect.Brightness = 0
+		effect.Contrast = 0
+		effect.Saturation = 0
+		effect.TintColor = Color3.fromRGB(255, 255, 255)
+	end
 end
 
 -- 初始化并记录 Studio 默认 Lighting；重复调用不会覆盖已经记录的默认值。
@@ -284,25 +347,60 @@ function LightingStateController.GetDefault(): LightingTarget
 	return getDefaultTarget()
 end
 
--- 设置昼夜系统的基础光照目标；Rain 激活时会在该目标上叠加阴雨效果。
+-- 设置昼夜系统的最新基础光照目标；活动天气会始终叠加在这份最新目标上。
 function LightingStateController.SetBaseTarget(patch: LightingPatch, duration: number?)
 	baseTarget = resolveTarget(patch)
 	applyLighting(duration)
 end
 
--- 开关 Rain 的本地光照叠加；只改变视觉，不影响服务端天气、市场或成长。
-function LightingStateController.SetRainActive(active: boolean)
-	if rainActive == active then
+-- 设置唯一活动天气的本地光照叠加；未知天气按晴天处理且不影响服务端状态。
+function LightingStateController.SetWeatherActive(weatherId: string?)
+	local resolvedWeatherId = if weatherId == "Rain" or weatherId == "Lightning" or weatherId == "Snowfall"
+		then weatherId
+		else nil
+	if activeWeatherId == resolvedWeatherId then
 		return
 	end
-	rainActive = active
-	if active then
-		applyRainClouds()
-	else
-		restoreRainClouds()
+	activeWeatherId = resolvedWeatherId
+	if resolvedWeatherId ~= "Lightning" then
+		resetLightningFlash()
 	end
-	applyRainEffect(active)
+	applyRainEffect(resolvedWeatherId == "Rain")
+	applyWeatherClouds(resolvedWeatherId)
 	applyLighting(WEATHER_TWEEN_TIME)
+end
+
+-- 播放一次模板参数的双段雷电屏闪；仅在 Lightning 活动时生效，不改变基础昼夜目标。
+function LightingStateController.FlashLightning()
+	if activeWeatherId ~= "Lightning" then
+		return
+	end
+	flashLifecycle += 1
+	local lifecycle = flashLifecycle
+	local effect = ensureLightningEffect()
+	cancelTween(lightningFlashTween)
+	effect.Brightness = 2.5
+	effect.Contrast = 0.15
+	effect.Saturation = -0.3
+	lightningFlashTween = TweenService:Create(effect, TweenInfo.new(0.6, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
+		Brightness = 0,
+		Contrast = 0,
+		Saturation = 0,
+	})
+	lightningFlashTween:Play()
+	task.delay(0.5, function()
+		if lifecycle ~= flashLifecycle or activeWeatherId ~= "Lightning" or not effect.Parent then
+			return
+		end
+		cancelTween(lightningFlashTween)
+		effect.Brightness = 0.4
+		effect.Contrast = 0
+		effect.Saturation = 0
+		lightningFlashTween = TweenService:Create(effect, TweenInfo.new(0.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
+			Brightness = 0,
+		})
+		lightningFlashTween:Play()
+	end)
 end
 
 return LightingStateController

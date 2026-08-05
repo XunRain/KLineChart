@@ -5,10 +5,10 @@
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
+local AudioController = require(script.Parent.AudioController)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 
 local localPlayer = Players.LocalPlayer
@@ -204,22 +204,6 @@ local function tweenSeedTransparency(states: { SeedPartState }, tweenInfo: Tween
 	end
 end
 
-local function playSfx()
-	local sfxFolder = SoundService:FindFirstChild("SFX")
-	local template = sfxFolder and sfxFolder:FindFirstChild("PlantSFX")
-	if not template or not template:IsA("Sound") then
-		return
-	end
-	local sound = template:Clone()
-	sound.PlaybackSpeed = 1 + math.random(-10, 10) / 100
-	sound.Parent = getTemporaryFolder()
-	sound:Play()
-	sound.Ended:Once(function()
-		sound:Destroy()
-	end)
-	Debris:AddItem(sound, math.max(2, sound.TimeLength + 0.5))
-end
-
 local function createDirtChunk(position: Vector3)
 	local part = Instance.new("Part")
 	local size = math.random(25, 45) / 100
@@ -400,7 +384,7 @@ local function fadeMoundWhenGrowthStarts(recordId: string, dirt: BasePart)
 end
 
 local function playImpact(position: Vector3, recordId: string)
-	playSfx()
+	AudioController.PlaySfx("Plant", position)
 	spawnDirtChunks(position)
 	local dirt = createDirtMound(position)
 	fadeMoundWhenGrowthStarts(recordId, dirt)

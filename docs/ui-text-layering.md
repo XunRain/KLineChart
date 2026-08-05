@@ -21,3 +21,20 @@
 - `Main_Frame.Cost_Text.TextLabel`：直接子 `TextLabel`，显示相同的前景文案。
 - 修改价格或 `NO STOCK` 时只同步上述两个节点，不递归修改 `Cost_Text` 内其他后代。
 - `Cost_Text.TextLabel.UIGradient` 与 `Cost_Text.TextLabel.NoStock` 的启用状态由模板约定分别表示正常价格和缺货表现，应互斥设置。
+
+## SellShop 价格曲线示例
+
+`SellShop.RightFrame.RightDetail.TrendBox.GuideLabel1`、`GuideLabel2`、`GuideLabel3` 是已确认的双层文字：
+
+- 三个父 `TextLabel` 分别承载最高、基准和最低参考价底字。
+- 每个父节点下名为 `TextLabel` 的直接子 `TextLabel` 承载相同的前景价格。
+- 曲线刷新参考价时只同步这三组父子文字，不递归修改 `TrendBox` 的其他文案或视觉节点。
+
+## SellShop 实时价格示例
+
+`SellShop.RightFrame.RightDetail.TopInfo.Price_Text` 是已确认的双层文字：
+
+- `Price_Text` 父 `TextLabel` 与其直接子 `Price_Text.TextLabel` 必须同步显示相同的实时价格或 `--`。
+- 只同步上述直接父子节点，不递归修改 `Price_Text` 的其他后代文案。
+- `Price_Text.TextLabel.UIGradient` 表示正常价格，`Price_Text.TextLabel.NoStock` 表示缺货状态；实时价格和无选中占位均启用前者、禁用后者。
+- 缺少父子层级或任一 Gradient 时，只安全禁用该实时价格显示并警告，不阻断 SellShop 其他功能。

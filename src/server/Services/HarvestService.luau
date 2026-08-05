@@ -14,6 +14,7 @@ local PlotService: any
 local InventoryService: any
 local PlantService: any
 local RemoteService: any
+local TutorialService: any
 local locks: { [string]: boolean } = {}
 
 local function handlePrompt(prompt: ProximityPrompt, player: Player)
@@ -46,6 +47,7 @@ local function handlePrompt(prompt: ProximityPrompt, player: Player)
 	end
 	local fruitSlotCount = if model then model:GetAttribute("FruitSlotCount") else nil
 	local fruitSlotIndex = prompt:GetAttribute("FruitSlotIndex")
+	local harvestPosition = root.Position
 
 	local removed = false
 	local updatedRecord: any = nil
@@ -109,8 +111,12 @@ local function handlePrompt(prompt: ProximityPrompt, player: Player)
 	end
 	PlayerDataService.RequestSave(player)
 	InventoryService.Sync(player)
+	RemoteService.GetEvent("AudioCue"):FireAllClients("Harvest", harvestPosition)
 	local definition = harvestedPlantId and ItemConfig.Get(harvestedPlantId)
 	RemoteService.Notify(player, string.format("Harvested %s.", definition and definition.DisplayName or "produce"), "Success")
+	if harvestedPlantId then
+		TutorialService.OnProduceHarvested(player, harvestedPlantId)
+	end
 	finish()
 end
 
@@ -121,12 +127,14 @@ function HarvestService.Init(dependencies: {
 	InventoryService: any,
 	PlantService: any,
 	RemoteService: any,
+	TutorialService: any,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	PlotService = dependencies.PlotService
 	InventoryService = dependencies.InventoryService
 	PlantService = dependencies.PlantService
 	RemoteService = dependencies.RemoteService
+	TutorialService = dependencies.TutorialService
 
 	ProximityPromptService.PromptTriggered:Connect(function(prompt, player)
 		local ok, err = pcall(function()

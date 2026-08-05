@@ -9,9 +9,9 @@ export type TestAction = {
 	ActionId: string,
 	-- 白名单客户端按钮显示文本；不参与服务端奖励计算，可在不迁移存档的前提下修改。
 	DisplayText: string,
-	-- 一级菜单分类；客户端只用于折叠展示，服务端仍只按 ActionId 与 Kind 执行动作。
-	Category: "Seeds" | "Currency" | "Weather",
-	-- 测试动作类型；GrantSeed 发种子，GrantCurrency/ClearCurrency 调整 Sheckles，StartWeather/ClearWeather 控制天气，ForceTimePhase/ResumeTimeCycle 控制昼夜。
+	-- 一级菜单分类；客户端只用于折叠展示，Tutorial 仅承载白名单教程重置，服务端仍只按 ActionId 与 Kind 执行动作。
+	Category: "Seeds" | "Currency" | "Weather" | "Tutorial",
+	-- 测试动作类型；奖励与环境动作沿用既有职责，ResetTutorial 只重置权威教程子表，不修改经济或植物。
 	Kind:
 		"GrantSeed"
 		| "GrantCurrency"
@@ -19,7 +19,8 @@ export type TestAction = {
 		| "StartWeather"
 		| "ClearWeather"
 		| "ForceTimePhase"
-		| "ResumeTimeCycle",
+		| "ResumeTimeCycle"
+		| "ResetTutorial",
 	-- GrantSeed 写入 Inventory.Seeds 的稳定植物标识；必须存在于 ItemConfig，客户端不得提交或覆盖。
 	SeedId: string?,
 	-- GrantSeed 单次服务端权威增加的种子整数数量；必须处于 1 到 MaximumSeedGrantAmount。
@@ -76,6 +77,11 @@ TestMenuConfig.Categories = {
 		CategoryId = "Weather",
 		DisplayText = "天气",
 		SortOrder = 30,
+	},
+	{
+		CategoryId = "Tutorial",
+		DisplayText = "教程",
+		SortOrder = 40,
 	},
 }
 
@@ -175,6 +181,22 @@ TestMenuConfig.Actions = {
 		SortOrder = 100,
 	},
 	{
+		ActionId = "StartLightningWeather",
+		DisplayText = "开始雷电",
+		Category = "Weather",
+		Kind = "StartWeather",
+		WeatherId = "Lightning",
+		SortOrder = 101,
+	},
+	{
+		ActionId = "StartSnowfallWeather",
+		DisplayText = "开始雪天",
+		Category = "Weather",
+		Kind = "StartWeather",
+		WeatherId = "Snowfall",
+		SortOrder = 102,
+	},
+	{
 		ActionId = "ClearWeather",
 		DisplayText = "清空天气",
 		Category = "Weather",
@@ -211,6 +233,13 @@ TestMenuConfig.Actions = {
 		Category = "Weather",
 		Kind = "ResumeTimeCycle",
 		SortOrder = 150,
+	},
+	{
+		ActionId = "ResetTutorial",
+		DisplayText = "重置新手教程",
+		Category = "Tutorial",
+		Kind = "ResetTutorial",
+		SortOrder = 160,
 	},
 } :: { TestAction }
 

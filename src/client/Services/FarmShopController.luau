@@ -57,6 +57,7 @@ type MarketItemState = {
 	History: { MarketHistoryPoint }?,
 }
 type MarketSnapshot = {
+	ActiveWeatherId: string?,
 	Items: { MarketItemState }?,
 }
 type WeatherState = {
@@ -134,7 +135,6 @@ local MARKET_PRICE_UNCHANGED_COLOR = Color3.fromRGB(34, 111, 174)
 local MARKET_PRICE_RISING_COLOR = Color3.fromRGB(41, 116, 55)
 local MARKET_PRICE_FALLING_COLOR = Color3.fromRGB(180, 66, 52)
 local MARKET_REFRESH_TEXT_COLOR = Color3.fromRGB(114, 82, 56)
-local MARKET_PANEL_PRICE_COLOR = Color3.fromRGB(227, 172, 43)
 local invalidSelectedOverlayWarned: { [GuiButton]: boolean } = {}
 local costTextWarningsShown: { [string]: boolean } = {}
 
@@ -1372,12 +1372,6 @@ end
 local function updateExpansionMarketVisuals(expansion: Frame, itemId: string, definition: ItemConfig.ItemDefinition)
 	local price = if selectedMode == "Seeds" then definition.SeedBuyPrice else getProduceMarketPrice(itemId, definition)
 	setLabelText(expansion:FindFirstChild("MarketTag", true), FarmShopConfig.MarketPrimaryTagText)
-	setLabelText(
-		expansion:FindFirstChild("MarketPriceLabel", true),
-		if selectedMode == "Seeds" then FarmShopConfig.SeedPriceLabelText else FarmShopConfig.ProducePriceLabelText
-	)
-	local marketPriceValue = expansion:FindFirstChild("MarketPriceValue", true)
-	setLabelText(marketPriceValue, formatPriceNumber(price))
 	local rainTag: GuiObject? = nil
 	local trendTag: GuiObject? = nil
 	local trendTextLabel: TextLabel? = nil
@@ -1422,7 +1416,6 @@ local function updateExpansionMarketVisuals(expansion: Frame, itemId: string, de
 		trendTextLabel.Text = trendText
 	end
 	setGuiObjectVisible(trendTag, true)
-	setTextColor(marketPriceValue, MARKET_PANEL_PRICE_COLOR)
 end
 
 local function configureExpansion(expansion: Frame, itemId: string, definition: ItemConfig.ItemDefinition, order: number)

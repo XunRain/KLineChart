@@ -16,17 +16,27 @@ local HarvestService = require(Services.HarvestService)
 local ShovelService = require(Services.ShovelService)
 local SeedShopService = require(Services.SeedShopService)
 local MarketService = require(Services.MarketService)
+local LeaderboardService = require(Services.LeaderboardService)
 local WeatherService = require(Services.WeatherService)
 local TimeCycleService = require(Services.TimeCycleService)
 local SellShopService = require(Services.SellShopService)
 local TeleportService = require(Services.TeleportService)
 local TestMenuService = require(Services.TestMenuService)
+local TutorialService = require(Services.TutorialService)
 local PlotExpansionService = require(Services.PlotExpansionService)
 local PlayerLifecycleService = require(Services.PlayerLifecycleService)
 
 RemoteService.Init()
 PlayerDataService.Init()
+TutorialService.Init({
+	PlayerDataService = PlayerDataService,
+	RemoteService = RemoteService,
+})
 MarketService.Init({
+	RemoteService = RemoteService,
+})
+LeaderboardService.Init({
+	PlayerDataService = PlayerDataService,
 	RemoteService = RemoteService,
 })
 WeatherService.Init({
@@ -51,6 +61,7 @@ PlantingService.Init({
 	InventoryService = InventoryService,
 	PlantService = PlantService,
 	RemoteService = RemoteService,
+	TutorialService = TutorialService,
 })
 HarvestService.Init({
 	PlayerDataService = PlayerDataService,
@@ -58,6 +69,7 @@ HarvestService.Init({
 	InventoryService = InventoryService,
 	PlantService = PlantService,
 	RemoteService = RemoteService,
+	TutorialService = TutorialService,
 })
 ShovelService.Init({
 	PlayerDataService = PlayerDataService,
@@ -70,6 +82,7 @@ SeedShopService.Init({
 	PlayerDataService = PlayerDataService,
 	InventoryService = InventoryService,
 	RemoteService = RemoteService,
+	TutorialService = TutorialService,
 })
 DeveloperProductService.Init({
 	PlayerDataService = PlayerDataService,
@@ -83,6 +96,7 @@ SellShopService.Init({
 	InventoryService = InventoryService,
 	RemoteService = RemoteService,
 	MarketService = MarketService,
+	TutorialService = TutorialService,
 })
 TeleportService.Init({
 	PlotService = PlotService,
@@ -94,6 +108,7 @@ TestMenuService.Init({
 	RemoteService = RemoteService,
 	WeatherService = WeatherService,
 	TimeCycleService = TimeCycleService,
+	TutorialService = TutorialService,
 })
 PlotExpansionService.Init({
 	PlayerDataService = PlayerDataService,
@@ -106,6 +121,8 @@ PlayerLifecycleService.Init({
 	PlotService = PlotService,
 	InventoryService = InventoryService,
 	PlantService = PlantService,
+	TutorialService = TutorialService,
+	LeaderboardService = LeaderboardService,
 })
 
 PlantService.Start()

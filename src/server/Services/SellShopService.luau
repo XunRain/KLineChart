@@ -8,7 +8,6 @@ local Workspace = game:GetService("Workspace")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
-local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
 local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
 local NpcPromptService = require(script.Parent.NpcPromptService)
 
@@ -17,6 +16,7 @@ local PlayerDataService: any
 local InventoryService: any
 local RemoteService: any
 local MarketService: any
+local TutorialService: any
 local lastRequestAt: { [Player]: number } = {}
 
 local function sendSellResult(player: Player, payload: { [string]: any })
@@ -56,10 +56,6 @@ local function getNpcRoot(modelName: string, rootName: string): BasePart?
 	return getRoot(npc, rootName)
 end
 
-local function isNearRoot(playerRoot: BasePart, npcRoot: BasePart?, maximumDistance: number): boolean
-	return npcRoot ~= nil and (playerRoot.Position - npcRoot.Position).Magnitude <= maximumDistance
-end
-
 local function isAliveNearShop(player: Player): boolean
 	if player.Parent ~= Players then return false end
 	local character = player.Character
@@ -74,12 +70,9 @@ local function isAliveNearShop(player: Player): boolean
 	if not playerRoot then
 		return false
 	end
-	local seedRoot = getNpcRoot(SeedShopConfig.NpcModelName, SeedShopConfig.NpcRootName)
-	if isNearRoot(playerRoot, seedRoot, SeedShopConfig.MaximumInteractionDistance) then
-		return true
-	end
 	local sellRoot = getNpcRoot(SellShopConfig.NpcModelName, SellShopConfig.NpcRootName)
-	return isNearRoot(playerRoot, sellRoot, SellShopConfig.MaximumInteractionDistance)
+	return sellRoot ~= nil
+		and (playerRoot.Position - sellRoot.Position).Magnitude <= SellShopConfig.MaximumInteractionDistance
 end
 
 local function getActionId(payload: any): string
@@ -261,14 +254,24 @@ local function handleRequest(player: Player, payload: any)
 		SoldItems = soldItems,
 	})
 	RemoteService.Notify(player, string.format("Sold %d produce for %d Sheckles.", soldCount, payout), "Success")
+	for _, soldItem in soldItems do
+		TutorialService.OnProduceSold(player, soldItem.ItemId, soldItem.SoldCount)
+	end
 end
 
 -- 注入数据、库存与 Remote 服务，并注册出售请求及玩家离开冷却清理。
-function SellShopService.Init(dependencies: { PlayerDataService: any, InventoryService: any, RemoteService: any, MarketService: any? })
+function SellShopService.Init(dependencies: {
+	PlayerDataService: any,
+	InventoryService: any,
+	RemoteService: any,
+	MarketService: any?,
+	TutorialService: any,
+})
 	PlayerDataService = dependencies.PlayerDataService
 	InventoryService = dependencies.InventoryService
 	RemoteService = dependencies.RemoteService
 	MarketService = dependencies.MarketService
+	TutorialService = dependencies.TutorialService
 	RemoteService.GetEvent("RequestSellProduce").OnServerEvent:Connect(function(player, actionId)
 		local ok, err = pcall(function()
 			handleRequest(player, actionId)
@@ -277,7 +280,7 @@ function SellShopService.Init(dependencies: { PlayerDataService: any, InventoryS
 		if not ok then warn(string.format("[SellShopService] 出售请求失败 %s：%s", player.Name, tostring(err))) end
 	end)
 	Players.PlayerRemoving:Connect(function(player) lastRequestAt[player] = nil end)
-	NpcPromptService.Configure(
+	local prompt = NpcPromptService.Configure(
 		SellShopConfig.NpcFolderName,
 		SellShopConfig.NpcModelName,
 		SellShopConfig.NpcRootName,
@@ -287,6 +290,9 @@ function SellShopService.Init(dependencies: { PlayerDataService: any, InventoryS
 		SellShopConfig.PromptObjectText,
 		SellShopConfig.MaximumInteractionDistance
 	)
+	if prompt then
+		prompt.Enabled = SellShopConfig.Enabled
+	end
 end
 
 return SellShopService

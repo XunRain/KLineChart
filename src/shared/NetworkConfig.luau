@@ -12,6 +12,8 @@ return {
 		RequestShovelPlant = "RequestShovelPlant",
 		-- 服务端到全部客户端：参数依次为权威种植面位置 Vector3、plantId 字符串和植物记录 recordId；仅用于播放本地播种特效，不参与成长或库存结算。
 		PlantingFx = "PlantingFx",
+		-- 仅服务端到客户端：参数为白名单 cue 名和可选世界坐标；当前只承载权威购买成功与收获成功反馈，不接受客户端上行。
+		AudioCue = "AudioCue",
 		-- 白名单客户端到服务端：唯一参数为稳定 ActionId 字符串；服务端重新检查开关、UserId、冷却与动作配置，绝不接受客户端数量、SeedId 或目标库存。
 		RequestTestAction = "RequestTestAction",
 		-- 客户端到服务端：唯一参数为稳定植物 itemId 字符串；服务端从配置读取价格和每次数量，并重新验证距离、余额、库存上限与请求冷却。
@@ -44,12 +46,18 @@ return {
 		SellProduceResult = "SellProduceResult",
 		-- 客户端到服务端：无参数请求当前服务器共享市场快照；服务端只返回权威展示数据，不接受客户端提交价格或历史。
 		RequestMarketState = "RequestMarketState",
-		-- 服务端到客户端：参数为当前服务器共享市场快照，包含每个产物当前价、基础价、下次刷新时间、天气修正标识、暂停状态、冻结剩余秒数和最近价格历史。
+		-- 服务端到客户端：参数为当前服务器共享市场快照，包含视觉天气标识及每个产物当前价、刷新时间、修正标识、暂停状态和最近价格历史。
 		MarketStateChanged = "MarketStateChanged",
+		-- 客户端到服务端：无参数请求三块全局排行榜的只读快照；服务端不接受客户端提交名次、金币、时间或库存。
+		RequestLeaderboardState = "RequestLeaderboardState",
+		-- 服务端到单个客户端：返回 Top10 和该玩家 Self 行；客户端仅用于渲染 Workspace 排行榜模板。
+		LeaderboardStateChanged = "LeaderboardStateChanged",
 		-- 客户端到服务端：无参数请求当前服务器共享天气快照；服务端只返回当前天气、开始时间和结束时间。
 		RequestWeatherState = "RequestWeatherState",
 		-- 服务端到客户端：参数为当前服务器共享天气快照，客户端只能展示 UI 和本地特效，不能影响市场或存档。
 		WeatherStateChanged = "WeatherStateChanged",
+		-- 服务端到全部客户端：参数固定为 { EventId = "LightningStrike", Position = Vector3 }，只同步同服雷击表现，不造成伤害或结算。
+		WeatherVisualEvent = "WeatherVisualEvent",
 		-- 客户端到服务端：唯一参数为 Seeds、Garden 或 Sell 稳定标识；服务端按白名单自行解析目标，不接受坐标或 Instance。
 		RequestTeleport = "RequestTeleport",
 		-- 服务端到单个客户端：传送成功后回传最终落点 CFrame，客户端仅用于重置摄像机视角。
@@ -62,6 +70,12 @@ return {
 		HotbarLayoutChanged = "HotbarLayoutChanged",
 		-- 客户端到服务端：无参数请求购买下一档地块扩展；等级、价格、扣款、存档和地块尺寸均由服务端权威决定。
 		RequestExpandPlot = "RequestExpandPlot",
+		-- 客户端到服务端：无参数请求当前玩家教程展示状态；客户端不能借此推进或完成步骤。
+		RequestTutorialState = "RequestTutorialState",
+		-- 服务端到单个客户端：返回 Version/Step/Completed/Skipped 权威展示快照，不包含可写结算数据。
+		TutorialStateChanged = "TutorialStateChanged",
+		-- 客户端到服务端：无参数请求跳过尚未完成的教程；服务端重新校验存档并持久化完成状态。
+		RequestSkipTutorial = "RequestSkipTutorial",
 		-- 服务端到单个客户端：参数依次为消息字符串和可选级别字符串；仅用于界面提示，不承载任何权威状态或结算结果。
 		Notify = "Notify",
 	},

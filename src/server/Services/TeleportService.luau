@@ -199,7 +199,11 @@ local function warnMissingFixedTargets()
 		return
 	end
 	for _, definition in TeleportConfig.Destinations do
-		if definition.Kind == "Fixed" and definition.TargetName and not getFixedTargetPivot(definition.TargetName) then
+		if definition.Enabled
+			and definition.Kind == "Fixed"
+			and definition.TargetName
+			and not getFixedTargetPivot(definition.TargetName)
+		then
 			warn(string.format(
 				"[TeleportService] Workspace.%s.%s 必须是 BasePart 或 Model",
 				TeleportConfig.WorkspaceFolderName,

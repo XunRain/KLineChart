@@ -14,6 +14,7 @@ local PlotService: any
 local InventoryService: any
 local PlantService: any
 local RemoteService: any
+local TutorialService: any
 local lastRequestAt: { [Player]: number } = {}
 
 local function finiteVector3(value: any): boolean
@@ -147,6 +148,7 @@ local function handleRequest(player: Player, requestedPosition: any, seedId: any
 	InventoryService.Sync(player)
 	RemoteService.GetEvent("PlantingFx"):FireAllClients(worldPosition, seedId, recordId)
 	RemoteService.Notify(player, string.format("Planted %s.", definition.DisplayName), "Success")
+	TutorialService.OnPlantCreated(player, seedId)
 end
 
 -- 注入种植流程依赖并注册 RequestPlant 与玩家离开时的限频状态清理。
@@ -156,12 +158,14 @@ function PlantingService.Init(dependencies: {
 	InventoryService: any,
 	PlantService: any,
 	RemoteService: any,
+	TutorialService: any,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	PlotService = dependencies.PlotService
 	InventoryService = dependencies.InventoryService
 	PlantService = dependencies.PlantService
 	RemoteService = dependencies.RemoteService
+	TutorialService = dependencies.TutorialService
 
 	RemoteService.GetEvent("RequestPlant").OnServerEvent:Connect(function(player, requestedPosition, seedId, tool)
 		local ok, err = pcall(function()

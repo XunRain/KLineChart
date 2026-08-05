@@ -5,11 +5,11 @@
 return {
 	-- 种子商店总开关；客户端据此绑定界面，服务端仍独立检查，关闭后所有购买请求均拒绝。
 	Enabled = true,
-	-- 旧版购买请求未提交数量时使用的默认整数数量；新版 FarmShop 可提交数量，但服务端仍会重新校验库存、余额和背包上限。
+	-- 单次金币购买的固定整数数量；客户端与服务端都锁定该值，不能通过 Remote 提交其他数量。
 	PurchaseAmount = 1,
 	-- 同一玩家两次购买请求之间的最短间隔，单位为秒；服务端用于限制高频点击和 Remote 滥用。
 	PurchaseCooldown = 0.35,
-	-- 玩家 HumanoidRootPart 到任一商店 NPC 根节点的最大服务端购买距离，单位为 stud；客户端 Prompt 不能替代该校验。
+	-- 玩家 HumanoidRootPart 到 Sam 根节点的最大服务端购买距离，单位为 stud；客户端 Prompt 不能替代该校验。
 	MaximumInteractionDistance = 10,
 	-- 种子商店每轮自动补货间隔，单位为秒；服务端以 os.time 维护同一服务器统一刷新时刻，客户端只展示倒计时。
 	RefreshIntervalSeconds = 5 * 60,
@@ -66,11 +66,17 @@ return {
 	ScreenGuiName = "SeedShop",
 	-- SeedShop.Frame.NormalShop 下原模板商品行 Frame 名称；运行时按 ItemConfig 克隆该行以保持模板视觉。
 	ItemTemplateName = "ItemTemplate",
-	-- SeedShop.Frame.NormalShop 下原模板货币货架名称；当前项目不接入货币购买，客户端会隐藏该货架。
+	GeneratedItemPrefix = "KLineItem_",
+	-- SeedShop.Frame.NormalShop 下金币购买货架模板；运行时作为当前商品的共享展开货架。
 	ShecklesShelfName = "Sheckles_Shelf",
-	-- SeedShop.Frame.NormalShop 下原模板 Robux 货架名称；当前项目不接入 Robux 种子购买，客户端会隐藏该货架。
+	-- SeedShop.Frame.NormalShop 下 Robux 购买货架模板；运行时与金币货架互斥显示。
 	RobuxShelfName = "Robux_Shelf",
-	-- Workspace 下已确认承载 Sam 与 Steven 的 NPC Folder 稳定名称，服务端据此选择现有 Prompt。
+	ActiveShelfName = "Sheckles_Shelf",
+	CoinBuyButtonName = "BuyButton",
+	ToggleRobuxButtonName = "ToggleRobux",
+	ToggleShecklesButtonName = "ToggleSheckles",
+	GiftButtonPrefix = "GiftButton",
+	-- Workspace 下承载 Sam 的 NPC Folder 稳定名称，服务端据此选择现有 Prompt。
 	NpcFolderName = "NPCS",
 	-- Workspace.NPCS 下老板 Model 的稳定名称，服务端与客户端均据此定位交互根节点。
 	NpcModelName = "Sam",

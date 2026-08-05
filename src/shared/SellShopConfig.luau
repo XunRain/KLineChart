@@ -5,6 +5,52 @@
 return {
 	-- 出售系统总开关；客户端仅据此绑定界面，服务端仍独立检查并在关闭时拒绝交易。
 	Enabled = true,
+	-- StarterGui/PlayerGui 下独立出售商店 ScreenGui 稳定名称；代码只控制 Enabled，不改外壳比例与布局。
+	ScreenGuiName = "SellShop",
+	-- SellShop 下承载 Header 与 NormalShop 的 Studio 主外壳名称；RightFrame 与它同级。
+	MainFrameName = "Frame",
+	-- 主外壳下顶部栏稳定名称。
+	HeaderName = "Header",
+	-- Header 下关闭按钮稳定名称；必须为 GuiButton。
+	ExitButtonName = "ExitButton",
+	-- Header 下正式出售全部产物库存的 GuiButton；客户端只提交 SellAllActionId，服务端权威读取库存、行情与收益。
+	SellStockName = "SellStock",
+	-- Header 下不再使用的默认切换入口，运行时始终隐藏并禁用交互。
+	DefaultButtonName = "DefaultButton",
+	-- 主外壳下商品列表 ScrollingFrame 稳定名称。
+	NormalShopName = "NormalShop",
+	-- NormalShop 下商品行模板稳定名称；源模板保持隐藏，运行时按 ItemConfig 克隆。
+	ItemTemplateName = "ItemTemplate",
+	-- NormalShop 下唯一共享出售货架稳定名称；运行时只改变 Visible 与 LayoutOrder。
+	SellShelfName = "Sell_Shelf",
+	-- NormalShop 下不再使用的购买货架稳定名称，运行时始终隐藏并禁用交互。
+	ShecklesShelfName = "Sheckles_Shelf",
+	-- SellShop ScreenGui 下与 Frame 同级的右侧滑动面板稳定名称；运行时仅 Tween Position。
+	RightFrameName = "RightFrame",
+	-- RightFrame.Header 下承载价格刷新倒计时的容器名称。
+	RefreshInName = "RefreshIn",
+	-- RightFrame.Header.RefreshIn 下单层倒计时 TextLabel 名称；代码只修改 Text。
+	RefreshTimerName = "Timer",
+	-- RightFrame 下详情根节点稳定名称。
+	RightDetailName = "RightDetail",
+	-- RightDetail 下允许填充名称、价格与植物预览的区域稳定名称。
+	TopInfoName = "TopInfo",
+	-- RightDetail.TopInfo 下承载预览背景与 ViewportFrame 的稳定容器名称。
+	ImageDisplayName = "ImageDisplay",
+	-- RightDetail.TopInfo.ImageDisplay 下唯一允许挂载农作物预览的 ViewportFrame 名称。
+	ViewportFrameName = "ViewportFrame",
+	-- RightDetail 下允许填充价格曲线与趋势文案的区域稳定名称。
+	TrendBoxName = "TrendBox",
+	-- 运行时商品行名称前缀；只用于清理本控制器生成的克隆，不匹配 Studio 模板。
+	GeneratedItemPrefix = "KLineSellItem_",
+	-- RightFrame 仿 GrowingList 滑入/滑出的 Tween 时长，单位为秒；只影响 Position 动画。
+	RightPanelTweenDuration = 0.35,
+	-- Sell_Shelf 趋势标签在最新价格上涨、下跌或持平时使用的展示文案，不参与权威结算。
+	TrendTagRisingText = "Price Up",
+	TrendTagFallingText = "Price Down",
+	TrendTagStableText = "Stable",
+	-- 当前 ItemConfig 尚无独立稀有度字段，出售行沿用模板统一稀有度展示；只影响文案。
+	VisualRarityText = "Common",
 	-- Workspace 下已确认承载 Sam 与 Steven 的 NPC Folder 稳定名称。
 	NpcFolderName = "NPCS",
 	-- Workspace.NPCS 下已确认存在的出售 NPC 稳定名称。

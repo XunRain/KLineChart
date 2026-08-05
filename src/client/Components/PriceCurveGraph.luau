@@ -1,6 +1,6 @@
 --!strict
 
--- 本组件把价格数组渲染成 FarmShop 价格曲线；优先使用 Plottr，失败时回退到轻量 Frame 折线图。
+-- 本组件把价格数组按 Studio 参考线位置渲染成商店价格曲线；优先使用 Plottr，失败时回退到轻量 Frame 折线图。
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -46,17 +46,47 @@ type ResolvedGuideValues = {
 	Max: number,
 }
 
-type ResolvedDrawingRange = {
-	Min: number,
-	Max: number,
+type GuideLayout = {
+	MaxY: number,
+	BaseY: number,
+	MinY: number,
+}
+
+type PlotPadding = {
+	top: number,
+	right: number,
+	bottom: number,
+	left: number,
+}
+
+type PlotRect = {
+	Left: number,
+	Right: number,
+	Top: number,
+	Bottom: number,
+	Width: number,
+	Height: number,
+	Padding: PlotPadding,
 }
 
 type RenderSignature = {
 	Data: { number },
 	GuideValues: ResolvedGuideValues,
+	GuideLayout: Vector3,
 	Size: Vector2,
 	ZIndex: number,
 	Theme: ResolvedTheme,
+}
+
+type RenderWatchState = {
+	Data: { number },
+	Theme: ResolvedTheme,
+	GuideValues: GuideValues?,
+	ContainerConnections: { RBXScriptConnection },
+	GuideConnections: { RBXScriptConnection },
+	GuideInstances: { [number]: GuiObject },
+	RenderQueued: boolean,
+	Disposed: boolean,
 }
 
 local PriceCurveGraph = {}
@@ -70,7 +100,8 @@ local DEFAULT_THEME: ResolvedTheme = {
 	FallingLineColor = Color3.fromRGB(220, 86, 72),
 	DotColor = Color3.fromRGB(86, 194, 83),
 	DotStrokeColor = Color3.fromRGB(149, 96, 49),
-	LineThickness = 3,
+	-- LineThickness = 3,
+	LineThickness = 4,
 	GlowThickness = 7,
 	DotSizeScale = 0.075,
 	UsePlottr = true,
@@ -79,8 +110,9 @@ local DEFAULT_THEME: ResolvedTheme = {
 local SERIES_NAME = "Market Price"
 local PLOTTR_COMMIT = "4a48b93c12f2ed5e4c080a541cae2ea55701d76f"
 local PLOTTR_MIN_CANVAS_SIZE = 2
-local DRAWING_RANGE_PADDING_RATIO = 0.08
-local DRAWING_RANGE_MIN_PADDING = 1
+local DEFAULT_GUIDE_MAX_Y_SCALE = 0.25
+local DEFAULT_GUIDE_BASE_Y_SCALE = 0.5
+local DEFAULT_GUIDE_MIN_Y_SCALE = 0.75
 
 -- Plottr 是第三方库，当前项目没有它的 Luau 类型声明；any 只隔离在适配层内。
 type PlottrState = {
@@ -90,10 +122,14 @@ type PlottrState = {
 local plottrByContainer: any = setmetatable({}, { __mode = "k" })
 local renderSignatureByContainer: { [Frame]: RenderSignature } = {}
 setmetatable(renderSignatureByContainer, { __mode = "k" })
+local renderWatchByContainer: { [Frame]: RenderWatchState } = {}
+setmetatable(renderWatchByContainer, { __mode = "k" })
 local plottrModule: any? = nil
 local plottrLoadFailed = false
 local plottrWarningShown = false
 local missingGuideLabelWarnings: { [number]: boolean } = {}
+local invalidGuideLayoutWarnings: { [Frame]: boolean } = {}
+setmetatable(invalidGuideLayoutWarnings, { __mode = "k" })
 
 local function warnPlottr(message: string)
 	if plottrWarningShown then
@@ -397,6 +433,82 @@ local function resolveGuideValues(data: { number }, guideValues: GuideValues?): 
 	}
 end
 
+local function getGuideCenterY(container: Frame, index: number, defaultScale: number): number
+	local height = math.max(1, container.AbsoluteSize.Y)
+	local guide = container:FindFirstChild("Guide" .. index)
+	if not guide or not guide:IsA("GuiObject") then
+		return height * defaultScale
+	end
+	local centerY = guide.AbsolutePosition.Y - container.AbsolutePosition.Y + guide.AbsoluteSize.Y * 0.5
+	return math.clamp(centerY, 0, height)
+end
+
+-- 读取 Studio 三条参考线的真实纵向位置；层级缺失或顺序无效时回退到兼容旧模板的默认位置。
+local function resolveGuideLayout(container: Frame): GuideLayout
+	local height = math.max(1, container.AbsoluteSize.Y)
+	local layout = {
+		MaxY = getGuideCenterY(container, 1, DEFAULT_GUIDE_MAX_Y_SCALE),
+		BaseY = getGuideCenterY(container, 2, DEFAULT_GUIDE_BASE_Y_SCALE),
+		MinY = getGuideCenterY(container, 3, DEFAULT_GUIDE_MIN_Y_SCALE),
+	}
+	if layout.MaxY < layout.BaseY and layout.BaseY < layout.MinY then
+		return layout
+	end
+	if not invalidGuideLayoutWarnings[container] then
+		invalidGuideLayoutWarnings[container] = true
+		warn("[PriceCurveGraph] Guide1/Guide2/Guide3 必须从上到下排列，当前回退到 25%/50%/75%")
+	end
+	return {
+		MaxY = height * DEFAULT_GUIDE_MAX_Y_SCALE,
+		BaseY = height * DEFAULT_GUIDE_BASE_Y_SCALE,
+		MinY = height * DEFAULT_GUIDE_MIN_Y_SCALE,
+	}
+end
+
+local function mapPriceToGuideY(
+	value: number,
+	guideValues: ResolvedGuideValues,
+	guideLayout: GuideLayout,
+	height: number
+): number
+	local y: number
+	if value >= guideValues.Base then
+		local span = guideValues.Max - guideValues.Base
+		if span > 0 then
+			local alpha = (value - guideValues.Base) / span
+			y = guideLayout.BaseY + (guideLayout.MaxY - guideLayout.BaseY) * alpha
+		else
+			y = if value > guideValues.Base then guideLayout.MaxY else guideLayout.BaseY
+		end
+	else
+		local span = guideValues.Base - guideValues.Min
+		if span > 0 then
+			local alpha = (guideValues.Base - value) / span
+			y = guideLayout.BaseY + (guideLayout.MinY - guideLayout.BaseY) * alpha
+		else
+			y = guideLayout.MinY
+		end
+	end
+	return math.clamp(y, 0, height)
+end
+
+local function mapGuideYToPrice(y: number, guideValues: ResolvedGuideValues, guideLayout: GuideLayout): number
+	if y <= guideLayout.BaseY then
+		local span = guideLayout.MaxY - guideLayout.BaseY
+		if math.abs(span) <= 0.001 then
+			return guideValues.Base
+		end
+		local alpha = (y - guideLayout.BaseY) / span
+		return guideValues.Base + (guideValues.Max - guideValues.Base) * alpha
+	end
+	local span = guideLayout.MinY - guideLayout.BaseY
+	if math.abs(span) <= 0.001 then
+		return guideValues.Base
+	end
+	local alpha = (y - guideLayout.BaseY) / span
+	return guideValues.Base + (guideValues.Min - guideValues.Base) * alpha
+end
+
 local function hasSameTheme(left: ResolvedTheme, right: ResolvedTheme): boolean
 	return left.BackgroundTransparency == right.BackgroundTransparency
 		and left.GridColor == right.GridColor
@@ -418,6 +530,7 @@ local function hasSameRenderSignature(left: RenderSignature, right: RenderSignat
 		or left.GuideValues.Min ~= right.GuideValues.Min
 		or left.GuideValues.Base ~= right.GuideValues.Base
 		or left.GuideValues.Max ~= right.GuideValues.Max
+		or left.GuideLayout ~= right.GuideLayout
 		or not hasSameTheme(left.Theme, right.Theme)
 		or #left.Data ~= #right.Data
 	then
@@ -432,9 +545,11 @@ local function hasSameRenderSignature(left: RenderSignature, right: RenderSignat
 end
 
 local function buildRenderSignature(container: Frame, data: { number }, chartTheme: ResolvedTheme, guideValues: GuideValues?): RenderSignature
+	local guideLayout = resolveGuideLayout(container)
 	return {
 		Data = table.clone(data),
 		GuideValues = resolveGuideValues(data, guideValues),
+		GuideLayout = Vector3.new(guideLayout.MaxY, guideLayout.BaseY, guideLayout.MinY),
 		Size = container.AbsoluteSize,
 		ZIndex = container.ZIndex,
 		Theme = chartTheme,
@@ -449,31 +564,6 @@ local function hasRenderedGraph(container: Frame): boolean
 	end
 	local fallbackDot = container:FindFirstChild("PriceCurveDot")
 	return fallbackDot ~= nil and fallbackDot:IsA("GuiObject") and fallbackDot:GetAttribute("PriceCurveRuntime") == true
-end
-
--- 绘制轴仅在真实价格突破参考区间时扩张，保留真实数据与固定 Guide 文案。
-local function resolveDrawingRange(data: { number }, guideValues: GuideValues?): ResolvedDrawingRange
-	local guideRange = resolveGuideValues(data, guideValues)
-	local dataMin, dataMax = getRange(data)
-	local minValue = math.min(guideRange.Min, dataMin)
-	local maxValue = math.max(guideRange.Max, dataMax)
-	local effectiveSpan = math.max(maxValue - minValue, DRAWING_RANGE_MIN_PADDING)
-	local padding = math.max(effectiveSpan * DRAWING_RANGE_PADDING_RATIO, DRAWING_RANGE_MIN_PADDING)
-
-	if dataMin < guideRange.Min then
-		minValue = math.max(0, minValue - padding)
-	end
-	if dataMax > guideRange.Max then
-		maxValue += padding
-	end
-	if maxValue <= minValue then
-		maxValue = minValue + DRAWING_RANGE_MIN_PADDING
-	end
-
-	return {
-		Min = minValue,
-		Max = maxValue,
-	}
 end
 
 local function getTrendColor(previousValue: number, currentValue: number, chartTheme: ResolvedTheme): Color3
@@ -530,7 +620,7 @@ local function noXLabel(_index: number): string?
 	return nil
 end
 
-local function getPlottrPadding(size: Vector2): { top: number, right: number, bottom: number, left: number }
+local function getPlottrPadding(size: Vector2): PlotPadding
 	local verticalPadding = if size.Y < 36 then 1 elseif size.Y < 60 then 3 else 6
 	local rightPadding = if size.X < 90 then 1 else 4
 	return {
@@ -541,12 +631,37 @@ local function getPlottrPadding(size: Vector2): { top: number, right: number, bo
 	}
 end
 
-local function renderGuides(container: Frame, data: { number }, chartTheme: ResolvedTheme, guideValues: GuideValues?)
+local function getPlotRect(size: Vector2): PlotRect
+	local width = math.max(1, size.X)
+	local height = math.max(1, size.Y)
+	local padding = getPlottrPadding(size)
+	local left = padding.left
+	local right = math.max(left + 1, width - padding.right)
+	local top = padding.top
+	local bottom = math.max(top + 1, height - padding.bottom)
+	return {
+		Left = left,
+		Right = right,
+		Top = top,
+		Bottom = bottom,
+		Width = right - left,
+		Height = bottom - top,
+		Padding = padding,
+	}
+end
+
+local function renderGuides(
+	container: Frame,
+	data: { number },
+	chartTheme: ResolvedTheme,
+	guideValues: GuideValues?
+): GuideLayout
 	local height = math.max(1, container.AbsoluteSize.Y)
 	local resolved = resolveGuideValues(data, guideValues)
-	configureGuide(container, 1, height * 0.25, height, resolved.Max, chartTheme)
-	configureGuide(container, 2, height * 0.5, height, resolved.Base, chartTheme)
-	configureGuide(container, 3, height * 0.75, height, resolved.Min, chartTheme)
+	configureGuide(container, 1, height * DEFAULT_GUIDE_MAX_Y_SCALE, height, resolved.Max, chartTheme)
+	configureGuide(container, 2, height * DEFAULT_GUIDE_BASE_Y_SCALE, height, resolved.Base, chartTheme)
+	configureGuide(container, 3, height * DEFAULT_GUIDE_MIN_Y_SCALE, height, resolved.Min, chartTheme)
+	return resolveGuideLayout(container)
 end
 
 local function hidePlottrAxisBaseline(canvas: GuiObject)
@@ -572,7 +687,18 @@ local function renderWithPlottr(container: Frame, data: { number }, chartTheme: 
 		container.BackgroundTransparency = chartTheme.BackgroundTransparency
 		container.ClipsDescendants = true
 
-		local drawingRange = resolveDrawingRange(data, guideValues)
+		local resolvedGuides = resolveGuideValues(data, guideValues)
+		local guideLayout = renderGuides(container, data, chartTheme, guideValues)
+		local plotRect = getPlotRect(absoluteSize)
+		local displayData: { number } = table.create(#data)
+		for _, value in data do
+			local y = mapPriceToGuideY(value, resolvedGuides, guideLayout, absoluteSize.Y)
+			table.insert(displayData, math.clamp((plotRect.Bottom - y) / plotRect.Height, 0, 1))
+		end
+		local function formatDisplayValue(displayValue: number): string
+			local y = plotRect.Bottom - displayValue * plotRect.Height
+			return formatGuideValue(mapGuideYToPrice(y, resolvedGuides, guideLayout))
+		end
 
 		local config = {
 			theme = buildPlottrTheme(chartTheme),
@@ -583,26 +709,27 @@ local function renderWithPlottr(container: Frame, data: { number }, chartTheme: 
 				easingDirection = Enum.EasingDirection.Out,
 				stagger = 0.012,
 			},
-			padding = getPlottrPadding(absoluteSize),
+			padding = plotRect.Padding,
 			grid = { horizontal = false, vertical = false },
 			fill = { enabled = false, topTransparency = 0.88, bottomTransparency = 1, resolution = 4 },
 			smoothing = { enabled = true, amount = 0.75, samples = 8 },
 			yTickCount = 3,
 			maxXTickCount = 1,
 			baselineZero = false,
-			yMin = drawingRange.Min,
-			yMax = drawingRange.Max,
+			yMin = 0,
+			yMax = 1,
 			lineThickness = chartTheme.LineThickness,
-			pointRadius = 2,
+			pointRadius = 4,
 			showPoints = true,
 			showLegend = false,
 			legendToggle = false,
 			tooltips = true,
 			tooltipTextSize = 16,
 			cornerRadius = 0,
-			formatValue = formatGuideValue,
-			tooltipFormatter = function(_seriesName: string, value: number, _index: number): string
-				return "Price: " .. formatGuideValue(value)
+			formatValue = formatDisplayValue,
+			tooltipFormatter = function(_seriesName: string, value: number, index: number): string
+				local actualValue = data[index]
+				return "Price: " .. formatGuideValue(actualValue or mapGuideYToPrice(plotRect.Bottom - value * plotRect.Height, resolvedGuides, guideLayout))
 			end,
 			xLabels = noXLabel,
 			maxPoints = 10,
@@ -612,7 +739,7 @@ local function renderWithPlottr(container: Frame, data: { number }, chartTheme: 
 		local graph: any
 		local series = {
 			name = SERIES_NAME,
-			values = data,
+			values = displayData,
 			color = chartTheme.LineColor,
 			segmentColors = getSegmentColors(data, chartTheme),
 			pointColors = getPointColors(data, chartTheme),
@@ -644,7 +771,6 @@ local function renderWithPlottr(container: Frame, data: { number }, chartTheme: 
 			canvas.ClipsDescendants = true
 			hidePlottrAxisBaseline(canvas)
 		end
-		renderGuides(container, data, chartTheme, guideValues)
 	end)
 	if not ok then
 		destroyPlottr(container)
@@ -662,15 +788,15 @@ local function renderFallback(container: Frame, data: { number }, chartTheme: Re
 
 	local width = math.max(1, container.AbsoluteSize.X)
 	local height = math.max(1, container.AbsoluteSize.Y)
-	local drawingRange = resolveDrawingRange(data, guideValues)
-	renderGuides(container, data, chartTheme, guideValues)
+	local resolvedGuides = resolveGuideValues(data, guideValues)
+	local guideLayout = renderGuides(container, data, chartTheme, guideValues)
+	local plotRect = getPlotRect(container.AbsoluteSize)
 
 	local points = {}
 	for index, value in data do
-		local x = ((index - 1) / math.max(1, #data - 1)) * width
-		local alpha = (value - drawingRange.Min) / (drawingRange.Max - drawingRange.Min)
-		local y = height - (alpha * height)
-		table.insert(points, Vector2.new(x, math.clamp(y, 0, height)))
+		local x = plotRect.Left + ((index - 1) / math.max(1, #data - 1)) * plotRect.Width
+		local y = math.clamp(mapPriceToGuideY(value, resolvedGuides, guideLayout, height), plotRect.Top, plotRect.Bottom)
+		table.insert(points, Vector2.new(x, y))
 	end
 
 	local finalColor = getFinalColor(data, chartTheme)
@@ -702,14 +828,25 @@ local function renderFallback(container: Frame, data: { number }, chartTheme: Re
 	stroke.Parent = dot
 end
 
--- 用给定价格数组重画曲线；guideValues 传入后会固定最高价、原价和最低价参考值。
-function PriceCurveGraph.Render(container: Frame?, values: { number }, theme: Theme?, guideValues: GuideValues?)
-	if not container then
-		return
+local function cloneGuideValues(guideValues: GuideValues?): GuideValues?
+	if not guideValues then
+		return nil
 	end
+	return {
+		Min = guideValues.Min,
+		Base = guideValues.Base,
+		Max = guideValues.Max,
+	}
+end
 
-	local chartTheme = normalizeTheme(theme)
-	local data = sanitizeData(values)
+local function disconnectConnections(connections: { RBXScriptConnection })
+	for _, connection in connections do
+		connection:Disconnect()
+	end
+	table.clear(connections)
+end
+
+local function renderGraph(container: Frame, data: { number }, chartTheme: ResolvedTheme, guideValues: GuideValues?)
 	local renderSignature = buildRenderSignature(container, data, chartTheme, guideValues)
 	local previousSignature = renderSignatureByContainer[container]
 	if previousSignature and hasSameRenderSignature(previousSignature, renderSignature) and hasRenderedGraph(container) then
@@ -721,6 +858,119 @@ function PriceCurveGraph.Render(container: Frame?, values: { number }, theme: Th
 	end
 	renderFallback(container, data, chartTheme, guideValues)
 	renderSignatureByContainer[container] = renderSignature
+end
+
+local refreshGuideConnections: (Frame, RenderWatchState) -> ()
+
+local function queueWatchedRender(container: Frame, state: RenderWatchState)
+	if state.Disposed or state.RenderQueued then
+		return
+	end
+	state.RenderQueued = true
+	task.defer(function()
+		state.RenderQueued = false
+		if state.Disposed or renderWatchByContainer[container] ~= state or not container.Parent then
+			return
+		end
+		renderGraph(container, state.Data, state.Theme, state.GuideValues)
+		refreshGuideConnections(container, state)
+	end)
+end
+
+refreshGuideConnections = function(container: Frame, state: RenderWatchState)
+	local guides: { [number]: GuiObject } = {}
+	local changed = false
+	for index = 1, 3 do
+		local candidate = container:FindFirstChild("Guide" .. index)
+		local guide = if candidate and candidate:IsA("GuiObject") then candidate else nil
+		if guide then
+			guides[index] = guide
+		end
+		if guide ~= state.GuideInstances[index] then
+			changed = true
+		end
+	end
+	if not changed then
+		return
+	end
+
+	disconnectConnections(state.GuideConnections)
+	state.GuideInstances = guides
+	for _, guide in guides do
+		table.insert(state.GuideConnections, guide:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
+			queueWatchedRender(container, state)
+		end))
+		table.insert(state.GuideConnections, guide:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+			queueWatchedRender(container, state)
+		end))
+	end
+end
+
+local function isDirectGuide(container: Frame, instance: Instance): boolean
+	if instance.Parent ~= container then
+		return false
+	end
+	return instance.Name == "Guide1" or instance.Name == "Guide2" or instance.Name == "Guide3"
+end
+
+local function bindRenderWatch(container: Frame, state: RenderWatchState)
+	table.insert(state.ContainerConnections, container:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		queueWatchedRender(container, state)
+	end))
+	table.insert(state.ContainerConnections, container.ChildAdded:Connect(function(child)
+		if isDirectGuide(container, child) then
+			refreshGuideConnections(container, state)
+			queueWatchedRender(container, state)
+		end
+	end))
+	table.insert(state.ContainerConnections, container.ChildRemoved:Connect(function(child)
+		if child.Name == "Guide1" or child.Name == "Guide2" or child.Name == "Guide3" then
+			refreshGuideConnections(container, state)
+			queueWatchedRender(container, state)
+		end
+	end))
+	table.insert(state.ContainerConnections, container.Destroying:Connect(function()
+		state.Disposed = true
+		disconnectConnections(state.GuideConnections)
+		disconnectConnections(state.ContainerConnections)
+		renderWatchByContainer[container] = nil
+		renderSignatureByContainer[container] = nil
+		invalidGuideLayoutWarnings[container] = nil
+		destroyPlottr(container)
+	end))
+	refreshGuideConnections(container, state)
+end
+
+-- 用给定价格数组重画曲线；guideValues 传入后会固定最高价、原价和最低价参考值。
+function PriceCurveGraph.Render(container: Frame?, values: { number }, theme: Theme?, guideValues: GuideValues?)
+	if not container then
+		return
+	end
+
+	local chartTheme = normalizeTheme(theme)
+	local data = sanitizeData(values)
+	local state = renderWatchByContainer[container]
+	if not state then
+		state = {
+			Data = data,
+			Theme = chartTheme,
+			GuideValues = cloneGuideValues(guideValues),
+			ContainerConnections = {},
+			GuideConnections = {},
+			GuideInstances = {},
+			RenderQueued = false,
+			Disposed = false,
+		}
+		renderWatchByContainer[container] = state
+		bindRenderWatch(container, state)
+	else
+		state.Data = data
+		state.Theme = chartTheme
+		state.GuideValues = cloneGuideValues(guideValues)
+	end
+
+	renderGraph(container, data, chartTheme, guideValues)
+	refreshGuideConnections(container, state)
 end
 
 return PriceCurveGraph

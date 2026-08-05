@@ -46,6 +46,11 @@ SeedIAPConfig.PurchaseButtonAmounts = {
 	Buy3Button = 3,
 	Buy10Button = 10,
 } :: { [string]: number }
+SeedIAPConfig.SeedShopPurchaseButtonAmounts = {
+	["1Button"] = 1,
+	["3Button"] = 3,
+	["10Button"] = 10,
+} :: { [string]: number }
 -- Roblox 内置 Robux 字形；悬浮价格固定显示为“图标 数字”，不得由客户端虚构价格。
 SeedIAPConfig.RobuxCurrencyIconText = utf8.char(0xE002)
 -- 目标价格缺失或非法时的安全占位；正式模式官方价格查询失败时仍保留目标价格，不使用此占位覆盖。

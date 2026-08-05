@@ -9,6 +9,8 @@ local PlayerDataService: any
 local PlotService: any
 local InventoryService: any
 local PlantService: any
+local TutorialService: any
+local LeaderboardService: any
 local characterConnections: { [Player]: RBXScriptConnection } = {}
 local loadingPlayers: { [Player]: boolean } = {}
 
@@ -18,6 +20,7 @@ local function cleanup(player: Player)
 		connection:Disconnect()
 		characterConnections[player] = nil
 	end
+	LeaderboardService.PlayerRemoving(player)
 	PlantService.DestroyPlayer(player)
 	PlotService.Release(player)
 	PlayerDataService.CloseSession(player)
@@ -64,6 +67,8 @@ local function loadPlayer(player: Player)
 		end
 		return
 	end
+	TutorialService.PlayerReady(player)
+	LeaderboardService.PlayerReady(player)
 
 	local function onCharacter(character: Model)
 		task.defer(function()
@@ -86,11 +91,15 @@ function PlayerLifecycleService.Init(dependencies: {
 	PlotService: any,
 	InventoryService: any,
 	PlantService: any,
+	TutorialService: any,
+	LeaderboardService: any,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	PlotService = dependencies.PlotService
 	InventoryService = dependencies.InventoryService
 	PlantService = dependencies.PlantService
+	TutorialService = dependencies.TutorialService
+	LeaderboardService = dependencies.LeaderboardService
 
 	Players.PlayerAdded:Connect(function(player)
 		task.spawn(loadPlayer, player)

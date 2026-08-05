@@ -12,6 +12,7 @@ local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local PlantGrowthIAPConfig = require(ReplicatedStorage.Shared.PlantGrowthIAPConfig)
 local PlotExpansionConfig = require(ReplicatedStorage.Shared.PlotExpansionConfig)
+local TutorialConfig = require(ReplicatedStorage.Shared.TutorialConfig)
 local DataStoreConfig = require(script.Parent.Parent.Config.DataStoreConfig)
 
 type PlantRecord = {
@@ -30,6 +31,12 @@ type PlantRecord = {
 
 type PlayerData = {
 	Version: number,
+	Tutorial: {
+		Version: number,
+		Step: TutorialConfig.TutorialStep,
+		Completed: boolean,
+		Skipped: boolean,
+	},
 	Sheckles: number,
 	OwnedExpansions: number,
 	ProcessedDeveloperProductReceipts: { [string]: number },
@@ -90,6 +97,12 @@ end
 local function defaultData(): PlayerData
 	return {
 		Version = DataStoreConfig.SchemaVersion,
+		Tutorial = {
+			Version = TutorialConfig.Version,
+			Step = TutorialConfig.Steps.BuyCarrot,
+			Completed = false,
+			Skipped = false,
+		},
 		Sheckles = EconomyConfig.StartingSheckles,
 		OwnedExpansions = 0,
 		ProcessedDeveloperProductReceipts = {},
@@ -136,13 +149,38 @@ end
 
 -- 只保留可恢复的纯数据，损坏条目会被跳过。
 local function normalize(raw: any): PlayerData
-	if type(raw) ~= "table" then
+	local rawWasMissing = type(raw) ~= "table"
+	local rawVersion = if type(raw) == "table" then finiteNumber(raw.Version, 0) else 0
+	local rawTutorial = if type(raw) == "table" then raw.Tutorial else nil
+	if rawWasMissing then
 		raw = {}
 	end
 	reconcile(raw, defaultData())
 
 	local normalized = defaultData()
 	normalized.Version = DataStoreConfig.SchemaVersion
+	if type(rawTutorial) == "table" then
+		local rawStep = rawTutorial.Step
+		local completed = rawTutorial.Completed == true or rawTutorial.Skipped == true
+		local step = if TutorialConfig.IsStep(rawStep) then rawStep :: TutorialConfig.TutorialStep else TutorialConfig.Steps.BuyCarrot
+		if step == TutorialConfig.Steps.Completed then
+			completed = true
+		end
+		normalized.Tutorial = {
+			Version = TutorialConfig.Version,
+			Step = if completed then TutorialConfig.Steps.Completed else step,
+			Completed = completed,
+			Skipped = completed and rawTutorial.Skipped == true,
+		}
+	elseif not rawWasMissing and rawVersion < DataStoreConfig.SchemaVersion then
+		-- v1-v5 老档没有教程字段时直接完成，避免上线后强迫既有玩家重走新手流程。
+		normalized.Tutorial = {
+			Version = TutorialConfig.Version,
+			Step = TutorialConfig.Steps.Completed,
+			Completed = true,
+			Skipped = false,
+		}
+	end
 	normalized.Sheckles = math.clamp(
 		math.floor(finiteNumber(raw.Sheckles, EconomyConfig.StartingSheckles)),
 		0,

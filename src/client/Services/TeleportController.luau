@@ -93,6 +93,18 @@ local function bindScreen(screen: Instance, requestTeleport: RemoteEvent)
 			))
 			continue
 		end
+		if not definition.Enabled then
+			button.Visible = false
+			button.Active = false
+			button.Interactable = false
+			button.Selectable = false
+			continue
+		end
+		button.Visible = true
+		button.Active = true
+		button.Interactable = true
+		button.Selectable = true
+		button.AutoButtonColor = true
 		if not boundButtons[button] then
 			local stableDestinationId = definition.DestinationId
 			boundButtons[button] = true
