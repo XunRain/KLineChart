@@ -167,6 +167,18 @@ local function setLabelText(root: Instance?, text: string)
 	end
 end
 
+-- 仅同步模板确认的 Rarity_Text 父层及其直接 TextLabel 子层，不递归改写渐变或其他后代。
+local function setDirectLayeredLabelText(root: Instance?, text: string)
+	if not root or not root:IsA("TextLabel") then
+		return
+	end
+	root.Text = text
+	local face = root:FindFirstChild("TextLabel")
+	if face and face:IsA("TextLabel") then
+		face.Text = text
+	end
+end
+
 -- 严格解析按钮中 Studio 约定的底层加粗字与前景字，避免只更新一层产生重影。
 local function getLayeredButtonText(button: GuiButton, containerName: string): LayeredButtonText?
 	local container = button:FindFirstChild(containerName)
@@ -1036,6 +1048,9 @@ local function beginRobuxPriceHover(amount: number)
 	robuxHoveredByAmount[amount] = true
 	local textLayers = robuxButtonTextByAmount[amount]
 	local itemId = selectedItemId
+	if not itemId or not SeedIAPConfig.HasItemConfiguration(itemId) then
+		return
+	end
 	local productId = if itemId then SeedIAPConfig.GetProductId(itemId, amount) else nil
 	if not textLayers then
 		return
@@ -1085,24 +1100,31 @@ local function updatePurchaseModeUi()
 		return
 	end
 	local isSeedsPage = selectedMode == "Seeds"
+	local itemId = selectedItemId
+	local hasRobuxConfiguration = itemId ~= nil and SeedIAPConfig.HasItemConfiguration(itemId :: string)
 	if not isSeedsPage then
 		purchaseMode = "Coins"
+	elseif purchaseMode == "Robux" and not hasRobuxConfiguration then
+		purchaseMode = "Coins"
 	end
-	local isRobuxMode = isSeedsPage and purchaseMode == "Robux"
+	local isRobuxMode = isSeedsPage and purchaseMode == "Robux" and hasRobuxConfiguration
 	local textContextKey = string.format("%s|%s|%s", selectedMode, purchaseMode, selectedItemId or "")
 	if robuxTextContextKey ~= textContextKey then
 		robuxTextContextKey = textContextKey
 		resetRobuxHoverText()
 	end
-	enterRobuxButton.Visible = isSeedsPage and not isRobuxMode
+	enterRobuxButton.Visible = isSeedsPage and not isRobuxMode and hasRobuxConfiguration
 	productButtons.Visible = isRobuxMode
 	returnCoinsButton.Visible = isRobuxMode
 
-	local itemId = selectedItemId
 	local ownedSeeds = if itemId then getInventoryCount("Seeds", itemId) else EconomyConfig.MaximumSeedInventory
 	local inventorySpace = math.max(0, EconomyConfig.MaximumSeedInventory - ownedSeeds)
 	for amount, button in robuxButtonByAmount do
-		local enabled = isRobuxMode and itemId ~= nil and inventorySpace >= amount and not DeveloperProductPromptController.IsPending()
+		local enabled = isRobuxMode
+			and itemId ~= nil
+			and hasRobuxConfiguration
+			and inventorySpace >= amount
+			and not DeveloperProductPromptController.IsPending()
 		button.Visible = isRobuxMode
 		button.Active = enabled
 		button.AutoButtonColor = enabled
@@ -1349,7 +1371,7 @@ local function configureRow(row: Frame, itemId: string, definition: ItemConfig.I
 	setGuiObjectVisible(stockLabel, selectedMode == "Seeds")
 	local rarity = main:FindFirstChild("Rarity")
 	if rarity then
-		setLabelText(rarity:FindFirstChild("Rarity_Text"), SeedShopConfig.VisualRarityText)
+		setDirectLayeredLabelText(rarity:FindFirstChild("Rarity_Text"), definition.Quality:upper())
 	end
 	renderPreview(getRowPreviewViewport(main), selectedMode, itemId, definition)
 	local button = main:FindFirstChild("TextButton")
@@ -1651,7 +1673,12 @@ local function openShop(mode: ShopMode, root: BasePart)
 end
 
 local function enterRobuxPurchaseMode()
-	if not robuxUiReady or selectedMode ~= "Seeds" then
+	local itemId = selectedItemId
+	if not robuxUiReady
+		or selectedMode ~= "Seeds"
+		or not itemId
+		or not SeedIAPConfig.HasItemConfiguration(itemId)
+	then
 		return
 	end
 	purchaseMode = "Robux"
@@ -1671,7 +1698,12 @@ local function submitSeedProductPurchase(amount: number)
 		return
 	end
 	local itemId = selectedItemId
-	if not itemId or not ItemConfig.Get(itemId) or not SeedIAPConfig.IsPackAmount(amount) or DeveloperProductPromptController.IsPending() then
+	if not itemId
+		or not ItemConfig.Get(itemId)
+		or not SeedIAPConfig.HasItemConfiguration(itemId)
+		or not SeedIAPConfig.IsPackAmount(amount)
+		or DeveloperProductPromptController.IsPending()
+	then
 		return
 	end
 	local now = os.clock()

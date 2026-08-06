@@ -9,11 +9,24 @@
 | 1 | Carrot | `Carrot` | `Assets.Plants.Carrot` | — |
 | 2 | Strawberry | `Strawberry` | `Assets.Plants.Strawberry` | `Assets.Fruits.Strawberry` |
 | 3 | Eggplant | `Eggplant` | `Assets.Plants.Eggplant` | `Assets.Fruits.Eggplant` |
-| 4 | Tulip | `Tulip` | `Assets.Plants.Tulip` | — |
+| 4 | Dandelion | `Dandelion` | `Assets.Plants.Dandelion` | — |
 | 5 | Tomato | `Tomato` | `Assets.Plants.Tomato` | `Assets.Fruits.Tomato` |
 | 6 | Apple | `Apple` | `Assets.Plants.Apple` | `Assets.Fruits.Apple` |
+| 7 | Watermelon | `Watermelon` | `Assets.Plants.Watermelon` | `Assets.Fruits.Watermelon` |
+| 8 | Corn | `Corn` | `Assets.Plants.Corn` | `Assets.Fruits.Corn` |
+| 9 | Cactus | `Cactus` | `Assets.Plants.Cactus` | `Assets.Fruits.Cactus` |
+| 10 | Pumpkin | `Pumpkin` | `Assets.Plants.Pumpkin` | `Assets.Fruits.Pumpkin` |
+| 11 | Pineapple | `Pineapple` | `Assets.Plants.Pineapple` | `Assets.Fruits.Pineapple` |
+| 12 | Cauliflower | `Cauliflower` | `Assets.Plants.Cauliflower` | — |
+| 13 | Mushroom | `Mushroom` | `Assets.Plants.Mushroom` | — |
+| 14 | Berry | `Berry` | `Assets.Plants.Berry` | `Assets.Fruits.Berry` |
+| 15 | Banana | `Banana` | `Assets.Plants.Banana` | `Assets.Fruits.Banana` |
+| 16 | Grape | `Grape` | `Assets.Plants.Grape` | `Assets.Fruits.Grape` |
+| 17 | Lantern Fruit | `LanternFruit` | `Assets.Plants.LanternFruit` | `Assets.Fruits.LanternFruit` |
 
 > 注意：模板植物数值参考表中的编号 `3` 是 Blueberry；本项目已经将该品种替换为 Eggplant，因此本项目编号 `3` 是 Eggplant。两套编号不可混用。
+
+> Tulip 已由 Dandelion 替换；项目编号 `4`、数值与商店位置由 Dandelion 完整继承。旧存档中的 Tulip 会在加载时幂等归一化为 Dandelion，Tulip Studio 资源暂不删除。
 
 ## 稳定性规则
 

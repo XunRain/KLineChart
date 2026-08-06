@@ -48,11 +48,6 @@ MarketConfig.Rules = {
 		MultiplierMin = 0.5,
 		MultiplierMax = 2,
 	},
-	Tulip = {
-		RefreshInterval = 40,
-		MultiplierMin = 0.5,
-		MultiplierMax = 2,
-	},
 	Tomato = {
 		RefreshInterval = 50,
 		MultiplierMin = 0.5,
@@ -60,6 +55,66 @@ MarketConfig.Rules = {
 	},
 	Apple = {
 		RefreshInterval = 60,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Dandelion = {
+		RefreshInterval = 40,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Watermelon = {
+		RefreshInterval = 70,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Corn = {
+		RefreshInterval = 80,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Cactus = {
+		RefreshInterval = 90,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Pumpkin = {
+		RefreshInterval = 100,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Pineapple = {
+		RefreshInterval = 110,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Cauliflower = {
+		RefreshInterval = 120,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Mushroom = {
+		RefreshInterval = 130,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Berry = {
+		RefreshInterval = 140,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Banana = {
+		RefreshInterval = 150,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	Grape = {
+		RefreshInterval = 160,
+		MultiplierMin = 0.5,
+		MultiplierMax = 2,
+	},
+	LanternFruit = {
+		RefreshInterval = 170,
 		MultiplierMin = 0.5,
 		MultiplierMax = 2,
 	},

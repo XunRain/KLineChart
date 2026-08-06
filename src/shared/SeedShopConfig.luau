@@ -36,11 +36,6 @@ return {
 			MinStock = 1,
 			MaxStock = 8,
 		},
-		Tulip = {
-			Chance = 1,
-			MinStock = 3,
-			MaxStock = 4,
-		},
 		Tomato = {
 			Chance = 0.9,
 			MinStock = 2,
@@ -51,8 +46,68 @@ return {
 			MinStock = 1,
 			MaxStock = 1,
 		},
+		Dandelion = {
+			Chance = 1,
+			MinStock = 3,
+			MaxStock = 4,
+		},
+		Watermelon = {
+			Chance = 0.5263,
+			MinStock = 1,
+			MaxStock = 1,
+		},
+		Corn = {
+			Chance = 0.5263,
+			MinStock = 1,
+			MaxStock = 1,
+		},
+		Cactus = {
+			Chance = 0.5263,
+			MinStock = 1,
+			MaxStock = 1,
+		},
+		Pumpkin = {
+			Chance = 0.5263,
+			MinStock = 1,
+			MaxStock = 1,
+		},
+		Pineapple = {
+			Chance = 0.5263,
+			MinStock = 1,
+			MaxStock = 1,
+		},
+		Cauliflower = {
+			Chance = 0.25,
+			MinStock = 1,
+			MaxStock = 1,
+		},
+		Mushroom = {
+			Chance = 0.25,
+			MinStock = 1,
+			MaxStock = 1,
+		},
+		Berry = {
+			Chance = 0.25,
+			MinStock = 1,
+			MaxStock = 1,
+		},
+		Banana = {
+			Chance = 0.25,
+			MinStock = 1,
+			MaxStock = 1,
+		},
+		Grape = {
+			Chance = 0.25,
+			MinStock = 1,
+			MaxStock = 1,
+		},
+		LanternFruit = {
+			Chance = 0.25,
+			MinStock = 1,
+			MaxStock = 1,
+		},
 	},
-	-- 仅用于模板商店视觉兼容的种子稀有度文案；当前不参与解锁、权重、售价、库存或服务端购买校验。
+	-- 仅作为旧 UI 的兼容兜底；正常商品行统一读取 ItemConfig 中的 Quality。
 	VisualRarityText = "Common",
 	-- 客户端尚未收到服务端商店状态时显示的刷新占位文案；收到状态后会改为真实剩余时间。
 	VisualRestockText = "New stock in --:--",

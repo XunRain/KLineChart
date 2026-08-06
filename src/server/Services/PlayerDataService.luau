@@ -85,6 +85,8 @@ local shuttingDown = false
 local LEGACY_BLUEBERRY_SCHEMA_MAX = 6
 local LEGACY_BLUEBERRY_ITEM_ID = "Blueberry"
 local EGGPLANT_ITEM_ID = "Eggplant"
+local LEGACY_TULIP_ITEM_ID = "Tulip"
+local DANDELION_ITEM_ID = "Dandelion"
 local MAX_SAFE_INTEGER = 9007199254740991
 
 local function deepCopy(value: any): any
@@ -147,27 +149,32 @@ local function safeNonNegativeInteger(value: any, maximum: number): number
 	return math.clamp(math.floor(finiteNumber(value, 0)), 0, maximum)
 end
 
-local function mergeLegacyInventoryCount(counts: any, maximum: number)
-	if type(counts) ~= "table" or counts[LEGACY_BLUEBERRY_ITEM_ID] == nil then
+local function mergeLegacyInventoryCount(
+	counts: any,
+	legacyItemId: string,
+	replacementItemId: string,
+	maximum: number
+)
+	if type(counts) ~= "table" or counts[legacyItemId] == nil then
 		return
 	end
-	local currentCount = safeNonNegativeInteger(counts[EGGPLANT_ITEM_ID], maximum)
-	local legacyCount = safeNonNegativeInteger(counts[LEGACY_BLUEBERRY_ITEM_ID], maximum)
-	counts[EGGPLANT_ITEM_ID] = math.min(maximum, currentCount + legacyCount)
-	counts[LEGACY_BLUEBERRY_ITEM_ID] = nil
+	local currentCount = safeNonNegativeInteger(counts[replacementItemId], maximum)
+	local legacyCount = safeNonNegativeInteger(counts[legacyItemId], maximum)
+	counts[replacementItemId] = if currentCount >= maximum - legacyCount then maximum else currentCount + legacyCount
+	counts[legacyItemId] = nil
 end
 
-local function migrateLegacyHotbarKey(value: string): string
-	local legacySeedKey = "Seed:" .. LEGACY_BLUEBERRY_ITEM_ID
+local function migrateLegacyHotbarKey(value: string, legacyItemId: string, replacementItemId: string): string
+	local legacySeedKey = "Seed:" .. legacyItemId
 	if value == legacySeedKey then
-		return "Seed:" .. EGGPLANT_ITEM_ID
+		return "Seed:" .. replacementItemId
 	end
-	local legacyFruitPrefix = "Fruit:" .. LEGACY_BLUEBERRY_ITEM_ID
+	local legacyFruitPrefix = "Fruit:" .. legacyItemId
 	local suffix = string.sub(value, #legacyFruitPrefix + 1)
 	if string.sub(value, 1, #legacyFruitPrefix) == legacyFruitPrefix
 		and (suffix == "" or string.sub(suffix, 1, 1) == ":")
 	then
-		return "Fruit:" .. EGGPLANT_ITEM_ID .. suffix
+		return "Fruit:" .. replacementItemId .. suffix
 	end
 	return value
 end
@@ -178,12 +185,17 @@ local function migrateLegacyBlueberryData(raw: any)
 		return
 	end
 	if type(raw.Inventory) == "table" then
-		mergeLegacyInventoryCount(raw.Inventory.Seeds, EconomyConfig.MaximumSeedInventory)
-		mergeLegacyInventoryCount(raw.Inventory.Produce, MAX_SAFE_INTEGER)
+		mergeLegacyInventoryCount(
+			raw.Inventory.Seeds,
+			LEGACY_BLUEBERRY_ITEM_ID,
+			EGGPLANT_ITEM_ID,
+			EconomyConfig.MaximumSeedInventory
+		)
+		mergeLegacyInventoryCount(raw.Inventory.Produce, LEGACY_BLUEBERRY_ITEM_ID, EGGPLANT_ITEM_ID, MAX_SAFE_INTEGER)
 		if type(raw.Inventory.HotbarLayout) == "table" then
 			for slot, value in raw.Inventory.HotbarLayout do
 				if type(value) == "string" then
-					raw.Inventory.HotbarLayout[slot] = migrateLegacyHotbarKey(value)
+					raw.Inventory.HotbarLayout[slot] = migrateLegacyHotbarKey(value, LEGACY_BLUEBERRY_ITEM_ID, EGGPLANT_ITEM_ID)
 				end
 			end
 		end
@@ -206,6 +218,41 @@ local function migrateLegacyBlueberryData(raw: any)
 	end
 end
 
+-- 在 ItemConfig 过滤旧键前，将 Tulip 数量、热栏、植株和付费商店余量幂等合并到 Dandelion。
+local function migrateLegacyTulipData(raw: any)
+	if type(raw) ~= "table" then
+		return
+	end
+	if type(raw.Inventory) == "table" then
+		mergeLegacyInventoryCount(raw.Inventory.Seeds, LEGACY_TULIP_ITEM_ID, DANDELION_ITEM_ID, EconomyConfig.MaximumSeedInventory)
+		mergeLegacyInventoryCount(raw.Inventory.Produce, LEGACY_TULIP_ITEM_ID, DANDELION_ITEM_ID, MAX_SAFE_INTEGER)
+		if type(raw.Inventory.HotbarLayout) == "table" then
+			for slot, value in raw.Inventory.HotbarLayout do
+				if type(value) == "string" then
+					raw.Inventory.HotbarLayout[slot] = migrateLegacyHotbarKey(value, LEGACY_TULIP_ITEM_ID, DANDELION_ITEM_ID)
+				end
+			end
+		end
+	end
+	if type(raw.Plants) == "table" then
+		for _, record in raw.Plants do
+			if type(record) == "table" and record.plantId == LEGACY_TULIP_ITEM_ID then
+				record.plantId = DANDELION_ITEM_ID
+			end
+		end
+	end
+	if type(raw.SeedShopPaidStockSnapshot) == "table"
+		and type(raw.SeedShopPaidStockSnapshot.Stock) == "table"
+	then
+		mergeLegacyInventoryCount(
+			raw.SeedShopPaidStockSnapshot.Stock,
+			LEGACY_TULIP_ITEM_ID,
+			DANDELION_ITEM_ID,
+			EconomyConfig.MaximumSeedInventory
+		)
+	end
+end
+
 local function maxExpansionLevel(): number
 	local maximum = 0
 	for _, level in PlotExpansionConfig.Levels do
@@ -225,6 +272,7 @@ local function normalize(raw: any): PlayerData
 	if not rawWasMissing and rawVersion <= LEGACY_BLUEBERRY_SCHEMA_MAX then
 		migrateLegacyBlueberryData(raw)
 	end
+	migrateLegacyTulipData(raw)
 	reconcile(raw, defaultData())
 
 	local normalized = defaultData()

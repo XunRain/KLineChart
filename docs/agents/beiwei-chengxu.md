@@ -13,14 +13,14 @@
 KLineChart 已实现第一版种植与存档基础：
 
 - `src/shared/ItemConfig.luau` 是植物成长、收获类型、初始种子、预制模型名称、视觉成长参数和交互限制的单一来源；当前有 Carrot、Strawberry 与 Blueberry。
-- `PlayerDataService` 使用原生 `UpdateAsync`、`Version = 2`、会话锁、深度补全、自动保存与保存防抖；v1 或缺失 `Sheckles` 的档案安全补 20，Live DataStore 失败时拒绝加载，Studio 才允许内存降级。
+- `PlayerDataService` 使用原生 `UpdateAsync`、`Version = 2`、会话锁、深度补全、自动保存与保存防抖；v1 或缺失 `Sheckles` 的档案安全补 5，Live DataStore 失败时拒绝加载，Studio 才允许内存降级。
 - `PlotService` 适配 `Workspace.Gardens.Plot1..Plot8`，优先使用 `Visual.PlantAreaColumn1/2`，以 `SpawnPoint` 保存植物局部坐标。
 - `PlantingService`、`HarvestService`、`InventoryService` 和 `PlantService` 分别拥有请求校验、收获事务、库存物化和运行时植物模型职责。
 - 客户端 `PlantInteractionController` 只提交种植命中点，`PlantVisualController` 以约 12Hz 驱动预制植株与挂点果实的时间戳成长；最终库存与成熟判断均由服务端决定。
 - `PlantService` 从 `ReplicatedStorage.Assets.Plants` 严格验证并克隆 Carrot、Strawberry、Blueberry，并按品种 `PlacementOffsetY` 调整运行时 Root 高度；重复收获品种从 `Assets.Fruits` 按 `BodyRoot` 的 `FruitSlot=true` Attachment 创建视觉果实，缺资源时种植失败并退种，不生成几何降级。
 - 无 Handle 种子 Tool 仍是代码侧交互载体。动态市场首版已实现；FarmShop 的 `PriceCurveGraph` 使用服务端最近 10 次价格历史绘制走势并显示 Guide 最高/中间/最低价；Rain 天气 UI 与无声音本地雨天视觉已进入首版接入；昼夜切换首版已新增独立时间循环和本地光照合成，暂不影响市场价格、成长、出售或存档，Bloodmoon、Goldmoon、Rainbow Moon、其他天气和事件仍未实现。
-- `TestMenuService` 与 `TestMenuController` 已提供代码测试菜单；当前 `TestMenuConfig.AllowAllPlayers=true` 临时对所有玩家开放，改回 false 后恢复白名单限制。客户端按“种子 / 金币 / 天气”一级分类展开二级动作并只提交 `ActionId`，服务端从 `TestMenuConfig` 权威读取种子、金币、天气或昼夜动作；天气动作通过注入的 `WeatherService` 强制开始 Rain 或清空当前天气，昼夜动作通过注入的 `TimeCycleService` 强制切换 Day/Sunset/Night 或恢复自动循环。
-- `SeedShopService` 参考模板思路实现 5 分钟一轮的个人库存刷新，当前全部种子均按 `SeedShopConfig.StockRules` 刷新个人库存；购买时在靠近商店后按配置完成“扣 Sheckles + 扣个人库存 + 加种子”的权威事务；合并商店 `FarmShop` 的刷新按钮通过 `RequestSeedShopRestock` 请求 39 R$ 个人刷新商品，测试开关关闭时保存个人刷新代次后直发，正式模式由唯一 `ProcessReceipt` 幂等发放，绝不清空全服模板或其他玩家缓存。`SeedShopController` 克隆 Studio `SeedShop.Frame.NormalShop.ItemTemplate` 模板商品行，填充名称、价格、真实库存、稀有度、Restock 倒计时，并强制从 `ReplicatedStorage.Assets.Seeds.<ItemId>` 渲染种子预览，缺资源时留空告警而不显示模板占位块。
+- `TestMenuService` 与 `TestMenuController` 已提供代码测试菜单；当前 `TestMenuConfig.AllowAllPlayers=false`，仅白名单玩家可见可用，如需短期全员测试才临时改为 true。客户端按“种子 / 金币 / 天气”一级分类展开二级动作并只提交 `ActionId`，服务端从 `TestMenuConfig` 权威读取种子、金币、天气或昼夜动作；天气动作通过注入的 `WeatherService` 强制开始 Rain 或清空当前天气，昼夜动作通过注入的 `TimeCycleService` 强制切换 Day/Sunset/Night 或恢复自动循环。
+- `SeedShopService` 参考模板思路实现 5 分钟一轮的个人库存刷新，当前全部种子均按 `SeedShopConfig.StockRules` 刷新个人库存；购买时在靠近商店后按配置完成“扣 Sheckles + 扣个人库存 + 加种子”的权威事务；合并商店 `FarmShop` 的刷新按钮通过 `RequestSeedShopRestock` 请求 39 R$ 个人刷新商品，当前已开启正式购买并由唯一 `ProcessReceipt` 幂等发放，绝不清空全服模板或其他玩家缓存。`SeedShopController` 克隆 Studio `SeedShop.Frame.NormalShop.ItemTemplate` 模板商品行，填充名称、价格、真实库存、稀有度、Restock 倒计时，并强制从 `ReplicatedStorage.Assets.Seeds.<ItemId>` 渲染种子预览，缺资源时留空告警而不显示模板占位块。
 - `HudCurrencyController` 从服务端物化的 `KLineInventory.Sheckles` 只读同步 HUD 金币显示，当前会同时写入 `PlayerGui.HUD.Currencies.CoinsCounter.TextLabel` 描边底字和其子级 `TextLabel` 前景数字，并同步模板 `Target`/`Goal` NumberValue，避免显示 Studio 假值或父子文字重影。
 - `InterfaceVisualController` 用 owner 集合统一管理多个界面的 Blur=20 与当前真实 FOV-10，最后一个界面关闭后恢复；SeedShop 与测试菜单共用该模块。
 - `TeleportController` 只绑定 `PlayerGui.TeleportButtons.TeleportButtons` 的三个现有按钮并提交稳定目的地标识；`TeleportService` 校验白名单、冷却和存活角色后，权威解析固定目标或玩家自己的地块 SpawnPoint，当前仍待 Studio Play 验收。
@@ -69,7 +69,7 @@ KLineChart 已实现第一版种植与存档基础：
 - 同一服务器内所有玩家读取同一个市场状态。不要擅自扩展为跨服务器市场或玩家独立行情。
 - 天气和事件的开始、结束、叠加和价格影响必须由服务端决定，并向客户端同步可展示状态。
 - 价格历史必须包含明确时间信息、保持顺序、限制长度，并处理历史不足、重复采样和玩家中途加入。
-- 当前 DataStore 名集中在 `server/Config/DataStoreConfig.luau`，不得随意修改；未来迁移必须递增 Schema 版本并保持旧数据兼容。商业化仍未定义，不得自行发明产品 ID。
+- 当前 DataStore 名集中在 `server/Config/DataStoreConfig.luau`，不得随意修改；未来迁移必须递增 Schema 版本并保持旧数据兼容。种子 51 档、成长跳过 2 档和个人刷新 1 档正式开发者商品 ID 已集中接入对应 IAP 配置，未经工具人提供的新后台配置不得自行更改或发明产品 ID。
 
 ## 工作原则
 

@@ -40,8 +40,8 @@ local TestMenuConfig = {}
 -- 测试菜单总开关；客户端据此决定是否创建 UI，服务端仍会独立检查，关闭后所有测试动作均拒绝。
 TestMenuConfig.Enabled = true
 
--- 临时开放开关；为 true 时所有玩家都可看到并使用测试菜单，恢复白名单限制时改回 false。
-TestMenuConfig.AllowAllPlayers = true
+-- 临时开放开关；当前保持 false，仅白名单玩家可看到并使用测试菜单；如需短期全员测试再临时改为 true。
+TestMenuConfig.AllowAllPlayers = false
 
 -- 获准使用测试奖励的 UserId 集合；键必须是正整数，客户端副本可被篡改，因此服务端必须再次查询此表。
 TestMenuConfig.Whitelist = {
@@ -115,15 +115,6 @@ TestMenuConfig.Actions = {
 		SortOrder = 30,
 	},
 	{
-		ActionId = "GrantTulipSeeds5",
-		DisplayText = "郁金香种子 ×5",
-		Category = "Seeds",
-		Kind = "GrantSeed",
-		SeedId = "Tulip",
-		Amount = 5,
-		SortOrder = 40,
-	},
-	{
 		ActionId = "GrantTomatoSeeds5",
 		DisplayText = "番茄种子 ×5",
 		Category = "Seeds",
@@ -142,12 +133,120 @@ TestMenuConfig.Actions = {
 		SortOrder = 60,
 	},
 	{
+		ActionId = "GrantDandelionSeeds5",
+		DisplayText = "蒲公英种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "Dandelion",
+		Amount = 5,
+		SortOrder = 40,
+	},
+	{
+		ActionId = "GrantWatermelonSeeds5",
+		DisplayText = "西瓜种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "Watermelon",
+		Amount = 5,
+		SortOrder = 70,
+	},
+	{
+		ActionId = "GrantCornSeeds5",
+		DisplayText = "玉米种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "Corn",
+		Amount = 5,
+		SortOrder = 80,
+	},
+	{
+		ActionId = "GrantCactusSeeds5",
+		DisplayText = "仙人掌种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "Cactus",
+		Amount = 5,
+		SortOrder = 90,
+	},
+	{
+		ActionId = "GrantPumpkinSeeds5",
+		DisplayText = "南瓜种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "Pumpkin",
+		Amount = 5,
+		SortOrder = 100,
+	},
+	{
+		ActionId = "GrantPineappleSeeds5",
+		DisplayText = "菠萝种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "Pineapple",
+		Amount = 5,
+		SortOrder = 110,
+	},
+	{
+		ActionId = "GrantCauliflowerSeeds5",
+		DisplayText = "花椰菜种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "Cauliflower",
+		Amount = 5,
+		SortOrder = 120,
+	},
+	{
+		ActionId = "GrantMushroomSeeds5",
+		DisplayText = "蘑菇种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "Mushroom",
+		Amount = 5,
+		SortOrder = 130,
+	},
+	{
+		ActionId = "GrantBerrySeeds5",
+		DisplayText = "浆果种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "Berry",
+		Amount = 5,
+		SortOrder = 140,
+	},
+	{
+		ActionId = "GrantBananaSeeds5",
+		DisplayText = "香蕉种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "Banana",
+		Amount = 5,
+		SortOrder = 150,
+	},
+	{
+		ActionId = "GrantGrapeSeeds5",
+		DisplayText = "葡萄种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "Grape",
+		Amount = 5,
+		SortOrder = 160,
+	},
+	{
+		ActionId = "GrantLanternFruitSeeds5",
+		DisplayText = "灯笼果种子 ×5",
+		Category = "Seeds",
+		Kind = "GrantSeed",
+		SeedId = "LanternFruit",
+		Amount = 5,
+		SortOrder = 170,
+	},
+	{
 		ActionId = "GrantSheckles1K",
 		DisplayText = "+1K 金币",
 		Category = "Currency",
 		Kind = "GrantCurrency",
 		CurrencyAmount = 1_000,
-		SortOrder = 70,
+		SortOrder = 1000,
 	},
 	{
 		ActionId = "GrantSheckles1M",
@@ -155,7 +254,7 @@ TestMenuConfig.Actions = {
 		Category = "Currency",
 		Kind = "GrantCurrency",
 		CurrencyAmount = 1_000_000,
-		SortOrder = 80,
+		SortOrder = 1010,
 	},
 	{
 		ActionId = "GrantSheckles1B",
@@ -163,14 +262,14 @@ TestMenuConfig.Actions = {
 		Category = "Currency",
 		Kind = "GrantCurrency",
 		CurrencyAmount = 1_000_000_000,
-		SortOrder = 90,
+		SortOrder = 1020,
 	},
 	{
 		ActionId = "ClearSheckles",
 		DisplayText = "清空金币",
 		Category = "Currency",
 		Kind = "ClearCurrency",
-		SortOrder = 95,
+		SortOrder = 1030,
 	},
 	{
 		ActionId = "StartRainWeather",
@@ -178,7 +277,7 @@ TestMenuConfig.Actions = {
 		Category = "Weather",
 		Kind = "StartWeather",
 		WeatherId = "Rain",
-		SortOrder = 100,
+		SortOrder = 1100,
 	},
 	{
 		ActionId = "StartLightningWeather",
@@ -186,7 +285,7 @@ TestMenuConfig.Actions = {
 		Category = "Weather",
 		Kind = "StartWeather",
 		WeatherId = "Lightning",
-		SortOrder = 101,
+		SortOrder = 1110,
 	},
 	{
 		ActionId = "StartSnowfallWeather",
@@ -194,14 +293,14 @@ TestMenuConfig.Actions = {
 		Category = "Weather",
 		Kind = "StartWeather",
 		WeatherId = "Snowfall",
-		SortOrder = 102,
+		SortOrder = 1120,
 	},
 	{
 		ActionId = "ClearWeather",
 		DisplayText = "清空天气",
 		Category = "Weather",
 		Kind = "ClearWeather",
-		SortOrder = 110,
+		SortOrder = 1130,
 	},
 	{
 		ActionId = "ForceTimePhaseDay",
@@ -209,7 +308,7 @@ TestMenuConfig.Actions = {
 		Category = "Weather",
 		Kind = "ForceTimePhase",
 		TimePhaseId = "Day",
-		SortOrder = 120,
+		SortOrder = 1140,
 	},
 	{
 		ActionId = "ForceTimePhaseSunset",
@@ -217,7 +316,7 @@ TestMenuConfig.Actions = {
 		Category = "Weather",
 		Kind = "ForceTimePhase",
 		TimePhaseId = "Sunset",
-		SortOrder = 130,
+		SortOrder = 1150,
 	},
 	{
 		ActionId = "ForceTimePhaseNight",
@@ -225,21 +324,21 @@ TestMenuConfig.Actions = {
 		Category = "Weather",
 		Kind = "ForceTimePhase",
 		TimePhaseId = "Night",
-		SortOrder = 140,
+		SortOrder = 1160,
 	},
 	{
 		ActionId = "ResumeTimeCycle",
 		DisplayText = "恢复自动昼夜",
 		Category = "Weather",
 		Kind = "ResumeTimeCycle",
-		SortOrder = 150,
+		SortOrder = 1170,
 	},
 	{
 		ActionId = "ResetTutorial",
 		DisplayText = "重置新手教程",
 		Category = "Tutorial",
 		Kind = "ResetTutorial",
-		SortOrder = 160,
+		SortOrder = 1200,
 	},
 } :: { TestAction }
 

@@ -763,7 +763,7 @@ local function configureRow(row: Frame, itemId: string, definition: ItemConfig.I
 		setFirstText(main, { itemName.Name }, definition.DisplayName)
 	end
 	local rarity = main:FindFirstChild("Rarity")
-	setFirstText(rarity, { "Rarity_Text" }, SellShopConfig.VisualRarityText)
+	setFirstText(rarity, { "Rarity_Text" }, definition.Quality:upper())
 	local priceBase = main:FindFirstChild("Price_Text")
 	local priceText = getLayeredText(priceBase)
 	local priceFace = priceText and priceText.Face

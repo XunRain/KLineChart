@@ -509,6 +509,7 @@ local function refreshRobuxHoverPrice(amount: number)
 		or not shelf
 		or not shelf.Visible
 		or not itemId
+		or not SeedIAPConfig.HasItemConfiguration(itemId)
 	then
 		return
 	end
@@ -572,6 +573,7 @@ local function beginRobuxPriceHover(amount: number)
 		or not shelf
 		or not shelf.Visible
 		or not itemId
+		or not SeedIAPConfig.HasItemConfiguration(itemId)
 		or not robuxButtonTextByAmount[amount]
 	then
 		return
@@ -624,6 +626,13 @@ local function refreshPurchaseAvailability()
 	end
 
 	local promptPending = DeveloperProductPromptController.IsPending()
+	local toggleRobux = getShelfButton(shecklesShelf, SeedShopConfig.ToggleRobuxButtonName)
+	if toggleRobux then
+		setButtonEnabled(
+			toggleRobux,
+			itemId ~= nil and SeedIAPConfig.HasItemConfiguration(itemId :: string) and not promptPending
+		)
+	end
 	for buttonName, amount in SeedIAPConfig.SeedShopPurchaseButtonAmounts do
 		local button = getShelfButton(robuxShelf, buttonName)
 		if button then
@@ -636,6 +645,7 @@ local function refreshPurchaseAvailability()
 				end
 			end
 			local configured = itemId ~= nil
+				and SeedIAPConfig.HasItemConfiguration(itemId :: string)
 				and (not SeedIAPConfig.UseMarketplacePurchases or SeedIAPConfig.GetProductId(itemId :: string, amount) ~= nil)
 			setButtonEnabled(button, configured and not promptPending)
 		end
@@ -693,6 +703,9 @@ end
 
 local function showSelectedShelf()
 	local itemId = selectedItemId
+	if selectedMode == "Robux" and (not itemId or not SeedIAPConfig.HasItemConfiguration(itemId)) then
+		selectedMode = "Sheckles"
+	end
 	local row = itemId and itemRows[itemId] or nil
 	local coins = shecklesShelf
 	local robux = robuxShelf
@@ -755,7 +768,7 @@ local function bindItems(itemTemplate: Frame)
 			stockLabel.Text = "x0 in Stock"
 		end
 		local rarity = mainFrame:FindFirstChild("Rarity")
-		setLayeredText(rarity and rarity:FindFirstChild("Rarity_Text"), SeedShopConfig.VisualRarityText)
+		setLayeredText(rarity and rarity:FindFirstChild("Rarity_Text"), item.Definition.Quality:upper())
 		local viewport = mainFrame:FindFirstChild("ViewportFrame")
 		if viewport and viewport:IsA("ViewportFrame") then
 			viewport.Visible = true
@@ -813,7 +826,7 @@ local function bindShelves()
 	local toggleRobux = getShelfButton(coins, SeedShopConfig.ToggleRobuxButtonName)
 	if toggleRobux then
 		toggleRobux.Activated:Connect(function()
-			if selectedItemId then
+			if selectedItemId and SeedIAPConfig.HasItemConfiguration(selectedItemId) then
 				selectedMode = "Robux"
 				showSelectedShelf()
 			end
@@ -841,7 +854,7 @@ local function bindShelves()
 			button.Activated:Connect(function()
 				local itemId = selectedItemId
 				local remote = requestProductPurchase
-				if itemId and remote then
+				if itemId and SeedIAPConfig.HasItemConfiguration(itemId) and remote then
 					remote:FireServer({ ItemId = itemId, Amount = stableAmount })
 				end
 			end)

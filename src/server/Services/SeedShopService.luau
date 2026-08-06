@@ -465,6 +465,10 @@ local function handleProductRequest(player: Player, payload: any)
 		RemoteService.Notify(player, "Invalid seed product.", "Warning")
 		return
 	end
+	if not SeedIAPConfig.HasItemConfiguration(itemId) then
+		RemoteService.Notify(player, "This product is not configured yet.", "Warning")
+		return
+	end
 	local amount = requestedAmount :: number
 	if not isPlayerNearSeedShop(player) then
 		RemoteService.Notify(player, "Please stand closer to a shop.", "Warning")

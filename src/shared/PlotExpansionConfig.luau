@@ -69,9 +69,9 @@ return {
 		TemplateGuiName = "SurfaceGui",
 	},
 
-	-- 客户端显示文本；价格后缀沿用模板的 ¢，满级显示 MAX。
+	-- 客户端显示文本；价格后缀使用 $，满级显示 MAX。
 	Display = {
-		PriceSuffix = "¢",
+		PriceSuffix = "$",
 		MaxText = "MAX",
 		AffordableColor = Color3.fromRGB(0, 170, 0),
 		UnaffordableColor = Color3.fromRGB(255, 0, 0),

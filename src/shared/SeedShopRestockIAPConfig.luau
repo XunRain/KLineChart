@@ -7,11 +7,11 @@ local SeedIAPConfig = require(script.Parent.SeedIAPConfig)
 
 local SeedShopRestockIAPConfig = {}
 
--- false 仅用于 Studio/开发测试：服务端保存新的个人刷新代次后直接刷新；上线前必须配置商品 ID 后改为 true。
-SeedShopRestockIAPConfig.UseMarketplacePurchases = false
+-- true 表示通过 Roblox 官方开发者商品弹窗购买，并仅按服务端收据保存和应用个人刷新。
+SeedShopRestockIAPConfig.UseMarketplacePurchases = true
 
--- 个人种子商店刷新开发者商品 ID 占位；0 表示未配置，正数不得复用种子 18 档或成长 2 档商品 ID。
-SeedShopRestockIAPConfig.ProductId = 0
+-- 个人种子商店刷新的正式开发者商品 ID；不得复用种子 51 档或成长 2 档商品 ID。
+SeedShopRestockIAPConfig.ProductId = 3629442103
 
 -- 悬浮时始终显示的目标价格；正式模式成功读取官方价格后，当前悬浮会临时改为官方 PriceInRobux。
 SeedShopRestockIAPConfig.DisplayPrice = 39

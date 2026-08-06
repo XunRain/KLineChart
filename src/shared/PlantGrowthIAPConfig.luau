@@ -6,8 +6,8 @@ export type GrowthScope = "Single" | "All"
 
 local PlantGrowthIAPConfig = {}
 
--- false 仅用于 Studio/开发测试：服务端校验后直接跳过首次成长；上线前必须配置商品 ID 后改为 true。
-PlantGrowthIAPConfig.UseMarketplacePurchases = false
+-- true 表示通过 Roblox 官方开发者商品弹窗购买并仅按服务端收据结算跳过成长。
+PlantGrowthIAPConfig.UseMarketplacePurchases = true
 
 -- 同一玩家两次成长商品请求的最短间隔，单位秒；只限制 Remote 滥用，不参与收据结算。
 PlantGrowthIAPConfig.RequestCooldown = 0.5
@@ -27,13 +27,13 @@ PlantGrowthIAPConfig.StateRefreshInterval = 1
 -- 未决购买超过该秒数后允许安全清理；迟到收据仍会转为持久 credit，不能直接丢弃已付款权益。
 PlantGrowthIAPConfig.PendingIntentTimeout = 15 * 60
 
--- Single 与 All 的开发者商品 ID 占位；0 表示未配置，两个正数 ID 必须互不重复且不得复用种子商品 ID。
+-- Single 与 All 的正式开发者商品 ID；两个正数 ID 必须互不重复且不得复用种子或商店刷新商品 ID。
 PlantGrowthIAPConfig.ProductIds = {
-	Single = 0,
-	All = 0,
+	Single = 3629440139,
+	All = 3629441072,
 } :: { [GrowthScope]: number }
 
--- UI 悬浮展示价占位；0 表示未配置，不得被当作 Roblox 官方售价或传给服务端结算。
+-- UI 悬浮目标展示价；正式模式成功查询商品后以 Roblox 官方售价为准，不得把此值传给服务端结算。
 PlantGrowthIAPConfig.DisplayPrices = {
 	Single = 39,
 	All = 299,
@@ -106,7 +106,7 @@ function PlantGrowthIAPConfig.GetScopeForProductId(productId: any): GrowthScope?
 	return matched
 end
 
--- 返回范围对应的正整数 UI 占位展示价；未配置时返回 nil。
+-- 返回范围对应的正整数 UI 目标展示价；未配置时返回 nil。
 function PlantGrowthIAPConfig.GetDisplayPrice(scope: GrowthScope): number?
 	local price = PlantGrowthIAPConfig.DisplayPrices[scope]
 	return if isPositiveInteger(price) then price else nil
