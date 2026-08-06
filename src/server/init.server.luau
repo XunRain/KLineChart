@@ -45,7 +45,11 @@ WeatherService.Init({
 })
 TimeCycleService.Init()
 PlotService.Init()
-InventoryService.Init({ PlayerDataService = PlayerDataService, RemoteService = RemoteService })
+InventoryService.Init({
+	PlayerDataService = PlayerDataService,
+	RemoteService = RemoteService,
+	LeaderboardService = LeaderboardService,
+})
 PlantService.Init({
 	PlotService = PlotService,
 	PlayerDataService = PlayerDataService,
@@ -65,7 +69,6 @@ PlantingService.Init({
 })
 HarvestService.Init({
 	PlayerDataService = PlayerDataService,
-	PlotService = PlotService,
 	InventoryService = InventoryService,
 	PlantService = PlantService,
 	RemoteService = RemoteService,

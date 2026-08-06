@@ -43,7 +43,7 @@ MarketConfig.Rules = {
 		MultiplierMin = 0.5,
 		MultiplierMax = 2,
 	},
-	Blueberry = {
+	Eggplant = {
 		RefreshInterval = 30,
 		MultiplierMin = 0.5,
 		MultiplierMax = 2,

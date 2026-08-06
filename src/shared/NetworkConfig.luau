@@ -8,11 +8,13 @@ return {
 	Events = {
 		-- 客户端到服务端：参数依次为世界命中点 Vector3、seedId 字符串和种子 Tool；服务端重新验证位置及自有地块区域、Tool/种子所有权、库存、角色距离、容量与频率。
 		RequestPlant = "RequestPlant",
+		-- 客户端到服务端：只提交植物 recordId、Plant/Fruit 目标类型与可选果实槽编号；服务端重新校验所有权、模型、成熟状态、槽位、限频与事务锁，绝不接受品种、数量或奖励。
+		RequestHarvestTarget = "RequestHarvestTarget",
 		-- 客户端到服务端：唯一参数为植物 recordId 字符串；服务端重新校验铲子、所有权、距离、冷却和存档记录后才删除整株植物。
 		RequestShovelPlant = "RequestShovelPlant",
 		-- 服务端到全部客户端：参数依次为权威种植面位置 Vector3、plantId 字符串和植物记录 recordId；仅用于播放本地播种特效，不参与成长或库存结算。
 		PlantingFx = "PlantingFx",
-		-- 仅服务端到客户端：参数为白名单 cue 名和可选世界坐标；当前只承载权威购买成功与收获成功反馈，不接受客户端上行。
+		-- 仅服务端到客户端：参数为白名单 cue 名和可选世界坐标；当前承载权威购买、收获与种子库存刷新反馈，不接受客户端上行。
 		AudioCue = "AudioCue",
 		-- 白名单客户端到服务端：唯一参数为稳定 ActionId 字符串；服务端重新检查开关、UserId、冷却与动作配置，绝不接受客户端数量、SeedId 或目标库存。
 		RequestTestAction = "RequestTestAction",

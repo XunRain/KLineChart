@@ -11,6 +11,10 @@ local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
 local InventoryService = {}
 local PlayerDataService: any
 local RemoteService: any
+type LeaderboardDependency = {
+	NotifyStockChanged: (Player) -> (),
+}
+local LeaderboardService: LeaderboardDependency? = nil
 
 local TOOL_TYPE_SEED = "Seed"
 local TOOL_TYPE_PRODUCE = "Produce"
@@ -398,6 +402,10 @@ function InventoryService.Sync(player: Player)
 	end
 	syncShovelTool(player)
 	InventoryService.SendHotbarLayout(player)
+	local leaderboardService = LeaderboardService
+	if leaderboardService then
+		leaderboardService.NotifyStockChanged(player)
+	end
 end
 
 -- 向客户端下发当前存档中的热栏布局偏好，客户端只用它重排已持有 Tool。
@@ -430,10 +438,15 @@ local function bindHotbarLayoutRemotes()
 	end)
 end
 
--- 注入权威玩家数据服务，供后续库存同步读取快照。
-function InventoryService.Init(dependencies: { PlayerDataService: any, RemoteService: any? })
+-- 注入权威玩家数据、Remote 与可选排行榜服务，供库存同步和热栏布局复用。
+function InventoryService.Init(dependencies: {
+	PlayerDataService: any,
+	RemoteService: any?,
+	LeaderboardService: LeaderboardDependency?,
+})
 	PlayerDataService = dependencies.PlayerDataService
 	RemoteService = dependencies.RemoteService
+	LeaderboardService = dependencies.LeaderboardService
 	bindHotbarLayoutRemotes()
 end
 

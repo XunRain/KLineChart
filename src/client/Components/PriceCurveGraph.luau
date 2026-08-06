@@ -341,7 +341,7 @@ local function configureGuide(container: Frame, index: number, y: number, height
 		return
 	end
 
-	label.Text = formatGuideValue(value)
+	label.Text = formatGuideValue(value) .. "$"
 	label.ZIndex = guide.ZIndex + 1
 	label.Visible = true
 end

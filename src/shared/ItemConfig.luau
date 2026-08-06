@@ -9,6 +9,8 @@ export type HarvestType = "Single" | "Repeat"
 export type ItemDefinition = {
 	-- 稳定的程序标识，必须与 Items 表中的键及存档中的 plantId 一致。
 	Id: string,
+	-- 项目内稳定的植物编号，必须为正整数且全局唯一；仅用于策划定位和品种替换，不参与存档、资源查找或商店排序。
+	PlantNumber: number,
 	-- 面向玩家显示的名称，目前同时用于种子 Tool、收获提示和通知文本。
 	DisplayName: string,
 	-- 决定收获后移除整株还是进入下一次结果周期。
@@ -46,13 +48,11 @@ ItemConfig.Limits = {
 	MaxPlantsPerPlot = 80,
 	-- 玩家角色到种植位置的最大服务端允许距离，单位为 stud。
 	PlacementDistance = 45,
-	-- 玩家角色到植物根节点的最大服务端收获距离，单位为 stud。
-	HarvestDistance = 18,
 	-- 同一玩家两次种植请求之间的最短间隔，单位为秒，用于限制 Remote 请求频率。
 	PlacementCooldown = 0.15,
 	-- 客户端命中点相对种植区域在竖直方向允许的额外误差，单位为 stud。
 	AreaVerticalTolerance = 12,
-	-- 服务端刷新收获 Prompt 可用状态的时间间隔，单位为秒。
+	-- 服务端刷新植物成熟属性与重复果实状态的时间间隔，单位为秒。
 	PromptRefreshInterval = 0.5,
 	-- 客户端从摄像机检测种植面的最大射线长度，单位为 stud；服务端仍会独立校验位置。
 	PlantRaycastDistance = 500,
@@ -74,6 +74,7 @@ ItemConfig.Items = {
 	-- 胡萝卜用于验证短周期单次收获流程：成熟后产出一次并移除整株。
 	Carrot = {
 		Id = "Carrot",
+		PlantNumber = 1,
 		DisplayName = "Carrot",
 		HarvestType = "Single",
 		GrowthTime = 15,
@@ -92,6 +93,7 @@ ItemConfig.Items = {
 	-- 草莓用于验证重复收获流程：首次成熟后植株保留，有空果实槽时按 RegrowTime 逐颗补果，满槽时暂停。
 	Strawberry = {
 		Id = "Strawberry",
+		PlantNumber = 2,
 		DisplayName = "Strawberry",
 		HarvestType = "Repeat",
 		GrowthTime = 20,
@@ -107,10 +109,11 @@ ItemConfig.Items = {
 		FruitGrowthStartAlpha = 1,
 		PlacementOffsetY = -0.4,
 	},
-	-- 蓝莓用于扩展重复收获品种：灌木保留，四个果实槽按 RegrowTime 逐颗补果。
-	Blueberry = {
-		Id = "Blueberry",
-		DisplayName = "Blueberry",
+	-- 茄子用于扩展重复收获品种：植株保留，两个果实槽按 RegrowTime 逐颗补果。
+	Eggplant = {
+		Id = "Eggplant",
+		PlantNumber = 3,
+		DisplayName = "Eggplant",
 		HarvestType = "Repeat",
 		GrowthTime = 20,
 		RegrowTime = 10,
@@ -119,8 +122,8 @@ ItemConfig.Items = {
 		SeedBuyPrice = 25,
 		BaseSellPrice = 5,
 		ShopSortOrder = 30,
-		PlantModelName = "Blueberry",
-		FruitModelName = "Blueberry",
+		PlantModelName = "Eggplant",
+		FruitModelName = "Eggplant",
 		MinimumVisualScale = 0.05,
 		FruitGrowthStartAlpha = 1,
 		PlacementOffsetY = 0,
@@ -128,6 +131,7 @@ ItemConfig.Items = {
 	-- 郁金香沿用模板单次收获规则；烘焙模型已按地面归零。
 	Tulip = {
 		Id = "Tulip",
+		PlantNumber = 4,
 		DisplayName = "Tulip",
 		HarvestType = "Single",
 		GrowthTime = 60,
@@ -146,6 +150,7 @@ ItemConfig.Items = {
 	-- 番茄沿用模板重复收获规则；模板 10..50 秒随机结果区间固定映射为保守上限 50 秒。
 	Tomato = {
 		Id = "Tomato",
+		PlantNumber = 5,
 		DisplayName = "Tomato",
 		HarvestType = "Repeat",
 		GrowthTime = 120,
@@ -164,6 +169,7 @@ ItemConfig.Items = {
 	-- 苹果沿用模板重复收获规则；模板 10..200 秒随机结果区间固定映射为保守上限 200 秒。
 	Apple = {
 		Id = "Apple",
+		PlantNumber = 6,
 		DisplayName = "Apple",
 		HarvestType = "Repeat",
 		GrowthTime = 180,
@@ -181,9 +187,38 @@ ItemConfig.Items = {
 	},
 } :: { [string]: ItemDefinition }
 
+local itemsByPlantNumber: { [number]: ItemDefinition } = {}
+for itemId, definition in ItemConfig.Items do
+	local plantNumber = definition.PlantNumber
+	if plantNumber <= 0 or plantNumber % 1 ~= 0 then
+		error(string.format("[ItemConfig] %s 的 PlantNumber 必须为正整数，当前值为 %s", itemId, tostring(plantNumber)))
+	end
+
+	local existingDefinition = itemsByPlantNumber[plantNumber]
+	if existingDefinition ~= nil then
+		error(string.format(
+			"[ItemConfig] PlantNumber %d 重复用于 %s 和 %s",
+			plantNumber,
+			existingDefinition.Id,
+			itemId
+		))
+	end
+
+	itemsByPlantNumber[plantNumber] = definition
+end
+
 -- 按稳定物品标识查询植物定义，未知标识返回 nil。
 function ItemConfig.Get(itemId: string): ItemDefinition?
 	return ItemConfig.Items[itemId]
+end
+
+-- 按项目稳定植物编号查询定义，非法或未知编号返回 nil。
+function ItemConfig.GetByPlantNumber(plantNumber: number): ItemDefinition?
+	if plantNumber <= 0 or plantNumber % 1 ~= 0 then
+		return nil
+	end
+
+	return itemsByPlantNumber[plantNumber]
 end
 
 -- 生成一份新玩家初始种子数量表，供默认存档创建使用。

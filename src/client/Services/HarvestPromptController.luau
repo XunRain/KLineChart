@@ -1,6 +1,6 @@
 --!strict
 
--- 本控制器隔离外玩家收获 Prompt，并为本地有效目标生成透明交互 UI、独立植物名、白色高亮与 Hold 进度。
+-- 本控制器在共享 XZ 水平半径内按屏幕中心锁定本人已成熟植物，不检查 Y 或遮挡，并用单个本地代理 Prompt 承载跨输入收获。
 
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
@@ -11,12 +11,16 @@ local Workspace = game:GetService("Workspace")
 
 local HarvestPromptConfig = require(ReplicatedStorage.Shared.HarvestPromptConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 
 type ResolvedTarget = {
 	TargetModel: Model,
 	PlantModel: Model,
 	RootPart: BasePart,
 	Definition: ItemConfig.ItemDefinition,
+	RecordId: string,
+	TargetKind: HarvestPromptConfig.HarvestTargetKind,
+	FruitSlotIndex: number?,
 }
 
 type PromptUi = {
@@ -46,11 +50,19 @@ local activeProgressRing: Frame? = nil
 local activeProgressValue: NumberValue? = nil
 local activeProgressTween: Tween? = nil
 local activeConnections: { RBXScriptConnection } = {}
+local activeInputType: Enum.ProximityPromptInputType? = nil
 local activeHoldPrompt: ProximityPrompt? = nil
 local activeHoldInput: InputObject? = nil
 local activeHoldStateConnection: RBXScriptConnection? = nil
 local activeHoldPositionConnection: RBXScriptConnection? = nil
-local foreignPromptWatchConnections: { [ProximityPrompt]: { RBXScriptConnection } } = {}
+local selectedTarget: ResolvedTarget? = nil
+local trackedPlants: { [Model]: boolean } = {}
+local suppressedTargets: { [string]: number } = {}
+local blockingPrompts: { [ProximityPrompt]: boolean } = {}
+local proxyPart: BasePart? = nil
+local proxyPrompt: ProximityPrompt? = nil
+local proxyTriggeredHandler: (() -> ())? = nil
+local requestHarvestRemote: RemoteEvent? = nil
 
 local function findPlantModel(instance: Instance): Model?
 	local current: Instance? = instance
@@ -63,69 +75,48 @@ local function findPlantModel(instance: Instance): Model?
 	return nil
 end
 
-local function findFruitModel(instance: Instance, plantModel: Model): Model?
-	local current: Instance? = instance
-	while current and current ~= plantModel do
-		if current:IsA("Model") and current:GetAttribute("KLineFruitVisual") == true then
-			return current
-		end
-		current = current.Parent
+local function getAliveLocalCharacterRoot(): BasePart?
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then
+		return nil
 	end
-	return nil
+	return root
 end
 
-local function resolveTarget(prompt: ProximityPrompt): ResolvedTarget?
-	if prompt.Name ~= HarvestPromptConfig.PromptName
-		or prompt.Style ~= HarvestPromptConfig.Style
-		or prompt:GetAttribute(HarvestPromptConfig.PromptMarkerAttribute) ~= true
-		or prompt:GetAttribute(HarvestPromptConfig.OwnerUserIdAttribute) ~= player.UserId
+local function isTargetWithinLocalHorizontalRadius(target: ResolvedTarget): boolean
+	local characterRoot = getAliveLocalCharacterRoot()
+	local plantRoot = target.PlantModel.PrimaryPart
+	if not characterRoot or not plantRoot then
+		return false
+	end
+	return HarvestPromptConfig.IsWithinHorizontalHarvestRadius(characterRoot.Position, plantRoot.Position)
+end
+
+local function isResolvedTargetValid(resolved: ResolvedTarget): boolean
+	if not resolved.PlantModel:IsDescendantOf(Workspace)
+		or not resolved.TargetModel:IsDescendantOf(resolved.PlantModel)
+		or not resolved.RootPart:IsDescendantOf(resolved.PlantModel)
+		or resolved.PlantModel:GetAttribute(HarvestPromptConfig.RecordIdAttribute) ~= resolved.RecordId
+		or resolved.PlantModel:GetAttribute(HarvestPromptConfig.OwnerUserIdAttribute) ~= player.UserId
+		or resolved.PlantModel:GetAttribute(HarvestPromptConfig.PlantIdAttribute) ~= resolved.Definition.Id
 	then
-		return nil
+		return false
 	end
-	local root = prompt.Parent
-	if not root or not root:IsA("BasePart") then
-		return nil
+	if resolved.TargetKind == HarvestPromptConfig.TargetKinds.Plant then
+		return resolved.Definition.HarvestType == "Single"
+			and resolved.FruitSlotIndex == nil
+			and resolved.PlantModel:GetAttribute(HarvestPromptConfig.HarvestReadyAttribute) == true
 	end
-	local plantModel = findPlantModel(root)
-	if not plantModel or plantModel:GetAttribute("OwnerUserId") ~= player.UserId then
-		return nil
-	end
-	local recordId = prompt:GetAttribute("PlantRecordId")
-	local plantRecordId = plantModel:GetAttribute("PlantRecordId")
-	if type(recordId) ~= "string" or type(plantRecordId) ~= "string" or recordId ~= plantRecordId then
-		return nil
-	end
-	local plantId = prompt:GetAttribute(HarvestPromptConfig.PlantIdAttribute)
-	if type(plantId) ~= "string" or plantModel:GetAttribute("PlantId") ~= plantId then
-		return nil
-	end
-	local definition = ItemConfig.Get(plantId)
-	if not definition then
-		return nil
-	end
-	local targetKind = prompt:GetAttribute(HarvestPromptConfig.TargetKindAttribute)
-	local targetModel: Model
-	if targetKind == HarvestPromptConfig.TargetKinds.Plant then
-		local body = plantModel:FindFirstChild("Body")
-		if not body or not body:IsA("Model") then
-			return nil
-		end
-		targetModel = body
-	elseif targetKind == HarvestPromptConfig.TargetKinds.Fruit then
-		local fruitModel = findFruitModel(root, plantModel)
-		if not fruitModel then
-			return nil
-		end
-		targetModel = fruitModel
-	else
-		return nil
-	end
-	return {
-		TargetModel = targetModel,
-		PlantModel = plantModel,
-		RootPart = root,
-		Definition = definition,
-	}
+	local slotIndex = resolved.FruitSlotIndex
+	return resolved.Definition.HarvestType == "Repeat"
+		and type(slotIndex) == "number"
+		and slotIndex > 0
+		and slotIndex == math.floor(slotIndex)
+		and resolved.TargetModel:GetAttribute(HarvestPromptConfig.RuntimeFruitMarkerAttribute) == true
+		and resolved.TargetModel:GetAttribute(HarvestPromptConfig.FruitSlotIndexAttribute) == slotIndex
+		and resolved.TargetModel:GetAttribute(HarvestPromptConfig.FruitMatureAttribute) == true
 end
 
 local function endActiveHold()
@@ -171,6 +162,7 @@ end
 local function clearActive()
 	activePrompt = nil
 	activeTarget = nil
+	activeInputType = nil
 	for _, connection in activeConnections do
 		connection:Disconnect()
 	end
@@ -595,17 +587,16 @@ local function startHoldProgress(prompt: ProximityPrompt)
 		return
 	end
 	stopHoldProgress()
+	local duration = math.max(0, prompt.HoldDuration)
+	if duration <= 0 then
+		return
+	end
 	local ring = activeProgressRing
 	local value = activeProgressValue
 	if not ring or not ring.Parent or not value or not value.Parent then
 		return
 	end
 	ring.Visible = true
-	local duration = math.max(0, prompt.HoldDuration)
-	if duration <= 0 then
-		value.Value = 1
-		return
-	end
 	local tween = TweenService:Create(
 		value,
 		TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
@@ -616,8 +607,8 @@ local function startHoldProgress(prompt: ProximityPrompt)
 end
 
 local function showPrompt(prompt: ProximityPrompt, inputType: Enum.ProximityPromptInputType)
-	local resolved = resolveTarget(prompt)
-	if not resolved then
+	local resolved = selectedTarget
+	if prompt ~= proxyPrompt or not resolved or not isResolvedTargetValid(resolved) then
 		return
 	end
 	clearActive()
@@ -638,6 +629,7 @@ local function showPrompt(prompt: ProximityPrompt, inputType: Enum.ProximityProm
 
 	activePrompt = prompt
 	activeTarget = resolved.TargetModel
+	activeInputType = inputType
 	activeHighlight = highlight
 	activeBillboard = promptUi.Billboard
 	activeActionButton = promptUi.ActionButton
@@ -671,17 +663,16 @@ local function showPrompt(prompt: ProximityPrompt, inputType: Enum.ProximityProm
 			cancelActiveHold()
 		end
 	end))
-	table.insert(activeConnections, prompt.PromptButtonHoldBegan:Connect(function()
-		startHoldProgress(prompt)
-	end))
-	table.insert(activeConnections, prompt.PromptButtonHoldEnded:Connect(function()
+	if prompt.HoldDuration > 0 then
+		table.insert(activeConnections, prompt.PromptButtonHoldBegan:Connect(function()
+			startHoldProgress(prompt)
+		end))
+		table.insert(activeConnections, prompt.PromptButtonHoldEnded:Connect(function()
+			stopHoldProgress()
+		end))
+	else
 		stopHoldProgress()
-	end))
-	table.insert(activeConnections, prompt.Triggered:Connect(function()
-		if activePrompt == prompt then
-			clearActive()
-		end
-	end))
+	end
 	table.insert(activeConnections, prompt.AncestryChanged:Connect(function(_, parent)
 		if not parent and activePrompt == prompt then
 			clearActive()
@@ -694,11 +685,6 @@ local function showPrompt(prompt: ProximityPrompt, inputType: Enum.ProximityProm
 	end))
 	table.insert(activeConnections, prompt:GetPropertyChangedSignal("Enabled"):Connect(function()
 		if activePrompt == prompt and not prompt.Enabled then
-			clearActive()
-		end
-	end))
-	table.insert(activeConnections, prompt.AttributeChanged:Connect(function()
-		if activePrompt == prompt and not resolveTarget(prompt) then
 			clearActive()
 		end
 	end))
@@ -717,49 +703,318 @@ local function showPrompt(prompt: ProximityPrompt, inputType: Enum.ProximityProm
 			clearActive()
 		end
 	end))
+	local maturityAttribute = if resolved.TargetKind == HarvestPromptConfig.TargetKinds.Plant
+		then HarvestPromptConfig.HarvestReadyAttribute
+		else HarvestPromptConfig.FruitMatureAttribute
+	local maturitySource = if resolved.TargetKind == HarvestPromptConfig.TargetKinds.Plant
+		then resolved.PlantModel
+		else resolved.TargetModel
+	table.insert(activeConnections, maturitySource:GetAttributeChangedSignal(maturityAttribute):Connect(function()
+		if activePrompt == prompt and not isResolvedTargetValid(resolved) then
+			clearActive()
+		end
+	end))
 end
 
-local function isForeignHarvestPrompt(prompt: ProximityPrompt): boolean
-	local ownerUserId = prompt:GetAttribute(HarvestPromptConfig.OwnerUserIdAttribute)
-	return prompt.Name == HarvestPromptConfig.PromptName
-		and prompt.Style == HarvestPromptConfig.Style
-		and prompt:GetAttribute(HarvestPromptConfig.PromptMarkerAttribute) == true
-		and type(ownerUserId) == "number"
-		and ownerUserId ~= player.UserId
+local function getCurrentPromptInputType(): Enum.ProximityPromptInputType
+	local lastInputType = UserInputService:GetLastInputType()
+	if lastInputType == Enum.UserInputType.Touch then
+		return Enum.ProximityPromptInputType.Touch
+	end
+	if string.find(lastInputType.Name, "Gamepad", 1, true) == 1 then
+		return Enum.ProximityPromptInputType.Gamepad
+	end
+	return Enum.ProximityPromptInputType.Keyboard
 end
 
--- 外玩家收获 Prompt 在本客户端无权触发，先本地禁用，避免其参与 OneGlobally 候选竞争。
-local function suppressForeignHarvestPrompt(prompt: ProximityPrompt)
-	if isForeignHarvestPrompt(prompt) and prompt.Enabled then
+local function getTargetKey(target: ResolvedTarget): string
+	return string.format(
+		"%s|%s|%s",
+		target.RecordId,
+		target.TargetKind,
+		if target.FruitSlotIndex then tostring(target.FruitSlotIndex) else "Plant"
+	)
+end
+
+local function isSameTarget(a: ResolvedTarget?, b: ResolvedTarget?): boolean
+	if not a or not b then
+		return a == nil and b == nil
+	end
+	return a.PlantModel == b.PlantModel
+		and a.TargetModel == b.TargetModel
+		and a.RecordId == b.RecordId
+		and a.TargetKind == b.TargetKind
+		and a.FruitSlotIndex == b.FruitSlotIndex
+end
+
+local function ensureProxyPrompt(): ProximityPrompt
+	local existingPrompt = proxyPrompt
+	local existingPart = proxyPart
+	if existingPrompt and existingPrompt.Parent and existingPart and existingPart.Parent then
+		return existingPrompt
+	end
+	if existingPart and existingPart.Parent then
+		existingPart:Destroy()
+	elseif existingPrompt and existingPrompt.Parent then
+		existingPrompt:Destroy()
+	end
+
+	local part = Instance.new("Part")
+	part.Name = "KLineHarvestInputProxy"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Size = Vector3.new(0.2, 0.2, 0.2)
+	part.Transparency = 1
+	part.Parent = Workspace
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = HarvestPromptConfig.PromptName
+	prompt.Style = HarvestPromptConfig.Style
+	prompt.Exclusivity = HarvestPromptConfig.Exclusivity
+	prompt.KeyboardKeyCode = HarvestPromptConfig.KeyboardKeyCode
+	prompt.GamepadKeyCode = HarvestPromptConfig.GamepadKeyCode
+	prompt.ActionText = HarvestPromptConfig.ActionText
+	prompt.ObjectText = ""
+	prompt.HoldDuration = HarvestPromptConfig.HoldDuration
+	prompt.ClickablePrompt = true
+	prompt.MaxActivationDistance = HarvestPromptConfig.ProxyActivationDistance
+	prompt.RequiresLineOfSight = false
+	prompt.Enabled = false
+	prompt.Parent = part
+	prompt.Triggered:Connect(function()
+		local handler = proxyTriggeredHandler
+		if handler then
+			handler()
+		end
+	end)
+
+	proxyPart = part
+	proxyPrompt = prompt
+	return prompt
+end
+
+local function clearProxyTargetAttributes(prompt: ProximityPrompt)
+	prompt:SetAttribute(HarvestPromptConfig.RecordIdAttribute, nil)
+	prompt:SetAttribute(HarvestPromptConfig.PlantIdAttribute, nil)
+	prompt:SetAttribute(HarvestPromptConfig.TargetKindAttribute, nil)
+	prompt:SetAttribute(HarvestPromptConfig.FruitSlotIndexAttribute, nil)
+end
+
+local function hasBlockingPrompt(): boolean
+	for prompt in blockingPrompts do
+		if prompt.Parent and prompt.Enabled then
+			return true
+		end
+		blockingPrompts[prompt] = nil
+	end
+	return false
+end
+
+local function updateProxyAvailability()
+	local prompt = ensureProxyPrompt()
+	local target = selectedTarget
+	if not target
+		or not isResolvedTargetValid(target)
+		or not isTargetWithinLocalHorizontalRadius(target)
+		or not ProximityPromptService.Enabled
+		or hasBlockingPrompt()
+	then
 		prompt.Enabled = false
+		if activePrompt == prompt then
+			clearActive()
+		end
+		return
+	end
+	prompt.Enabled = true
+	if not activePrompt then
+		showPrompt(prompt, getCurrentPromptInputType())
 	end
 end
 
-local function unwatchForeignHarvestPrompt(prompt: ProximityPrompt)
-	local connections = foreignPromptWatchConnections[prompt]
-	if not connections then
+local function setSelectedTarget(target: ResolvedTarget?)
+	local prompt = ensureProxyPrompt()
+	if isSameTarget(selectedTarget, target) then
+		selectedTarget = target
+		updateProxyAvailability()
 		return
 	end
-	foreignPromptWatchConnections[prompt] = nil
-	for _, connection in connections do
-		connection:Disconnect()
+
+	selectedTarget = target
+	prompt.Enabled = false
+	clearActive()
+	clearProxyTargetAttributes(prompt)
+	if not target or not isResolvedTargetValid(target) then
+		return
+	end
+	prompt:SetAttribute(HarvestPromptConfig.RecordIdAttribute, target.RecordId)
+	prompt:SetAttribute(HarvestPromptConfig.PlantIdAttribute, target.Definition.Id)
+	prompt:SetAttribute(HarvestPromptConfig.TargetKindAttribute, target.TargetKind)
+	prompt:SetAttribute(HarvestPromptConfig.FruitSlotIndexAttribute, target.FruitSlotIndex)
+	updateProxyAvailability()
+end
+
+local function registerPlantFromInstance(instance: Instance)
+	local model = if instance:IsA("Model")
+		and type(instance:GetAttribute(HarvestPromptConfig.RecordIdAttribute)) == "string"
+		then instance
+		else findPlantModel(instance)
+	if model then
+		trackedPlants[model] = true
 	end
 end
 
--- 只为契约完整的外玩家收获 Prompt 保留启用拦截与流送销毁清理，不监听本地或其他系统 Prompt。
-local function watchForeignHarvestPrompt(prompt: ProximityPrompt)
-	if not isForeignHarvestPrompt(prompt) or foreignPromptWatchConnections[prompt] then
+local function getTargetWorldPoint(target: ResolvedTarget): Vector3
+	local ok, boundingCFrame = pcall(function()
+		local cframe = target.TargetModel:GetBoundingBox()
+		return cframe
+	end)
+	if ok and typeof(boundingCFrame) == "CFrame" then
+		return (boundingCFrame :: CFrame).Position
+	end
+	return target.RootPart.Position
+end
+
+local function isSuppressed(target: ResolvedTarget, nowClock: number): boolean
+	local key = getTargetKey(target)
+	local suppressUntil = suppressedTargets[key]
+	if not suppressUntil then
+		return false
+	end
+	if nowClock < suppressUntil then
+		return true
+	end
+	suppressedTargets[key] = nil
+	return false
+end
+
+local function refreshScreenTarget()
+	local characterRoot = getAliveLocalCharacterRoot()
+	local camera = Workspace.CurrentCamera
+	if not characterRoot or not camera then
+		setSelectedTarget(nil)
 		return
 	end
-	local connections: { RBXScriptConnection } = {}
-	foreignPromptWatchConnections[prompt] = connections
-	table.insert(connections, prompt:GetPropertyChangedSignal("Enabled"):Connect(function()
-		suppressForeignHarvestPrompt(prompt)
-	end))
-	table.insert(connections, prompt.Destroying:Connect(function()
-		unwatchForeignHarvestPrompt(prompt)
-	end))
-	suppressForeignHarvestPrompt(prompt)
+	local resolvedCharacterRoot: BasePart = characterRoot
+
+	local inputPart = proxyPart
+	if not inputPart or not inputPart.Parent then
+		ensureProxyPrompt()
+		inputPart = proxyPart
+	end
+	if inputPart then
+		inputPart.CFrame = resolvedCharacterRoot.CFrame
+	end
+
+	local viewportSize = camera.ViewportSize
+	if viewportSize.X <= 0 or viewportSize.Y <= 0 then
+		setSelectedTarget(nil)
+		return
+	end
+	local screenCenter = viewportSize * 0.5
+	local nowClock = os.clock()
+	for key, suppressUntil in suppressedTargets do
+		if nowClock >= suppressUntil then
+			suppressedTargets[key] = nil
+		end
+	end
+	local bestTarget: ResolvedTarget? = nil
+	local bestScore = math.huge
+	local bestKey = ""
+
+	local function consider(target: ResolvedTarget)
+		local plantRoot = target.PlantModel.PrimaryPart
+		if not plantRoot
+			or not HarvestPromptConfig.IsWithinHorizontalHarvestRadius(
+				resolvedCharacterRoot.Position,
+				plantRoot.Position
+			)
+			or not isResolvedTargetValid(target)
+			or isSuppressed(target, nowClock)
+		then
+			return
+		end
+		local viewportPoint, onScreen = camera:WorldToViewportPoint(getTargetWorldPoint(target))
+		if not onScreen or viewportPoint.Z <= 0 then
+			return
+		end
+		local offset = Vector2.new(viewportPoint.X, viewportPoint.Y) - screenCenter
+		local score = offset.X * offset.X + offset.Y * offset.Y
+		local key = getTargetKey(target)
+		if score < bestScore or (score == bestScore and (bestKey == "" or key < bestKey)) then
+			bestTarget = target
+			bestScore = score
+			bestKey = key
+		end
+	end
+
+	for model in trackedPlants do
+		if not model:IsDescendantOf(Workspace) then
+			trackedPlants[model] = nil
+			continue
+		end
+		local recordId = model:GetAttribute(HarvestPromptConfig.RecordIdAttribute)
+		local plantId = model:GetAttribute(HarvestPromptConfig.PlantIdAttribute)
+		if type(recordId) ~= "string"
+			or type(plantId) ~= "string"
+			or model:GetAttribute(HarvestPromptConfig.OwnerUserIdAttribute) ~= player.UserId
+		then
+			continue
+		end
+		local definition = ItemConfig.Get(plantId)
+		local root = model.PrimaryPart
+		if not definition or not root then
+			continue
+		end
+		if definition.HarvestType == "Single" then
+			local body = model:FindFirstChild("Body")
+			if body and body:IsA("Model") and model:GetAttribute(HarvestPromptConfig.HarvestReadyAttribute) == true then
+				consider({
+					TargetModel = body,
+					PlantModel = model,
+					RootPart = root,
+					Definition = definition,
+					RecordId = recordId,
+					TargetKind = HarvestPromptConfig.TargetKinds.Plant,
+					FruitSlotIndex = nil,
+				})
+			end
+		else
+			local container = model:FindFirstChild("RuntimeFruits")
+			if not container or not container:IsA("Folder") then
+				continue
+			end
+			for _, child in container:GetChildren() do
+				if not child:IsA("Model")
+					or child:GetAttribute(HarvestPromptConfig.RuntimeFruitMarkerAttribute) ~= true
+					or child:GetAttribute(HarvestPromptConfig.FruitMatureAttribute) ~= true
+				then
+					continue
+				end
+				local slotIndex = child:GetAttribute(HarvestPromptConfig.FruitSlotIndexAttribute)
+				local fruitRoot = child.PrimaryPart or child:FindFirstChild("Root")
+				if type(slotIndex) == "number"
+					and slotIndex > 0
+					and slotIndex == math.floor(slotIndex)
+					and fruitRoot
+					and fruitRoot:IsA("BasePart")
+				then
+					consider({
+						TargetModel = child,
+						PlantModel = model,
+						RootPart = fruitRoot,
+						Definition = definition,
+						RecordId = recordId,
+						TargetKind = HarvestPromptConfig.TargetKinds.Fruit,
+						FruitSlotIndex = slotIndex,
+					})
+				end
+			end
+		end
+	end
+	setSelectedTarget(bestTarget)
 end
 
 -- 判断给定指针屏幕坐标是否落在当前本地收获交互区域及其外扩范围内，仅供其他客户端表现避让。
@@ -782,44 +1037,117 @@ function HarvestPromptController.IsMouseNearActiveUi(mousePosition: Vector2, pad
 	return HarvestPromptController.IsPointerNearActiveUi(mousePosition, padding)
 end
 
--- 初始化透明收获 Prompt，只为本地有效目标生成单活动 UI/高亮并隔离外玩家候选。
+-- 初始化屏幕目标缓存、本地代理 Prompt 与透明收获 UI；候选不执行距离或遮挡射线判断。
 function HarvestPromptController.Init()
 	if initialized then
 		return
 	end
 	initialized = true
-	ProximityPromptService.PromptShown:Connect(function(prompt, inputType)
-		if isForeignHarvestPrompt(prompt) then
-			suppressForeignHarvestPrompt(prompt)
+	local remoteFolder = ReplicatedStorage:WaitForChild(NetworkConfig.FolderName)
+	requestHarvestRemote = remoteFolder:WaitForChild(NetworkConfig.Events.RequestHarvestTarget) :: RemoteEvent
+	proxyTriggeredHandler = function()
+		if hasBlockingPrompt() then
+			updateProxyAvailability()
 			return
 		end
-		showPrompt(prompt, inputType)
-	end)
-	ProximityPromptService.PromptHidden:Connect(function(prompt)
-		if prompt == activePrompt then
-			clearActive()
+		local target = selectedTarget
+		local remote = requestHarvestRemote
+		if not target
+			or not remote
+			or not isResolvedTargetValid(target)
+			or not isTargetWithinLocalHorizontalRadius(target)
+		then
+			setSelectedTarget(nil)
+			return
+		end
+		suppressedTargets[getTargetKey(target)] = os.clock() + HarvestPromptConfig.TargetSuppressionAfterRequest
+		remote:FireServer(target.RecordId, target.TargetKind, target.FruitSlotIndex)
+		setSelectedTarget(nil)
+	end
+	ensureProxyPrompt()
+
+	ProximityPromptService.PromptShown:Connect(function(prompt, inputType)
+		if prompt == proxyPrompt then
+			showPrompt(prompt, inputType)
+		else
+			blockingPrompts[prompt] = true
+			updateProxyAvailability()
 		end
 	end)
-	ProximityPromptService.PromptTriggered:Connect(function(prompt, triggeringPlayer)
-		if prompt == activePrompt and (not triggeringPlayer or triggeringPlayer == player) then
-			clearActive()
+	ProximityPromptService.PromptHidden:Connect(function(prompt)
+		if prompt == proxyPrompt then
+			if prompt == activePrompt then
+				clearActive()
+			end
+		else
+			blockingPrompts[prompt] = nil
+			updateProxyAvailability()
 		end
 	end)
 	Workspace.DescendantAdded:Connect(function(descendant)
-		if descendant:IsA("ProximityPrompt") and isForeignHarvestPrompt(descendant) then
-			watchForeignHarvestPrompt(descendant)
+		if descendant:IsA("Model") then
+			registerPlantFromInstance(descendant)
+		end
+	end)
+	Workspace.DescendantRemoving:Connect(function(descendant)
+		if descendant:IsA("ProximityPrompt") and blockingPrompts[descendant] then
+			blockingPrompts[descendant] = nil
+			updateProxyAvailability()
+		end
+		if descendant:IsA("Model") then
+			trackedPlants[descendant] = nil
+		end
+		local target = selectedTarget
+		if target
+			and (descendant == target.PlantModel
+				or descendant == target.TargetModel
+				or target.TargetModel:IsDescendantOf(descendant))
+		then
+			setSelectedTarget(nil)
 		end
 	end)
 	for _, descendant in Workspace:GetDescendants() do
-		if descendant:IsA("ProximityPrompt") and isForeignHarvestPrompt(descendant) then
-			watchForeignHarvestPrompt(descendant)
+		if descendant:IsA("Model") then
+			registerPlantFromInstance(descendant)
 		end
 	end
 	player.CharacterAdded:Connect(function()
-		clearActive()
+		setSelectedTarget(nil)
 	end)
 	player.CharacterRemoving:Connect(function()
-		clearActive()
+		setSelectedTarget(nil)
+	end)
+	UserInputService.LastInputTypeChanged:Connect(function()
+		local currentPrompt = proxyPrompt
+		local target = selectedTarget
+		local inputType = getCurrentPromptInputType()
+		if currentPrompt
+			and currentPrompt.Enabled
+			and target
+			and isResolvedTargetValid(target)
+			and activeInputType ~= inputType
+			and ProximityPromptService.Enabled
+			and not hasBlockingPrompt()
+		then
+			showPrompt(currentPrompt, inputType)
+		end
+	end)
+	ProximityPromptService:GetPropertyChangedSignal("Enabled"):Connect(function()
+		if not ProximityPromptService.Enabled then
+			clearActive()
+			local currentPrompt = proxyPrompt
+			if currentPrompt then
+				currentPrompt.Enabled = false
+			end
+			return
+		end
+		updateProxyAvailability()
+	end)
+	task.spawn(function()
+		while true do
+			refreshScreenTarget()
+			task.wait(HarvestPromptConfig.TargetRefreshInterval)
+		end
 	end)
 end
 

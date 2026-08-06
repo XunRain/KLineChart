@@ -31,7 +31,7 @@ return {
 			MinStock = 1,
 			MaxStock = 10,
 		},
-		Blueberry = {
+		Eggplant = {
 			Chance = 1,
 			MinStock = 1,
 			MaxStock = 8,
@@ -69,6 +69,23 @@ return {
 	GeneratedItemPrefix = "KLineItem_",
 	-- SeedShop.Frame.NormalShop 下金币购买货架模板；运行时作为当前商品的共享展开货架。
 	ShecklesShelfName = "Sheckles_Shelf",
+	-- 金币货架下标签区域的稳定名称；客户端只切换其 Visible，不修改 Studio 固化的尺寸、位置、颜色或布局约束。
+	TagFrameName = "Tag_Frame",
+	-- 标签区域下横向滚动容器的稳定名称；其 AutomaticCanvasSize 与 UIListLayout 完全由 Studio 模板维护。
+	TagScrollingFrameName = "ScrollingFrame",
+	-- 复用模板中已弃用的趋势标签作为收获类型皮肤；实例保留原名，客户端绝不展示价格趋势、百分比或箭头文案。
+	HarvestTypeTagName = "TrendTag",
+	-- 稳定天气 Id 到模板标签名的映射；仅当 MarketConfig.GetWeatherModifier 对当前品种确有规则时显示对应标签。
+	WeatherBonusTagNames = {
+		Rain = "RainTag",
+		Lightning = "LightningTag",
+		Snowfall = "SnowfallTag",
+	},
+	-- ItemConfig.HarvestType 到玩家可见文案的稳定映射；只同步 MarketTrend 父 TextLabel 与其直接子 TextLabel。
+	HarvestTypeTagTexts = {
+		Single = "Single Harvest",
+		Repeat = "Multi Harvest",
+	},
 	-- SeedShop.Frame.NormalShop 下 Robux 购买货架模板；运行时与金币货架互斥显示。
 	RobuxShelfName = "Robux_Shelf",
 	ActiveShelfName = "Sheckles_Shelf",

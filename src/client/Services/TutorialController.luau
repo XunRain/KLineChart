@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
+local OpeningConfig = require(ReplicatedStorage.Shared.OpeningConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.TutorialConfig)
 local NotificationController = require(script.Parent.NotificationController)
 local TutorialVisualUtils = require(script.Parent.TutorialVisualUtils)
@@ -27,14 +28,27 @@ local skipConnection: RBXScriptConnection? = nil
 local skipConfirmUntil = 0
 local skipBindSerial = 0
 local skipMissingWarned = false
+local openingWasBlocking = false
 local TUTORIAL_NOTICE_KEY = "TutorialStep"
+
+local function isOpeningBlocking(): boolean
+	return OpeningConfig.Enabled
+		and player:GetAttribute(OpeningConfig.Attributes.Active) == true
+		and player:GetAttribute(OpeningConfig.Attributes.Done) ~= true
+end
 
 local function isActive(): boolean
 	local state = currentState
-	return state ~= nil and not state.Completed and TutorialConfig.IsActiveStep(state.Step)
+	return not isOpeningBlocking()
+		and state ~= nil
+		and not state.Completed
+		and TutorialConfig.IsActiveStep(state.Step)
 end
 
 local function showTutorialNotice(_fallbackMessage: string?)
+	if isOpeningBlocking() then
+		return
+	end
 	local state = currentState
 	if not state or state.Completed or not TutorialConfig.IsActiveStep(state.Step) then
 		return
@@ -128,12 +142,38 @@ local function applyState(payload: any)
 		disconnectSkipButton()
 		return
 	end
+	if isOpeningBlocking() then
+		NotificationController.ClearPersistent(TUTORIAL_NOTICE_KEY)
+		TutorialVisualUtils.Stop()
+		disconnectSkipButton()
+		return
+	end
 	local stateChanged = not previous or previous.Step ~= state.Step or previous.Completed ~= state.Completed
 	showTutorialNotice(nil)
 	if stateChanged then
 		TutorialVisualUtils.Start(state.Step, showTutorialNotice)
 	end
 	bindSkipButton()
+end
+
+local function refreshOpeningGate()
+	if isOpeningBlocking() then
+		openingWasBlocking = true
+		NotificationController.ClearPersistent(TUTORIAL_NOTICE_KEY)
+		TutorialVisualUtils.Stop()
+		disconnectSkipButton()
+		return
+	end
+	if not openingWasBlocking then
+		return
+	end
+	openingWasBlocking = false
+	local state = currentState
+	if state and not state.Completed and TutorialConfig.IsActiveStep(state.Step) then
+		showTutorialNotice(nil)
+		TutorialVisualUtils.Start(state.Step, showTutorialNotice)
+		bindSkipButton()
+	end
 end
 
 -- 幂等连接教程状态 Remote；客户端只请求/展示状态，不提供步骤完成入口。
@@ -147,14 +187,17 @@ function TutorialController.Init()
 	local stateChanged = folder:WaitForChild(NetworkConfig.Events.TutorialStateChanged) :: RemoteEvent
 	skipRemote = folder:WaitForChild(NetworkConfig.Events.RequestSkipTutorial) :: RemoteEvent
 	stateChanged.OnClientEvent:Connect(applyState)
+	player:GetAttributeChangedSignal(OpeningConfig.Attributes.Active):Connect(refreshOpeningGate)
+	player:GetAttributeChangedSignal(OpeningConfig.Attributes.Done):Connect(refreshOpeningGate)
 	player.CharacterAdded:Connect(function()
 		local state = currentState
-		if state and not state.Completed then
+		if state and not state.Completed and not isOpeningBlocking() then
 			showTutorialNotice(nil)
 			TutorialVisualUtils.Start(state.Step, showTutorialNotice)
 			bindSkipButton()
 		end
 	end)
+	refreshOpeningGate()
 	requestState:FireServer()
 	task.delay(TutorialConfig.TargetWaitTimeout, function()
 		if not currentState then

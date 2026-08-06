@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块集中播放白名单音效与昼夜音乐，并在雪天音乐覆盖期间安全暂停和恢复当前阶段音乐。
+-- 本模块集中播放白名单音效、天气环境声与昼夜音乐，并在雪天音乐覆盖期间安全暂停和恢复当前阶段音乐。
 
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
@@ -26,6 +26,14 @@ local currentPhaseId: string? = nil
 local currentMusic: Sound? = nil
 local weatherMusicOverride = false
 local musicTweens: { [Sound]: Tween } = {}
+local lastMusicSourcesByPhase: { [string]: Sound } = {}
+local failedMusicSources: { [Sound]: boolean } = {}
+local musicSessionGeneration = 0
+local currentWeatherAmbientKey: string? = nil
+local weatherAmbientSound: Sound? = nil
+local weatherAmbientTween: Tween? = nil
+local weatherAmbientTargetVolume = 0
+local weatherAmbientGeneration = 0
 local buttonConnections: { [GuiButton]: RBXScriptConnection } = {}
 local playerGuiConnections: { RBXScriptConnection } = {}
 local boundPlayerGui: PlayerGui? = nil
@@ -33,6 +41,8 @@ local warned: { [string]: boolean } = {}
 local random = Random.new()
 
 local MUSIC_FADE_TIME = 3
+local MUSIC_LOAD_TIMEOUT = 12
+local WEATHER_AMBIENT_FADE_TIME = 2
 local SFX_CLEANUP_FALLBACK = 15
 local SUPPRESS_UI_CLICK_ATTRIBUTE = "SuppressUIClickSFX"
 
@@ -40,6 +50,12 @@ local SFX_DEFINITIONS: { [string]: SfxDefinition } = {
 	Purchase = {
 		Path = { "SFX", "PurchaseSFX" },
 		WorldPositioned = false,
+	},
+	SeedStockRefresh = {
+		Path = { "SFX", "SeedStockRefreshSFX" },
+		WorldPositioned = false,
+		PlaybackSpeedMin = 0.85,
+		PlaybackSpeedMax = 1.15,
 	},
 	Sell = {
 		Path = { "SFX", "SellSFX" },
@@ -61,10 +77,19 @@ local SFX_DEFINITIONS: { [string]: SfxDefinition } = {
 	},
 }
 
-local MUSIC_PATHS: { [string]: { string } } = {
-	Day = { "MusicTracks", "TimeCycle", "Day" },
-	Sunset = { "MusicTracks", "TimeCycle", "Sunset" },
-	Night = { "MusicTracks", "TimeCycle", "Night" },
+local SUPPORTED_TIME_PHASES: { [string]: boolean } = {
+	Day = true,
+	Sunset = true,
+	Night = true,
+}
+
+local MUSIC_FOLDER_PATHS: { [string]: { string } } = {
+	Day = { "MusicTracks", "Day" },
+	Night = { "MusicTracks", "Night" },
+}
+
+local WEATHER_AMBIENT_PATHS: { [string]: { string } } = {
+	Rain = { "WeatherSFX", "Rain" },
 }
 
 local function warnOnce(key: string, message: string)
@@ -96,6 +121,66 @@ local function findSound(path: { string }, warningKey: string): Sound?
 	return candidate
 end
 
+local function resolveWeatherAmbientKey(weatherId: string?): string?
+	if weatherId == "Rain" or weatherId == "Lightning" then
+		return "Rain"
+	end
+	return nil
+end
+
+local function cancelWeatherAmbientTween()
+	local tween = weatherAmbientTween
+	weatherAmbientTween = nil
+	if not tween then
+		return
+	end
+	tween:Cancel()
+	tween:Destroy()
+end
+
+local function fadeInWeatherAmbient(sound: Sound, targetVolume: number)
+	cancelWeatherAmbientTween()
+	local tween = TweenService:Create(sound, TweenInfo.new(WEATHER_AMBIENT_FADE_TIME, Enum.EasingStyle.Sine), {
+		Volume = targetVolume,
+	})
+	weatherAmbientTween = tween
+	tween.Completed:Once(function()
+		if weatherAmbientTween == tween then
+			weatherAmbientTween = nil
+		end
+		tween:Destroy()
+	end)
+	tween:Play()
+end
+
+local function fadeOutWeatherAmbient(sound: Sound, expectedGeneration: number)
+	cancelWeatherAmbientTween()
+	local tween = TweenService:Create(sound, TweenInfo.new(WEATHER_AMBIENT_FADE_TIME, Enum.EasingStyle.Sine), {
+		Volume = 0,
+	})
+	weatherAmbientTween = tween
+	tween.Completed:Once(function()
+		if weatherAmbientTween == tween then
+			weatherAmbientTween = nil
+		end
+		tween:Destroy()
+		if
+			weatherAmbientGeneration ~= expectedGeneration
+			or currentWeatherAmbientKey ~= nil
+			or weatherAmbientSound ~= sound
+		then
+			return
+		end
+		weatherAmbientSound = nil
+		weatherAmbientTargetVolume = 0
+		if sound.Parent then
+			sound:Stop()
+			sound:Destroy()
+		end
+	end)
+	tween:Play()
+end
+
 local function cancelMusicTween(sound: Sound)
 	local tween = musicTweens[sound]
 	if not tween then
@@ -125,45 +210,169 @@ local function fadeOutAndDestroy(sound: Sound)
 	end)
 end
 
-local function startCurrentPhaseMusic()
+local function resetMusicSession()
+	musicSessionGeneration += 1
+	table.clear(failedMusicSources)
+end
+
+local function getMusicSources(phaseId: string): { Sound }
+	local path = MUSIC_FOLDER_PATHS[phaseId]
+	if not path then
+		return {}
+	end
+	local candidate = findPath(path)
+	if not candidate or not candidate:IsA("Folder") then
+		warnOnce(
+			"MusicFolder_" .. phaseId,
+			string.format("缺少 SoundService.%s Folder，%s 阶段已保持背景音乐静音。", table.concat(path, "."), phaseId)
+		)
+		return {}
+	end
+
+	local sources: { Sound } = {}
+	for _, child in candidate:GetChildren() do
+		if child:IsA("Sound") then
+			table.insert(sources, child)
+		end
+	end
+	if #sources == 0 then
+		warnOnce(
+			"MusicEmpty_" .. phaseId,
+			string.format("SoundService.%s 没有直接子 Sound，%s 阶段已保持背景音乐静音。", table.concat(path, "."), phaseId)
+		)
+	end
+	return sources
+end
+
+local function chooseMusicSource(phaseId: string): Sound?
+	local sources = getMusicSources(phaseId)
+	if #sources == 0 then
+		return nil
+	end
+
+	local availableSources: { Sound } = {}
+	for _, source in sources do
+		if not failedMusicSources[source] then
+			table.insert(availableSources, source)
+		end
+	end
+	if #availableSources == 0 then
+		warnOnce(
+			"MusicAllFailed_" .. phaseId,
+			string.format("SoundService.MusicTracks.%s 的音乐在本次播放会话中均加载失败，已保持静音。", phaseId)
+		)
+		return nil
+	end
+
+	local lastSource = lastMusicSourcesByPhase[phaseId]
+	local choices: { Sound } = {}
+	if #availableSources > 1 and lastSource then
+		for _, source in availableSources do
+			if source ~= lastSource then
+				table.insert(choices, source)
+			end
+		end
+	end
+	if #choices == 0 then
+		choices = availableSources
+	end
+
+	local source = choices[random:NextInteger(1, #choices)]
+	lastMusicSourcesByPhase[phaseId] = source
+	return source
+end
+
+local startCurrentPhaseMusic: (boolean) -> ()
+
+startCurrentPhaseMusic = function(fadeIn: boolean)
 	if weatherMusicOverride or currentMusic then
 		return
 	end
 	local phaseId = currentPhaseId
-	if not phaseId then
+	if not phaseId or phaseId == "Sunset" then
 		return
 	end
-	local path = MUSIC_PATHS[phaseId]
-	if not path then
-		warnOnce("Phase_" .. phaseId, string.format("不支持昼夜阶段 %s，已保持背景音乐静音。", phaseId))
-		return
+	local sessionGeneration = musicSessionGeneration
+	local source = chooseMusicSource(phaseId)
+	while source and source.SoundId == "" do
+		failedMusicSources[source] = true
+		source = chooseMusicSource(phaseId)
 	end
-	local source = findSound(path, "Music_" .. phaseId)
 	if not source then
 		return
 	end
+	local selectedSource: Sound = source
 
-	local targetVolume = source.Volume
-	local sound = source:Clone() :: Sound
+	local targetVolume = selectedSource.Volume
+	local sound = selectedSource:Clone() :: Sound
 	sound.Name = "ActiveTimeCycleMusic_" .. phaseId
-	sound.Looped = true
+	sound.Looped = false
 	sound.TimePosition = 0
-	sound.Volume = 0
+	sound.Volume = if fadeIn then 0 else targetVolume
 	sound.Parent = SoundService
 	currentMusic = sound
-	sound:Play()
-
-	local tween = TweenService:Create(sound, TweenInfo.new(MUSIC_FADE_TIME, Enum.EasingStyle.Sine), {
-		Volume = targetVolume,
-	})
-	musicTweens[sound] = tween
-	tween:Play()
-	tween.Completed:Once(function()
-		if musicTweens[sound] == tween then
-			musicTweens[sound] = nil
+	local loaded = sound.IsLoaded
+	if not loaded then
+		sound.Loaded:Once(function()
+			loaded = true
+		end)
+	end
+	sound.Ended:Once(function()
+		if
+			currentMusic ~= sound
+			or currentPhaseId ~= phaseId
+			or weatherMusicOverride
+			or musicSessionGeneration ~= sessionGeneration
+		then
+			return
 		end
-		tween:Destroy()
+		local endedLoaded = loaded or sound.IsLoaded
+		currentMusic = nil
+		if not endedLoaded then
+			failedMusicSources[selectedSource] = true
+		end
+		cancelMusicTween(sound)
+		if sound.Parent then
+			sound:Destroy()
+		end
+		startCurrentPhaseMusic(not endedLoaded)
 	end)
+	if fadeIn then
+		local tween = TweenService:Create(sound, TweenInfo.new(MUSIC_FADE_TIME, Enum.EasingStyle.Sine), {
+			Volume = targetVolume,
+		})
+		musicTweens[sound] = tween
+		tween.Completed:Once(function()
+			if musicTweens[sound] == tween then
+				musicTweens[sound] = nil
+			end
+			tween:Destroy()
+		end)
+		tween:Play()
+	end
+	sound:Play()
+	if not loaded then
+		task.delay(MUSIC_LOAD_TIMEOUT, function()
+			if
+				currentMusic ~= sound
+				or currentPhaseId ~= phaseId
+				or weatherMusicOverride
+				or musicSessionGeneration ~= sessionGeneration
+			then
+				return
+			end
+			if loaded or sound.IsLoaded then
+				return
+			end
+			currentMusic = nil
+			failedMusicSources[selectedSource] = true
+			cancelMusicTween(sound)
+			if sound.Parent then
+				sound:Destroy()
+			end
+			startCurrentPhaseMusic(true)
+		end)
+	end
 end
 
 local function stopCurrentPhaseMusic()
@@ -275,8 +484,8 @@ local function bindRemoteCues()
 			return
 		end
 		local position = if typeof(worldPosition) == "Vector3" then worldPosition else nil
-		if cueName == "Purchase" then
-			AudioController.PlaySfx("Purchase")
+		if cueName == "Purchase" or cueName == "SeedStockRefresh" then
+			AudioController.PlaySfx(cueName)
 		elseif cueName == "Harvest" and position then
 			AudioController.PlaySfx("Harvest", position)
 		end
@@ -340,21 +549,77 @@ function AudioController.PlaySfx(cueName: string, worldPosition: Vector3?)
 	Debris:AddItem(container, duration)
 end
 
--- 切换当前昼夜阶段并以三秒交叉淡化替换音乐；重复应用同一阶段不会重启曲目。
+-- 按天气切换全局环境声；Rain 与 Lightning 共用同一雨声，退出雨系时两秒淡出且快速返回会复用原声音。
+function AudioController.SetWeatherAmbient(weatherId: string?)
+	local ambientKey = resolveWeatherAmbientKey(weatherId)
+	if currentWeatherAmbientKey == ambientKey then
+		return
+	end
+	currentWeatherAmbientKey = ambientKey
+	weatherAmbientGeneration += 1
+	local expectedGeneration = weatherAmbientGeneration
+	cancelWeatherAmbientTween()
+
+	local existingSound = weatherAmbientSound
+	if not ambientKey then
+		if existingSound and existingSound.Parent then
+			fadeOutWeatherAmbient(existingSound, expectedGeneration)
+		elseif existingSound then
+			weatherAmbientSound = nil
+			weatherAmbientTargetVolume = 0
+		end
+		return
+	end
+
+	if existingSound and existingSound.Parent then
+		if not existingSound.Playing then
+			existingSound:Play()
+		end
+		fadeInWeatherAmbient(existingSound, weatherAmbientTargetVolume)
+		return
+	elseif existingSound then
+		weatherAmbientSound = nil
+		weatherAmbientTargetVolume = 0
+	end
+
+	local path = WEATHER_AMBIENT_PATHS[ambientKey]
+	if not path then
+		return
+	end
+	local source = findSound(path, "WeatherAmbient_" .. ambientKey)
+	if not source then
+		return
+	end
+
+	local targetVolume = source.Volume
+	local sound = source:Clone() :: Sound
+	sound.Name = "ActiveWeatherAmbient_" .. ambientKey
+	sound.Looped = true
+	sound.Volume = 0
+	sound.TimePosition = 0
+	sound.Parent = SoundService
+	weatherAmbientSound = sound
+	weatherAmbientTargetVolume = targetVolume
+	sound:Play()
+	fadeInWeatherAmbient(sound, targetVolume)
+end
+
+-- 切换昼夜阶段：白天和夜晚随机续播曲库，黄昏静音，阶段切换以三秒交叉淡化且重复阶段不重启。
 function AudioController.SetTimePhase(phaseId: string?)
-	if phaseId ~= nil and not MUSIC_PATHS[phaseId] then
+	if phaseId ~= nil and not SUPPORTED_TIME_PHASES[phaseId] then
 		warnOnce("Phase_" .. phaseId, string.format("拒绝未配置的昼夜阶段：%s。", phaseId))
 		return
 	end
 	if currentPhaseId == phaseId then
 		if not weatherMusicOverride and not currentMusic then
-			startCurrentPhaseMusic()
+			startCurrentPhaseMusic(true)
 		end
 		return
 	end
 	currentPhaseId = phaseId
+	resetMusicSession()
 	stopCurrentPhaseMusic()
-	startCurrentPhaseMusic()
+	startCurrentPhaseMusic(true)
 end
 
 -- 仅 Snowfall 天气覆盖昼夜音乐；Rain、Lightning 或 nil 会恢复当时阶段，重复状态不会重启。
@@ -364,10 +629,11 @@ function AudioController.SetWeatherMusicOverride(weatherId: string?)
 		return
 	end
 	weatherMusicOverride = shouldOverride
+	resetMusicSession()
 	if shouldOverride then
 		stopCurrentPhaseMusic()
 	else
-		startCurrentPhaseMusic()
+		startCurrentPhaseMusic(true)
 	end
 end
 

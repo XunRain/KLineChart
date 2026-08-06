@@ -24,6 +24,7 @@ local hotbarFrame: Frame? = nil
 local inventoryFrame: Frame? = nil
 local gridFrame: ScrollingFrame? = nil
 local searchBox: TextBox? = nil
+local totalStockText: TextLabel? = nil
 local toggleButton: ImageButton? = nil
 local outsideCloseButton: TextButton? = nil
 local InterfaceVisualController: any = nil
@@ -661,6 +662,30 @@ local function collectCurrentTools(): { Tool }
 	return tools
 end
 
+local function isConfiguredProduceTool(tool: Tool): boolean
+	if tool:GetAttribute("KLineItemTool") ~= true or tool:GetAttribute("KLineItemType") ~= "Produce" then
+		return false
+	end
+	local itemId = tool:GetAttribute("ItemId")
+	return type(itemId) == "string" and itemId ~= "" and ItemConfig.Get(itemId) ~= nil
+end
+
+local function updateTotalStockText(tools: { Tool })
+	local label = totalStockText
+	if not label then
+		return
+	end
+	local total = 0
+	for _, tool in tools do
+		if isConfiguredProduceTool(tool) then
+			total += getCount(tool) or 0
+		end
+	end
+	local decimalPlaces = if isMiniLayout() then 1 else 2
+	label.Text = "Total Stock: " .. NumberFormatter.Abbreviate(total, decimalPlaces)
+	label.Visible = selectedCategory == "Fruits"
+end
+
 local function toolStillHeld(tool: Tool, present: { [Tool]: boolean }): boolean
 	return present[tool] == true
 end
@@ -949,6 +974,11 @@ local function updateInventoryStaticLayout(panel: Frame, panelPixelSize: Vector2
 		sideBar.Size = UDim2.fromScale(sidebarWidth / math.max(1, panelPixelSize.X), 1)
 		sideBar.Visible = true
 	end
+	local stockLabel = totalStockText
+	if stockLabel then
+		stockLabel.Size = UDim2.fromScale(1, scalePixel(30, 24) / math.max(1, panelPixelSize.Y))
+		stockLabel.TextSize = getScaledTextSize(11, 8)
+	end
 end
 
 local function canUseInputForSlot(input: InputObject): boolean
@@ -1098,6 +1128,10 @@ local function renderInventory()
 	if not parent then
 		return
 	end
+	local stockLabel = totalStockText
+	if stockLabel then
+		stockLabel.Visible = selectedCategory == "Fruits"
+	end
 	clearLayout(parent)
 	local slotCount = getHotbarSlotCount()
 	local panelPixelSize = getTemplateInventoryPixelSize(slotCount)
@@ -1152,6 +1186,7 @@ refreshLayout = function()
 	else
 		assignNewTools(tools)
 	end
+	updateTotalStockText(tools)
 	renderHotbar()
 	renderInventory()
 end
@@ -1401,6 +1436,21 @@ local function buildGui()
 	for index, category in CATEGORY_ORDER do
 		makeCategoryButton(categories, category, index)
 	end
+
+	local stockLabel = newText(
+		categories,
+		"TotalStockText",
+		"Total Stock: 0",
+		UDim2.fromScale(1, scalePixel(30, 24) / math.max(1, initialPanelPixelSize.Y)),
+		UDim2.fromScale(0, 0)
+	)
+	stockLabel.LayoutOrder = 5
+	stockLabel.TextSize = getScaledTextSize(11, 8)
+	stockLabel.TextXAlignment = Enum.TextXAlignment.Center
+	stockLabel.TextYAlignment = Enum.TextYAlignment.Center
+	stockLabel.Visible = selectedCategory == "Fruits"
+	stockLabel.ZIndex = 20
+	totalStockText = stockLabel
 
 	local grid = Instance.new("ScrollingFrame")
 	grid.Name = "ScrollingFrame"

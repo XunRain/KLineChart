@@ -10,6 +10,7 @@ local TweenService = game:GetService("TweenService")
 
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local HudConfig = require(ReplicatedStorage.Shared.HudConfig)
+local MarketConfig = require(ReplicatedStorage.Shared.MarketConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local SeedIAPConfig = require(ReplicatedStorage.Shared.SeedIAPConfig)
@@ -29,6 +30,12 @@ type SeedShopState = {
 	Items: { { ItemId: string?, Stock: number? } }?,
 }
 
+type SeedTagBinding = {
+	Container: GuiObject,
+	Label: TextLabel,
+	Face: TextLabel,
+}
+
 local SeedShopController = {}
 local initialized = false
 local InterfaceVisualController: any
@@ -42,6 +49,10 @@ local selectedMode: "Sheckles" | "Robux" = "Sheckles"
 local normalShop: ScrollingFrame? = nil
 local shecklesShelf: Frame? = nil
 local robuxShelf: Frame? = nil
+local seedTagFrame: GuiObject? = nil
+local weatherTagBindings: { [string]: SeedTagBinding } = {}
+local harvestTypeTagBinding: SeedTagBinding? = nil
+local tagWarnings: { [string]: boolean } = {}
 local restockButton: GuiButton? = nil
 local restockTextBase: TextLabel? = nil
 local restockTextFace: TextLabel? = nil
@@ -50,6 +61,10 @@ local restockDefaultFaceText = ""
 local restockHovered = false
 local restockOfficialPriceByProductId: { [number]: number | false } = {}
 local restockPriceFetchInFlight: { [number]: boolean } = {}
+local robuxButtonTextByAmount: { [number]: TextLabel } = {}
+local robuxHoveredAmount: number? = nil
+local robuxOfficialPriceByProductId: { [number]: number | false } = {}
+local robuxPriceFetchInFlight: { [number]: boolean } = {}
 local canvasTween: Tween? = nil
 
 local requestBuy: RemoteEvent? = nil
@@ -83,6 +98,120 @@ local function setLayeredText(root: Instance?, value: string)
 	if face and face:IsA("TextLabel") then
 		face.Text = value
 	end
+end
+
+local function warnTagOnce(key: string, message: string)
+	if tagWarnings[key] then
+		return
+	end
+	tagWarnings[key] = true
+	warn("[SeedShopController] " .. message)
+end
+
+-- 绑定模板确认的标签父子文案；结构不完整时隐藏该标签并安全跳过。
+local function resolveSeedTag(container: Instance?, tagName: string): SeedTagBinding?
+	local tag = container and container:FindFirstChild(tagName)
+	if not tag or not tag:IsA("GuiObject") then
+		warnTagOnce("MissingTag:" .. tagName, string.format("Tag_Frame is missing %s", tagName))
+		return nil
+	end
+	tag.Visible = false
+	local label = tag:FindFirstChild("MarketTrend")
+	local face = label and label:FindFirstChild("TextLabel")
+	if not label or not label:IsA("TextLabel") or not face or not face:IsA("TextLabel") then
+		warnTagOnce(
+			"InvalidTagText:" .. tagName,
+			string.format("%s.MarketTrend requires a direct TextLabel child", tagName)
+		)
+		return nil
+	end
+	return {
+		Container = tag,
+		Label = label,
+		Face = face,
+	}
+end
+
+local function hideSeedTags()
+	local frame = seedTagFrame
+	if frame and frame.Parent then
+		frame.Visible = false
+	end
+	for _, binding in weatherTagBindings do
+		if binding.Container.Parent then
+			binding.Container.Visible = false
+		end
+	end
+	local harvestBinding = harvestTypeTagBinding
+	if harvestBinding and harvestBinding.Container.Parent then
+		harvestBinding.Container.Visible = false
+	end
+end
+
+-- 按当前品种规则刷新天气与收获类型标签；不读取当前天气，也不产生价格趋势展示。
+local function refreshSeedTags(itemId: string?)
+	hideSeedTags()
+	local frame = seedTagFrame
+	if not itemId or not frame or not frame.Parent then
+		return
+	end
+	local definition = ItemConfig.Get(itemId)
+	if not definition then
+		return
+	end
+
+	local hasVisibleTag = false
+	for weatherId, binding in weatherTagBindings do
+		if MarketConfig.GetWeatherModifier(weatherId, itemId) then
+			binding.Container.Visible = true
+			hasVisibleTag = true
+		end
+	end
+
+	local harvestText = SeedShopConfig.HarvestTypeTagTexts[definition.HarvestType]
+	local harvestBinding = harvestTypeTagBinding
+	if harvestBinding and harvestText then
+		harvestBinding.Label.Text = harvestText
+		harvestBinding.Face.Text = harvestText
+		harvestBinding.Container.Visible = true
+		hasVisibleTag = true
+	elseif not harvestText then
+		warnTagOnce(
+			"MissingHarvestText:" .. definition.HarvestType,
+			string.format("HarvestTypeTagTexts is missing %s", definition.HarvestType)
+		)
+	end
+	frame.Visible = hasVisibleTag
+end
+
+local function bindSeedTags(coins: Frame)
+	table.clear(weatherTagBindings)
+	harvestTypeTagBinding = nil
+	seedTagFrame = nil
+
+	local frame = coins:FindFirstChild(SeedShopConfig.TagFrameName)
+	if not frame or not frame:IsA("GuiObject") then
+		warnTagOnce("MissingTagFrame", string.format("%s is missing", SeedShopConfig.TagFrameName))
+		return
+	end
+	seedTagFrame = frame
+	frame.Visible = false
+	local scrollingFrame = frame:FindFirstChild(SeedShopConfig.TagScrollingFrameName)
+	if not scrollingFrame or not scrollingFrame:IsA("ScrollingFrame") then
+		warnTagOnce(
+			"MissingTagScrollingFrame",
+			string.format("%s.%s is missing", SeedShopConfig.TagFrameName, SeedShopConfig.TagScrollingFrameName)
+		)
+		return
+	end
+
+	for weatherId, tagName in SeedShopConfig.WeatherBonusTagNames do
+		local binding = resolveSeedTag(scrollingFrame, tagName)
+		if binding then
+			weatherTagBindings[weatherId] = binding
+		end
+	end
+	harvestTypeTagBinding = resolveSeedTag(scrollingFrame, SeedShopConfig.HarvestTypeTagName)
 end
 
 local function setButtonEnabled(button: GuiButton?, enabled: boolean)
@@ -340,6 +469,139 @@ local function getButtonDisplayLabel(button: GuiButton?, containerName: string):
 	return if label and label:IsA("TextLabel") then label else nil
 end
 
+local function getRobuxUnknownPriceText(): string
+	return string.format("%s %s", SeedIAPConfig.RobuxCurrencyIconText, SeedIAPConfig.UnknownPriceText)
+end
+
+local function setRobuxPackText(amount: number)
+	local label = robuxButtonTextByAmount[amount]
+	if label and label.Parent then
+		setLayeredText(label, string.format("x%d", amount))
+	end
+end
+
+local function clearRobuxPriceHover()
+	robuxHoveredAmount = nil
+	for amount in robuxButtonTextByAmount do
+		setRobuxPackText(amount)
+	end
+end
+
+local function setRobuxHoverPrice(amount: number, price: number?)
+	if robuxHoveredAmount ~= amount then
+		return
+	end
+	local label = robuxButtonTextByAmount[amount]
+	if not label or not label.Parent then
+		return
+	end
+	local text = if price
+		then string.format("%s %d", SeedIAPConfig.RobuxCurrencyIconText, price)
+		else getRobuxUnknownPriceText()
+	setLayeredText(label, text)
+end
+
+local function refreshRobuxHoverPrice(amount: number)
+	local shelf = robuxShelf
+	local itemId = selectedItemId
+	if robuxHoveredAmount ~= amount
+		or selectedMode ~= "Robux"
+		or not shelf
+		or not shelf.Visible
+		or not itemId
+	then
+		return
+	end
+	local price = SeedIAPConfig.GetTargetPrice(itemId, amount)
+	if SeedIAPConfig.UseMarketplacePurchases then
+		local productId = SeedIAPConfig.GetProductId(itemId, amount)
+		if productId then
+			local cachedPrice = robuxOfficialPriceByProductId[productId]
+			if type(cachedPrice) == "number" then
+				price = cachedPrice
+			end
+		end
+	end
+	setRobuxHoverPrice(amount, price)
+end
+
+local function applyOfficialRobuxPriceIfCurrent(productId: number, price: number?)
+	local amount = robuxHoveredAmount
+	local shelf = robuxShelf
+	local itemId = selectedItemId
+	if not price
+		or not amount
+		or selectedMode ~= "Robux"
+		or not shelf
+		or not shelf.Visible
+		or not itemId
+		or SeedIAPConfig.GetProductId(itemId, amount) ~= productId
+	then
+		return
+	end
+	setRobuxHoverPrice(amount, price)
+end
+
+-- 异步读取并按商品 ID 缓存官方种子售价；回调只更新仍匹配当前悬浮上下文的共享按钮。
+local function requestOfficialRobuxPrice(productId: number)
+	if robuxPriceFetchInFlight[productId] or robuxOfficialPriceByProductId[productId] ~= nil then
+		return
+	end
+	robuxPriceFetchInFlight[productId] = true
+	task.spawn(function()
+		local succeeded, productInfo = pcall(function()
+			return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
+		end)
+		local resolvedPrice: number? = nil
+		if succeeded and type(productInfo) == "table" then
+			local price = productInfo.PriceInRobux
+			if isPositiveInteger(price) then
+				resolvedPrice = price :: number
+			end
+		end
+		robuxPriceFetchInFlight[productId] = nil
+		robuxOfficialPriceByProductId[productId] = resolvedPrice or false
+		applyOfficialRobuxPriceIfCurrent(productId, resolvedPrice)
+	end)
+end
+
+local function beginRobuxPriceHover(amount: number)
+	local shelf = robuxShelf
+	local itemId = selectedItemId
+	if selectedMode ~= "Robux"
+		or not shelf
+		or not shelf.Visible
+		or not itemId
+		or not robuxButtonTextByAmount[amount]
+	then
+		return
+	end
+	local previousAmount = robuxHoveredAmount
+	if previousAmount and previousAmount ~= amount then
+		setRobuxPackText(previousAmount)
+	end
+	robuxHoveredAmount = amount
+	refreshRobuxHoverPrice(amount)
+	if not SeedIAPConfig.UseMarketplacePurchases then
+		return
+	end
+	local productId = SeedIAPConfig.GetProductId(itemId, amount)
+	if not productId then
+		return
+	end
+	if robuxOfficialPriceByProductId[productId] == nil then
+		requestOfficialRobuxPrice(productId)
+	end
+end
+
+local function endRobuxPriceHover(amount: number)
+	if robuxHoveredAmount ~= amount then
+		return
+	end
+	robuxHoveredAmount = nil
+	setRobuxPackText(amount)
+end
+
 local function refreshPurchaseAvailability()
 	local itemId = selectedItemId
 	local definition = itemId and ItemConfig.Get(itemId) or nil
@@ -367,7 +629,11 @@ local function refreshPurchaseAvailability()
 		if button then
 			local label = getButtonDisplayLabel(button, "TextDisplay")
 			if label then
-				setLayeredText(label, string.format("x%d", amount))
+				if robuxHoveredAmount == amount then
+					refreshRobuxHoverPrice(amount)
+				else
+					setLayeredText(label, string.format("x%d", amount))
+				end
 			end
 			local configured = itemId ~= nil
 				and (not SeedIAPConfig.UseMarketplacePurchases or SeedIAPConfig.GetProductId(itemId :: string, amount) ~= nil)
@@ -430,10 +696,15 @@ local function showSelectedShelf()
 	local row = itemId and itemRows[itemId] or nil
 	local coins = shecklesShelf
 	local robux = robuxShelf
+	refreshSeedTags(if row and coins and robux then itemId else nil)
 	if not row or not coins or not robux then
+		clearRobuxPriceHover()
 		if coins then coins.Visible = false end
 		if robux then robux.Visible = false end
 		return
+	end
+	if selectedMode ~= "Robux" then
+		clearRobuxPriceHover()
 	end
 	local shelfOrder = row.LayoutOrder + 1
 	coins.LayoutOrder = shelfOrder
@@ -445,8 +716,10 @@ local function showSelectedShelf()
 end
 
 local function selectItem(itemId: string)
+	clearRobuxPriceHover()
 	if selectedItemId == itemId then
 		selectedItemId = nil
+		refreshSeedTags(nil)
 		if shecklesShelf then shecklesShelf.Visible = false end
 		if robuxShelf then robuxShelf.Visible = false end
 		return
@@ -522,7 +795,10 @@ local function bindShelves()
 	end
 	coins.Visible = false
 	robux.Visible = false
+	bindSeedTags(coins)
 	hideGiftButtons(robux)
+	table.clear(robuxButtonTextByAmount)
+	robuxHoveredAmount = nil
 
 	local coinButton = getShelfButton(coins, SeedShopConfig.CoinBuyButtonName)
 	if coinButton then
@@ -556,12 +832,24 @@ local function bindShelves()
 		local button = getShelfButton(robux, buttonName)
 		if button then
 			local stableAmount = amount
+			local label = getButtonDisplayLabel(button, "TextDisplay")
+			if label then
+				robuxButtonTextByAmount[stableAmount] = label
+			else
+				warn(string.format("[SeedShopController] %s.TextDisplay.TextLabel is missing", buttonName))
+			end
 			button.Activated:Connect(function()
 				local itemId = selectedItemId
 				local remote = requestProductPurchase
 				if itemId and remote then
 					remote:FireServer({ ItemId = itemId, Amount = stableAmount })
 				end
+			end)
+			button.MouseEnter:Connect(function()
+				beginRobuxPriceHover(stableAmount)
+			end)
+			button.MouseLeave:Connect(function()
+				endRobuxPriceHover(stableAmount)
 			end)
 		end
 	end
@@ -719,6 +1007,7 @@ function SeedShopController.Init(dependencies: {
 		shopSessionVersion += 1
 		clearShopContext()
 		endRestockPriceHover()
+		clearRobuxPriceHover()
 		screen.Enabled = false
 		InterfaceVisualController.Close(screen)
 	end
@@ -736,6 +1025,7 @@ function SeedShopController.Init(dependencies: {
 		local session = shopSessionVersion
 		clearShopContext()
 		endRestockPriceHover()
+		clearRobuxPriceHover()
 		screen.Enabled = true
 		InterfaceVisualController.Open(screen)
 		requestState:FireServer()

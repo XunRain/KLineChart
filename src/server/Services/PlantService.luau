@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块按品种放置偏移生成已验证预制植物与挂点果实，并管理恢复、所有者和收获提示。
+-- 本模块按品种放置偏移生成已验证预制植物与挂点果实，并管理恢复、所有者及权威成熟属性。
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -109,7 +109,10 @@ end
 
 local function validateFruitTemplate(template: Model): (boolean, string?)
 	local root = template:FindFirstChild("Root")
-	if not root or not root:IsA("BasePart") or template.PrimaryPart ~= root then
+	if not root
+		or not root:IsA("BasePart")
+		or (template.PrimaryPart ~= nil and template.PrimaryPart ~= root)
+	then
 		return false, "InvalidFruitModelRoot"
 	end
 	local visual = template:FindFirstChild("Visual")
@@ -117,10 +120,37 @@ local function validateFruitTemplate(template: Model): (boolean, string?)
 		return false, "InvalidFruitVisual"
 	end
 	local visualRoot = visual:FindFirstChild("VisualRoot")
-	if not visualRoot or not visualRoot:IsA("BasePart") or visual.PrimaryPart ~= visualRoot then
+	if not visualRoot
+		or not visualRoot:IsA("BasePart")
+		or (visual.PrimaryPart ~= nil and visual.PrimaryPart ~= visualRoot)
+	then
 		return false, "InvalidFruitVisualRoot"
 	end
 	return true
+end
+
+-- 在运行时克隆件上补齐标准果实定位根，并固定为不可见、无碰撞辅助件。
+local function configureRuntimeFruitRoots(fruit: Model): (boolean, string?)
+	local valid, reason = validateFruitTemplate(fruit)
+	if not valid then
+		return false, reason
+	end
+	local root = fruit:FindFirstChild("Root")
+	local visual = fruit:FindFirstChild("Visual")
+	if not root or not root:IsA("BasePart") or not visual or not visual:IsA("Model") then
+		return false, "InvalidFruitRuntimeContract"
+	end
+	local visualRoot = visual:FindFirstChild("VisualRoot")
+	if not visualRoot or not visualRoot:IsA("BasePart") then
+		return false, "InvalidFruitRuntimeContract"
+	end
+	fruit.PrimaryPart = root
+	visual.PrimaryPart = visualRoot
+	root.Transparency = 1
+	root.CanCollide = false
+	visualRoot.Transparency = 1
+	visualRoot.CanCollide = false
+	return true, nil
 end
 
 local function prepareRuntimeParts(model: Model)
@@ -591,62 +621,10 @@ local function collectFruitSlots(bodyRoot: BasePart): { Attachment }
 	return slots
 end
 
--- 将服务端收获 Prompt 统一配置为带稳定目标契约的全局排他透明交互。
-local function configureHarvestPrompt(
-	prompt: ProximityPrompt,
-	player: Player,
-	record: PlantRecord,
-	definition: ItemConfig.ItemDefinition,
-	targetKind: HarvestPromptConfig.HarvestTargetKind
-)
-	prompt.Name = HarvestPromptConfig.PromptName
-	prompt.Style = HarvestPromptConfig.Style
-	prompt.Exclusivity = HarvestPromptConfig.Exclusivity
-	prompt.KeyboardKeyCode = HarvestPromptConfig.KeyboardKeyCode
-	prompt.GamepadKeyCode = HarvestPromptConfig.GamepadKeyCode
-	prompt.ActionText = HarvestPromptConfig.ActionText
-	prompt.ObjectText = ""
-	prompt.HoldDuration = HarvestPromptConfig.HoldDuration
-	prompt.ClickablePrompt = true
-	prompt.MaxActivationDistance = ItemConfig.Limits.HarvestDistance
-	prompt.RequiresLineOfSight = false
-	prompt:SetAttribute("PlantRecordId", record.recordId)
-	prompt:SetAttribute(HarvestPromptConfig.OwnerUserIdAttribute, player.UserId)
-	prompt:SetAttribute(HarvestPromptConfig.PlantIdAttribute, definition.Id)
-	prompt:SetAttribute(HarvestPromptConfig.TargetKindAttribute, targetKind)
-	prompt:SetAttribute(HarvestPromptConfig.PromptMarkerAttribute, true)
-end
-
-local function ensureFruitPrompt(fruit: Model, player: Player, record: PlantRecord, definition: ItemConfig.ItemDefinition): ProximityPrompt?
-	local root = fruit.PrimaryPart or fruit:FindFirstChild("Root")
-	if not root or not root:IsA("BasePart") then
-		return nil
-	end
-	local prompt = root:FindFirstChild("HarvestPrompt")
-	if prompt and not prompt:IsA("ProximityPrompt") then
-		prompt:Destroy()
-		prompt = nil
-	end
-	local promptInstance: ProximityPrompt
-	if prompt and prompt:IsA("ProximityPrompt") then
-		promptInstance = prompt
-	else
-		promptInstance = Instance.new("ProximityPrompt")
-		promptInstance.Enabled = false
-		promptInstance.Parent = root
-	end
-	configureHarvestPrompt(promptInstance, player, record, definition, HarvestPromptConfig.TargetKinds.Fruit)
-	promptInstance:SetAttribute("FruitSlotIndex", fruit:GetAttribute("FruitSlotIndex"))
-	return promptInstance
-end
-
 local function addRuntimeFruits(
 	model: Model,
 	bodyRoot: BasePart,
-	fruitTemplate: Model,
-	player: Player,
-	record: PlantRecord,
-	definition: ItemConfig.ItemDefinition
+	fruitTemplate: Model
 ): (boolean, string?)
 	local slots = collectFruitSlots(bodyRoot)
 	if #slots == 0 then
@@ -666,10 +644,16 @@ local function addRuntimeFruits(
 	container.Parent = model
 	for index, slot in slots do
 		local fruit = fruitTemplate:Clone()
+		local configured, configureReason = configureRuntimeFruitRoots(fruit)
+		if not configured then
+			fruit:Destroy()
+			return false, configureReason or "InvalidFruitRuntimeContract"
+		end
 		fruit.Name = slot.Name
-		fruit:SetAttribute("KLineFruitVisual", true)
+		fruit:SetAttribute(HarvestPromptConfig.RuntimeFruitMarkerAttribute, true)
 		fruit:SetAttribute("FruitSlotName", slot.Name)
-		fruit:SetAttribute("FruitSlotIndex", index)
+		fruit:SetAttribute(HarvestPromptConfig.FruitSlotIndexAttribute, index)
+		fruit:SetAttribute(HarvestPromptConfig.FruitMatureAttribute, false)
 		prepareRuntimeParts(fruit)
 		for _, descendant in fruit:GetDescendants() do
 			if descendant:IsA("BasePart") then
@@ -681,7 +665,6 @@ local function addRuntimeFruits(
 		end
 		fruit.Parent = container
 		fruit:PivotTo(slot.WorldCFrame)
-		ensureFruitPrompt(fruit, player, record, definition)
 	end
 	return true
 end
@@ -700,8 +683,8 @@ local function forEachRuntimeFruit(model: Model, callback: (Model, number) -> ()
 		return
 	end
 	for _, child in container:GetChildren() do
-		if child:IsA("Model") and child:GetAttribute("KLineFruitVisual") == true then
-			local slotIndex = child:GetAttribute("FruitSlotIndex")
+		if child:IsA("Model") and child:GetAttribute(HarvestPromptConfig.RuntimeFruitMarkerAttribute) == true then
+			local slotIndex = child:GetAttribute(HarvestPromptConfig.FruitSlotIndexAttribute)
 			if type(slotIndex) == "number" and slotIndex > 0 and slotIndex == math.floor(slotIndex) then
 				callback(child, slotIndex)
 			end
@@ -723,15 +706,10 @@ local function setRepeatAttributes(model: Model, record: PlantRecord, definition
 	forEachRuntimeFruit(model, function(fruit, slotIndex)
 		local mature = type(state.MatureSlots) == "table" and state.MatureSlots[slotIndex] == true
 		local growing = state.GrowingSlot == slotIndex
-		fruit:SetAttribute("FruitMature", mature)
+		fruit:SetAttribute(HarvestPromptConfig.FruitMatureAttribute, mature)
 		fruit:SetAttribute("FruitGrowing", growing)
 		fruit:SetAttribute("FruitNextReadyAt", if growing then state.NextFruitAt else 0)
 		setModelCollisionVisible(fruit, mature or growing)
-		local root = fruit.PrimaryPart
-		local prompt = root and root:FindFirstChild("HarvestPrompt")
-		if prompt and prompt:IsA("ProximityPrompt") then
-			prompt.Enabled = mature
-		end
 	end)
 end
 
@@ -801,11 +779,14 @@ local function buildPrefab(player: Player, record: PlantRecord, worldPosition: V
 	model:SetAttribute("NextHarvestAt", record.nextHarvestAt)
 	model:SetAttribute("HarvestType", definition.HarvestType)
 	model:SetAttribute("HarvestCount", record.harvestCount)
+	model:SetAttribute(
+		HarvestPromptConfig.HarvestReadyAttribute,
+		definition.HarvestType == "Single" and PlantGrowthService.IsHarvestable(record.nextHarvestAt, os.time())
+	)
 
 	prepareRuntimeParts(model)
 	local placedPosition = worldPosition + Vector3.new(0, definition.PlacementOffsetY, 0)
 	model:PivotTo(CFrame.new(placedPosition) * CFrame.Angles(0, math.rad(record.rotationY), 0))
-	local root = model.PrimaryPart :: BasePart
 	local body = model:FindFirstChild("Body") :: Model
 	local bodyRoot = body.PrimaryPart :: BasePart
 	body:SetAttribute("KLinePlantBody", true)
@@ -814,7 +795,7 @@ local function buildPrefab(player: Player, record: PlantRecord, worldPosition: V
 	createPlantTruss(model, body, bodyRoot, definition, growthProgress >= 1)
 	body:ScaleTo(getInitialBodyScale(record, definition, now))
 	if fruitTemplate then
-		local added, fruitReason = addRuntimeFruits(model, bodyRoot, fruitTemplate, player, record, definition)
+		local added, fruitReason = addRuntimeFruits(model, bodyRoot, fruitTemplate)
 		if not added then
 			model:Destroy()
 			return nil, fruitReason
@@ -828,15 +809,6 @@ local function buildPrefab(player: Player, record: PlantRecord, worldPosition: V
 		model:SetAttribute("FruitNextReadyAt", nil)
 	end
 
-	local prompt = Instance.new("ProximityPrompt")
-	configureHarvestPrompt(prompt, player, record, definition, HarvestPromptConfig.TargetKinds.Plant)
-	if definition.HarvestType == "Repeat" then
-		prompt.Enabled = false
-	else
-		prompt.Enabled = PlantGrowthService.IsHarvestable(record.nextHarvestAt, os.time())
-	end
-	prompt.Parent = root
-
 	return model
 end
 
@@ -848,6 +820,27 @@ end
 -- 按植物记录标识返回其玩家所有者，未注册时返回 nil。
 function PlantService.GetOwner(recordId: string): Player?
 	return ownerByRecord[recordId]
+end
+
+-- 按记录与正整数槽编号返回当前运行时果实，供服务端收获入口核对确切成熟目标。
+function PlantService.GetRuntimeFruit(recordId: string, slotIndex: number): Model?
+	if slotIndex <= 0 or slotIndex ~= math.floor(slotIndex) then
+		return nil
+	end
+	local model = modelsByRecord[recordId]
+	local container = model and model:FindFirstChild("RuntimeFruits")
+	if not container or not container:IsA("Folder") then
+		return nil
+	end
+	for _, child in container:GetChildren() do
+		if child:IsA("Model")
+			and child:GetAttribute(HarvestPromptConfig.RuntimeFruitMarkerAttribute) == true
+			and child:GetAttribute(HarvestPromptConfig.FruitSlotIndexAttribute) == slotIndex
+		then
+			return child
+		end
+	end
+	return nil
 end
 
 -- 根据权威植物记录克隆并验证预制模型，再注册模型与所有者映射。
@@ -923,7 +916,7 @@ function PlantService.RemoveRecord(recordId: string)
 	end
 end
 
--- 将权威成长记录同步到运行时属性、果实槽、收获 Prompt 与攀爬碰撞，不在事务外修改存档记录。
+-- 将权威成长记录同步到运行时属性、果实槽、成熟状态与攀爬碰撞，不在事务外修改存档记录。
 function PlantService.SyncGrowthRecord(record: PlantRecord): boolean
 	local model = modelsByRecord[record.recordId]
 	if not model then
@@ -953,13 +946,10 @@ function PlantService.SyncGrowthRecord(record: PlantRecord): boolean
 		}
 		setRepeatAttributes(model, visualRecord, definition, slotCount, os.time())
 	end
-	local root = model.PrimaryPart
-	local prompt = root and root:FindFirstChild("HarvestPrompt")
-	if prompt and prompt:IsA("ProximityPrompt") then
-		prompt.Enabled = if definition.HarvestType == "Repeat"
-			then false
-			else PlantGrowthService.IsHarvestable(record.nextHarvestAt, os.time())
-	end
+	model:SetAttribute(
+		HarvestPromptConfig.HarvestReadyAttribute,
+		definition.HarvestType == "Single" and PlantGrowthService.IsHarvestable(record.nextHarvestAt, os.time())
+	)
 	updatePlantTrussCollision(model, definition, os.time())
 	return true
 end
@@ -988,20 +978,18 @@ function PlantService.Init(dependencies: { PlotService: any, PlayerDataService: 
 	PlayerDataService = dependencies.PlayerDataService
 end
 
--- 启动服务端循环，按配置间隔刷新所有植物的收获提示可用状态。
+-- 启动服务端循环，按配置间隔推进重复果实并刷新成熟状态与攀爬碰撞。
 function PlantService.Start()
 	task.spawn(function()
 		while true do
 			local now = os.time()
 			for recordId, model in modelsByRecord do
-				local prompt = model.PrimaryPart and model.PrimaryPart:FindFirstChild("HarvestPrompt")
 				local plantId = model:GetAttribute("PlantId")
 				local definition = if type(plantId) == "string" then ItemConfig.Get(plantId) else nil
 				if definition then
 					updatePlantTrussCollision(model, definition, now)
-				end
-				if prompt and prompt:IsA("ProximityPrompt") and definition then
 					if definition.HarvestType == "Repeat" then
+						model:SetAttribute(HarvestPromptConfig.HarvestReadyAttribute, false)
 						local slotCount = getFruitSlotCount(model)
 						local fruitCount = model:GetAttribute("FruitCount")
 						local nextFruitAt = model:GetAttribute("FruitNextReadyAt")
@@ -1044,11 +1032,13 @@ function PlantService.Start()
 								warn(string.format("[PlantService] 重复结果推进失败 %s: %s", recordId, tostring(reason)))
 							end
 						end
-						prompt.Enabled = false
 					else
 						local nextHarvestAt = model:GetAttribute("NextHarvestAt")
 						if type(nextHarvestAt) == "number" then
-							prompt.Enabled = PlantGrowthService.IsHarvestable(nextHarvestAt, now)
+							model:SetAttribute(
+								HarvestPromptConfig.HarvestReadyAttribute,
+								PlantGrowthService.IsHarvestable(nextHarvestAt, now)
+							)
 						end
 					end
 				end

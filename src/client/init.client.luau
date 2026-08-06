@@ -2,6 +2,10 @@
 
 -- 本客户端入口按依赖顺序初始化通用界面视觉、通知、扩地、商店、传送、测试菜单与植物交互表现控制器。
 
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local OpeningConfig = require(ReplicatedStorage.Shared.OpeningConfig)
 local Services = script.Services
 
 local AudioController = require(Services.AudioController)
@@ -70,3 +74,4 @@ TopbarController.Init({
 	BackpackController = BackpackController,
 	TestMenuController = TestMenuController,
 })
+Players.LocalPlayer:SetAttribute(OpeningConfig.Attributes.ClientControllersReady, true)

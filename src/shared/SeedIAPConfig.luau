@@ -17,7 +17,7 @@ SeedIAPConfig.PackAmounts = { 1, 3, 10 }
 SeedIAPConfig.ProductIds = {
 	Carrot = { [1] = 0, [3] = 0, [10] = 0 },
 	Strawberry = { [1] = 0, [3] = 0, [10] = 0 },
-	Blueberry = { [1] = 0, [3] = 0, [10] = 0 },
+	Eggplant = { [1] = 0, [3] = 0, [10] = 0 },
 	Tulip = { [1] = 0, [3] = 0, [10] = 0 },
 	Tomato = { [1] = 0, [3] = 0, [10] = 0 },
 	Apple = { [1] = 0, [3] = 0, [10] = 0 },
@@ -28,7 +28,7 @@ SeedIAPConfig.ProductIds = {
 SeedIAPConfig.TargetPrices = {
 	Carrot = { [1] = 3, [3] = 9, [10] = 30 },
 	Strawberry = { [1] = 7, [3] = 21, [10] = 70 },
-	Blueberry = { [1] = 12, [3] = 36, [10] = 120 },
+	Eggplant = { [1] = 12, [3] = 36, [10] = 120 },
 	Tulip = { [1] = 4, [3] = 12, [10] = 40 },
 	Tomato = { [1] = 15, [3] = 45, [10] = 150 },
 	Apple = { [1] = 29, [3] = 87, [10] = 290 },

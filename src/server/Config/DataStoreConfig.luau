@@ -7,8 +7,8 @@ return {
 	Name = "KLineChart_PlayerData_v1",
 	-- 玩家数据键前缀，最终键为该值拼接 UserId；随意修改等同于更换全部线上玩家的数据键。
 	KeyPrefix = "Player_",
-	-- 当前存档结构版本 6；v1-v5 会完整保留既有字段且缺 Tutorial 时视为已完成，只有全新 v6 档默认进入教程。
-	SchemaVersion = 6,
+	-- 当前存档结构版本 7；v1-v6 会迁移旧品种标识并完整保留既有字段，缺 Tutorial 时视为已完成，只有全新 v7 档默认进入教程。
+	SchemaVersion = 7,
 	-- 自动保存并刷新会话锁心跳的间隔，单位为秒；必须明显短于 SessionLockTimeout。
 	AutoSaveInterval = 60,
 	-- 业务请求保存后的合并等待时间，单位为秒，用于降低连续变更造成的 DataStore 写入压力。

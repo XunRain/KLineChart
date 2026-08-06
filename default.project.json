@@ -3,6 +3,13 @@
   "tree": {
     "$className": "DataModel",
 
+    "ReplicatedFirst": {
+      "$ignoreUnknownInstances": true,
+      "KLineOpening": {
+        "$path": "src/replicatedFirst/OpeningController.client.luau"
+      }
+    },
+
     "ReplicatedStorage": {
       "$ignoreUnknownInstances": true,
       "Shared": {

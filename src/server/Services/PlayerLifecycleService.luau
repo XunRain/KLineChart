@@ -3,6 +3,9 @@
 -- 本模块编排玩家加入、角色重生与离开时的数据、地块、库存和植物生命周期。
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local OpeningConfig = require(ReplicatedStorage.Shared.OpeningConfig)
 
 local PlayerLifecycleService = {}
 local PlayerDataService: any
@@ -31,6 +34,7 @@ local function loadPlayer(player: Player)
 		return
 	end
 	loadingPlayers[player] = true
+	player:SetAttribute(OpeningConfig.Attributes.Ready, false)
 	local loaded, loadReason = PlayerDataService.Load(player)
 	if not loaded then
 		loadingPlayers[player] = nil
@@ -75,6 +79,16 @@ local function loadPlayer(player: Player)
 			if PlayerDataService.IsLoaded(player) then
 				PlotService.PlaceCharacter(player, character)
 				InventoryService.Sync(player)
+				local root = character:FindFirstChild("HumanoidRootPart")
+				if player.Parent == Players
+					and player.Character == character
+					and character.Parent ~= nil
+					and root ~= nil
+					and root:IsA("BasePart")
+					and PlotService.GetSpawnPoint(player) ~= nil
+				then
+					player:SetAttribute(OpeningConfig.Attributes.Ready, true)
+				end
 			end
 		end)
 	end

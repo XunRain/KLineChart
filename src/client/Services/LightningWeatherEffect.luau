@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块播放模板参数的雷暴降雨、环境雨声、同步雷柱、命中辉光与空间雷声，不产生伤害。
+-- 本模块播放模板参数的雷暴降雨、同步雷柱、命中辉光与空间雷声，不产生伤害。
 
 local Debris = game:GetService("Debris")
 local SoundService = game:GetService("SoundService")
@@ -18,8 +18,6 @@ type VisiblePart = {
 local LightningWeatherEffect = {}
 local active = false
 local activeFolder: Folder? = nil
-local ambientRain: Sound? = nil
-local ambientTween: Tween? = nil
 local warned: { [string]: boolean } = {}
 local random = Random.new()
 
@@ -73,52 +71,6 @@ end
 local function findWeatherSfx(name: string): Instance?
 	local weatherSfx = SoundService:FindFirstChild("WeatherSFX")
 	return if weatherSfx then weatherSfx:FindFirstChild(name) else nil
-end
-
-local function startAmbientRain()
-	local source = findWeatherSfx("Rain")
-	if not source or not source:IsA("Sound") then
-		warnOnce("RainSound", "缺少 SoundService.WeatherSFX.Rain，雷暴仍保留雨滴与雷击表现。")
-		return
-	end
-	local sound = source:Clone() :: Sound
-	sound.Name = "ActiveLightningRain"
-	sound.Looped = true
-	sound.Volume = 0
-	sound.TimePosition = 0
-	sound.Parent = SoundService
-	ambientRain = sound
-	sound:Play()
-	ambientTween = TweenService:Create(sound, TweenInfo.new(2, Enum.EasingStyle.Sine), {
-		Volume = 0.5,
-	})
-	ambientTween:Play()
-end
-
-local function stopAmbientRain()
-	local sound = ambientRain
-	ambientRain = nil
-	local tween = ambientTween
-	ambientTween = nil
-	if tween then
-		tween:Cancel()
-		tween:Destroy()
-	end
-	if not sound or not sound.Parent then
-		return
-	end
-	local fade = TweenService:Create(sound, TweenInfo.new(2, Enum.EasingStyle.Sine), {
-		Volume = 0,
-	})
-	fade:Play()
-	fade.Completed:Once(function()
-		fade:Destroy()
-		if sound.Parent then
-			sound:Stop()
-			sound.TimePosition = 0
-			sound:Destroy()
-		end
-	end)
 end
 
 local function createVisualPart(parent: Instance, name: string, size: Vector3, color: Color3, transparency: number): BasePart
@@ -314,7 +266,7 @@ local function isFiniteVector3(position: Vector3): boolean
 		and math.abs(position.Z) < math.huge
 end
 
--- 启动雷暴降雨和两秒淡入的环境雨声；重复调用不会创建重复循环或声音。
+-- 启动雷暴降雨与雷击表现；环境雨声由 AudioController 按天气统一管理。
 function LightningWeatherEffect.Start()
 	if active then
 		return
@@ -322,17 +274,15 @@ function LightningWeatherEffect.Start()
 	active = true
 	createActiveFolder()
 	RainWeatherEffect.Start("Lightning")
-	startAmbientRain()
 end
 
--- 停止雷暴并清理降雨、雷柱及环境声；已触发的淡出声音会在两秒后销毁。
+-- 停止雷暴并清理降雨与雷柱；环境雨声由 AudioController 按天气统一管理。
 function LightningWeatherEffect.Stop()
-	if not active and not activeFolder and not ambientRain then
+	if not active and not activeFolder then
 		return
 	end
 	active = false
 	RainWeatherEffect.Stop()
-	stopAmbientRain()
 	local folder = activeFolder
 	activeFolder = nil
 	if folder then

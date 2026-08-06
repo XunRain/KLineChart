@@ -82,6 +82,10 @@ local store = DataStoreService:GetDataStore(DataStoreConfig.Name)
 local cache: { [Player]: CacheEntry } = {}
 local studioMemory: { [string]: any } = {}
 local shuttingDown = false
+local LEGACY_BLUEBERRY_SCHEMA_MAX = 6
+local LEGACY_BLUEBERRY_ITEM_ID = "Blueberry"
+local EGGPLANT_ITEM_ID = "Eggplant"
+local MAX_SAFE_INTEGER = 9007199254740991
 
 local function deepCopy(value: any): any
 	if type(value) ~= "table" then
@@ -139,6 +143,69 @@ local function finiteNumber(value: any, fallback: number): number
 	return fallback
 end
 
+local function safeNonNegativeInteger(value: any, maximum: number): number
+	return math.clamp(math.floor(finiteNumber(value, 0)), 0, maximum)
+end
+
+local function mergeLegacyInventoryCount(counts: any, maximum: number)
+	if type(counts) ~= "table" or counts[LEGACY_BLUEBERRY_ITEM_ID] == nil then
+		return
+	end
+	local currentCount = safeNonNegativeInteger(counts[EGGPLANT_ITEM_ID], maximum)
+	local legacyCount = safeNonNegativeInteger(counts[LEGACY_BLUEBERRY_ITEM_ID], maximum)
+	counts[EGGPLANT_ITEM_ID] = math.min(maximum, currentCount + legacyCount)
+	counts[LEGACY_BLUEBERRY_ITEM_ID] = nil
+end
+
+local function migrateLegacyHotbarKey(value: string): string
+	local legacySeedKey = "Seed:" .. LEGACY_BLUEBERRY_ITEM_ID
+	if value == legacySeedKey then
+		return "Seed:" .. EGGPLANT_ITEM_ID
+	end
+	local legacyFruitPrefix = "Fruit:" .. LEGACY_BLUEBERRY_ITEM_ID
+	local suffix = string.sub(value, #legacyFruitPrefix + 1)
+	if string.sub(value, 1, #legacyFruitPrefix) == legacyFruitPrefix
+		and (suffix == "" or string.sub(suffix, 1, 1) == ":")
+	then
+		return "Fruit:" .. EGGPLANT_ITEM_ID .. suffix
+	end
+	return value
+end
+
+-- 在 ItemConfig 过滤未知键前，将 v1-v6 的旧蓝莓标识幂等迁移到茄子。
+local function migrateLegacyBlueberryData(raw: any)
+	if type(raw) ~= "table" then
+		return
+	end
+	if type(raw.Inventory) == "table" then
+		mergeLegacyInventoryCount(raw.Inventory.Seeds, EconomyConfig.MaximumSeedInventory)
+		mergeLegacyInventoryCount(raw.Inventory.Produce, MAX_SAFE_INTEGER)
+		if type(raw.Inventory.HotbarLayout) == "table" then
+			for slot, value in raw.Inventory.HotbarLayout do
+				if type(value) == "string" then
+					raw.Inventory.HotbarLayout[slot] = migrateLegacyHotbarKey(value)
+				end
+			end
+		end
+	end
+	if type(raw.Plants) == "table" then
+		for _, record in raw.Plants do
+			if type(record) == "table" and record.plantId == LEGACY_BLUEBERRY_ITEM_ID then
+				record.plantId = EGGPLANT_ITEM_ID
+			end
+		end
+	end
+	if type(raw.SeedShopPaidStockSnapshot) == "table"
+		and type(raw.SeedShopPaidStockSnapshot.Stock) == "table"
+	then
+		local stock = raw.SeedShopPaidStockSnapshot.Stock
+		if stock[EGGPLANT_ITEM_ID] == nil then
+			stock[EGGPLANT_ITEM_ID] = stock[LEGACY_BLUEBERRY_ITEM_ID]
+		end
+		stock[LEGACY_BLUEBERRY_ITEM_ID] = nil
+	end
+end
+
 local function maxExpansionLevel(): number
 	local maximum = 0
 	for _, level in PlotExpansionConfig.Levels do
@@ -154,6 +221,9 @@ local function normalize(raw: any): PlayerData
 	local rawTutorial = if type(raw) == "table" then raw.Tutorial else nil
 	if rawWasMissing then
 		raw = {}
+	end
+	if not rawWasMissing and rawVersion <= LEGACY_BLUEBERRY_SCHEMA_MAX then
+		migrateLegacyBlueberryData(raw)
 	end
 	reconcile(raw, defaultData())
 
@@ -173,7 +243,7 @@ local function normalize(raw: any): PlayerData
 			Skipped = completed and rawTutorial.Skipped == true,
 		}
 	elseif not rawWasMissing and rawVersion < DataStoreConfig.SchemaVersion then
-		-- v1-v5 老档没有教程字段时直接完成，避免上线后强迫既有玩家重走新手流程。
+		-- v1-v6 老档没有教程字段时直接完成，避免上线后强迫既有玩家重走新手流程。
 		normalized.Tutorial = {
 			Version = TutorialConfig.Version,
 			Step = TutorialConfig.Steps.Completed,

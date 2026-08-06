@@ -36,6 +36,7 @@ local initialized = false
 local shuttingDown = false
 local refreshRunning = false
 local refreshQueued = false
+local liveBroadcastScheduled = false
 local isStudio = RunService:IsStudio()
 
 local BOARD_IDS: { BoardId } = { "Coins", "Playtime", "Stock" }
@@ -185,13 +186,7 @@ local function writeBoardValue(boardId: BoardId, userId: number, value: number):
 	return false
 end
 
-local function getPlayerMetrics(player: Player, session: PlayerSession): (number, number)
-	local snapshot = PlayerDataService.GetSnapshot(player)
-	if not snapshot then
-		return session.LastCoins, session.LastStock
-	end
-
-	local coins = safeInteger(snapshot.Sheckles)
+local function stockFromSnapshot(snapshot: any): number
 	local stock = 0
 	local inventory = snapshot.Inventory
 	local produce = if type(inventory) == "table" and type(inventory.Produce) == "table"
@@ -202,9 +197,17 @@ local function getPlayerMetrics(player: Player, session: PlayerSession): (number
 			stock = math.min(LeaderboardConfig.MaximumValue, stock + safeInteger(produce[itemId]))
 		end
 	end
-	session.LastCoins = coins
-	session.LastStock = stock
-	return coins, stock
+	return stock
+end
+
+local function readPlayerMetrics(player: Player, session: PlayerSession): (number, number)
+	local snapshot = PlayerDataService.GetSnapshot(player)
+	if not snapshot then
+		return session.LastCoins, session.LastStock
+	end
+
+	local coins = safeInteger(snapshot.Sheckles)
+	return coins, stockFromSnapshot(snapshot)
 end
 
 local function currentPlaytime(session: PlayerSession): number
@@ -252,7 +255,7 @@ local function writePlayerMetrics(player: Player, waitForBusy: boolean): boolean
 	end
 
 	local callOk, allWritten = pcall(function(): boolean
-		local coins, stock = getPlayerMetrics(player, session)
+		local coins, stock = readPlayerMetrics(player, session)
 		local coinsWritten = writeBoardValue("Coins", player.UserId, coins)
 		local stockWritten = writeBoardValue("Stock", player.UserId, stock)
 		local playtimeReady = ensurePlaytimeBase(player, session)
@@ -358,13 +361,53 @@ local function refreshBoard(boardId: BoardId)
 	hasRankedSnapshot[boardId] = true
 end
 
-local function selfRankText(boardId: BoardId, userId: number): string
-	for _, entry in rankedEntries[boardId] do
+-- 复制最近持久榜并覆盖本服在线会话，生成不会污染共享快照的稳定 Stock 视图。
+local function buildLiveStockEntries(): { RankedEntry }
+	local entriesByUserId: { [number]: RankedEntry } = {}
+	for _, entry in rankedEntries.Stock do
+		if not entriesByUserId[entry.UserId] then
+			entriesByUserId[entry.UserId] = {
+				Rank = 0,
+				UserId = entry.UserId,
+				UserName = entry.UserName,
+				Value = entry.Value,
+			}
+		end
+	end
+	for onlinePlayer, session in sessions do
+		if not session.Closing and onlinePlayer.Parent == Players then
+			entriesByUserId[onlinePlayer.UserId] = {
+				Rank = 0,
+				UserId = onlinePlayer.UserId,
+				UserName = onlinePlayer.Name,
+				Value = session.LastStock,
+			}
+		end
+	end
+
+	local entries: { RankedEntry } = {}
+	for _, entry in entriesByUserId do
+		table.insert(entries, entry)
+	end
+	table.sort(entries, function(left, right)
+		return if left.Value == right.Value then left.UserId < right.UserId else left.Value > right.Value
+	end)
+	while #entries > LeaderboardConfig.QueryCount do
+		table.remove(entries)
+	end
+	for rank, entry in entries do
+		entry.Rank = rank
+	end
+	return entries
+end
+
+local function selfRankText(boardId: BoardId, entries: { RankedEntry }, userId: number): string
+	for _, entry in entries do
 		if entry.UserId == userId then
 			return "#" .. tostring(entry.Rank)
 		end
 	end
-	return if hasRankedSnapshot[boardId]
+	return if hasRankedSnapshot[boardId] or boardId == "Stock" and #entries > 0
 		then "#" .. tostring(LeaderboardConfig.QueryCount) .. "+"
 		else "—"
 end
@@ -375,21 +418,23 @@ local function currentBoardValue(boardId: BoardId, player: Player): number?
 		return nil
 	end
 	if boardId == "Coins" then
-		local coins = getPlayerMetrics(player, session)
+		local coins = readPlayerMetrics(player, session)
 		return coins
 	elseif boardId == "Stock" then
-		local _, stock = getPlayerMetrics(player, session)
-		return stock
+		return session.LastStock
 	end
 	return if session.HasSafePlaytimeBase then currentPlaytime(session) else nil
 end
 
-local function makeStateForPlayer(player: Player): { [string]: any }
+local function makeStateForPlayer(player: Player, liveStockEntries: { RankedEntry }?): { [string]: any }
 	local boards = {}
 	for _, boardId in BOARD_IDS do
+		local sourceEntries = if boardId == "Stock"
+			then liveStockEntries or buildLiveStockEntries()
+			else rankedEntries[boardId]
 		local displayEntries = {}
-		for index = 1, math.min(#rankedEntries[boardId], LeaderboardConfig.DisplayCount) do
-			local entry = rankedEntries[boardId][index]
+		for index = 1, math.min(#sourceEntries, LeaderboardConfig.DisplayCount) do
+			local entry = sourceEntries[index]
 			table.insert(displayEntries, {
 				Rank = entry.Rank,
 				UserId = entry.UserId,
@@ -397,13 +442,22 @@ local function makeStateForPlayer(player: Player): { [string]: any }
 				Value = entry.Value,
 			})
 		end
+		local selfValue = currentBoardValue(boardId, player)
+		if boardId == "Stock" then
+			for _, entry in sourceEntries do
+				if entry.UserId == player.UserId then
+					selfValue = entry.Value
+					break
+				end
+			end
+		end
 		boards[boardId] = {
 			Entries = displayEntries,
 			Self = {
-				Rank = selfRankText(boardId, player.UserId),
+				Rank = selfRankText(boardId, sourceEntries, player.UserId),
 				UserId = player.UserId,
 				UserName = player.Name,
-				Value = currentBoardValue(boardId, player),
+				Value = selfValue,
 			},
 		}
 	end
@@ -413,16 +467,30 @@ local function makeStateForPlayer(player: Player): { [string]: any }
 	}
 end
 
-local function fireState(player: Player)
+local function fireState(player: Player, liveStockEntries: { RankedEntry }?)
 	if player.Parent == Players then
-		RemoteService.GetEvent("LeaderboardStateChanged"):FireClient(player, makeStateForPlayer(player))
+		RemoteService.GetEvent("LeaderboardStateChanged"):FireClient(player, makeStateForPlayer(player, liveStockEntries))
 	end
 end
 
 local function broadcastStates()
+	local liveStockEntries = buildLiveStockEntries()
 	for _, player in Players:GetPlayers() do
-		fireState(player)
+		fireState(player, liveStockEntries)
 	end
+end
+
+local function scheduleLiveBroadcast()
+	if shuttingDown or liveBroadcastScheduled then
+		return
+	end
+	liveBroadcastScheduled = true
+	task.defer(function()
+		liveBroadcastScheduled = false
+		if not shuttingDown then
+			broadcastStates()
+		end
+	end)
 end
 
 local function refreshOnce()
@@ -467,6 +535,24 @@ local function startRefreshLoop()
 	end)
 end
 
+-- 在已建立会话的权威产物库存变化后更新本服实时榜视图，不触发任何持久化读写。
+function LeaderboardService.NotifyStockChanged(player: Player)
+	local session = sessions[player]
+	if not session or session.Closing or player.Parent ~= Players then
+		return
+	end
+	local snapshot = PlayerDataService.GetSnapshot(player)
+	if not snapshot then
+		return
+	end
+	local stock = stockFromSnapshot(snapshot)
+	if stock == session.LastStock then
+		return
+	end
+	session.LastStock = stock
+	scheduleLiveBroadcast()
+end
+
 -- 为已完成主存档加载的玩家建立时间会话，并排队写入三项权威指标和刷新全局排名。
 function LeaderboardService.PlayerReady(player: Player)
 	if sessions[player] then
@@ -482,7 +568,9 @@ function LeaderboardService.PlayerReady(player: Player)
 		Closing = false,
 	}
 	sessions[player] = temporarySession
-	getPlayerMetrics(player, temporarySession)
+	local coins, stock = readPlayerMetrics(player, temporarySession)
+	temporarySession.LastCoins = coins
+	temporarySession.LastStock = stock
 	userNameCache[player.UserId] = player.Name
 	requestRefresh()
 end
@@ -530,7 +618,7 @@ function LeaderboardService.Init(dependencies: { PlayerDataService: any, RemoteS
 			return
 		end
 		lastRequestAt[player] = now
-		fireState(player)
+		fireState(player, nil)
 	end)
 
 	startRefreshLoop()

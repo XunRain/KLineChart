@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块维护种子商店个人库存刷新，并只在玩家靠近 Sam 时权威处理种子购买。
+-- 本模块维护种子商店个人库存刷新与补货反馈，并只在玩家靠近 Sam 时权威处理种子购买。
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -42,9 +42,12 @@ local playerStockByUserId: { [number]: PlayerStockEntry } = {}
 local pendingRefreshSaveByUserId: { [number]: PendingRefreshSave } = {}
 local refreshSettlementBusyByUserId: { [number]: boolean } = {}
 local activePaidSnapshotExpiryByUserId: { [number]: number } = {}
+local lastBroadcastRefreshTime = 0
 local nextRefreshTime = 0
 local rng = Random.new(os.time())
 local MAXIMUM_REFRESH_GENERATION = 9007199254740991
+local STOCK_REFRESH_NOTICE = "🔔 Seed shop refreshed 🔔"
+local STOCK_REFRESH_AUDIO_CUE = "SeedStockRefresh"
 
 local function getBasePart(parent: Instance?, name: string): BasePart?
 	local child = parent and parent:FindFirstChild(name)
@@ -221,7 +224,6 @@ local function getPlayerStock(player: Player): { [string]: number }
 		}
 		return restoredStock
 	end
-	activePaidSnapshotExpiryByUserId[userId] = nil
 	local entry = playerStockByUserId[userId]
 	if entry
 		and entry.RefreshGeneration == refreshGeneration
@@ -271,6 +273,14 @@ local function fireState(player: Player)
 		return
 	end
 	RemoteService.GetEvent("SeedShopStateChanged"):FireClient(player, makeStateForPlayer(player))
+end
+
+local function notifyStockRefreshed(player: Player)
+	if player.Parent ~= Players then
+		return
+	end
+	RemoteService.GetEvent("AudioCue"):FireClient(player, STOCK_REFRESH_AUDIO_CUE)
+	RemoteService.Notify(player, STOCK_REFRESH_NOTICE, "Success")
 end
 
 local function getPurchasePayload(payload: any): (string?, number?)
@@ -581,18 +591,19 @@ local function settleNextRefreshGeneration(player: Player, purchaseId: string?):
 	return saved, reason, generation, grantedNewReward
 end
 
-local function applySavedPersonalRestock(player: Player, generation: number)
+local function applySavedPersonalRestock(player: Player, generation: number): boolean
 	if player.Parent ~= Players then
-		return
+		return false
 	end
 	ensureFreshStock()
 	local paidSnapshot = getSavedPaidStockSnapshot(player)
 	if not paidSnapshot or paidSnapshot.RefreshGeneration ~= generation then
 		warn(string.format("[SeedShopService] 已保存的个人刷新快照代次不一致：%s", player.Name))
-		return
+		return false
 	end
 	playerStockByUserId[player.UserId] = nil
 	fireState(player)
+	return true
 end
 
 local function handleManualRestock(player: Player)
@@ -625,14 +636,16 @@ local function handleManualRestock(player: Player)
 		return
 	end
 
-	local saved, saveReason, generation = settleNextRefreshGeneration(player, nil)
+	local saved, saveReason, generation, grantedNewReward = settleNextRefreshGeneration(player, nil)
 	if not saved then
 		warn(string.format("[SeedShopService] 测试刷新代次保存失败 %s：%s", player.Name, tostring(saveReason)))
 		RemoteService.Notify(player, "Restock failed. Please try again.", "Warning")
 		return
 	end
-	applySavedPersonalRestock(player, generation)
-	RemoteService.Notify(player, "Seed shop restocked.", "Success")
+	local applied = applySavedPersonalRestock(player, generation)
+	if grantedNewReward and applied then
+		notifyStockRefreshed(player)
+	end
 end
 
 -- 以收据 PurchaseId 幂等递增并保存个人刷新代次；只有 SaveNow 成功后才更新该玩家运行时库存。
@@ -647,22 +660,38 @@ function SeedShopService.ProcessRestockReceipt(player: Player, productId: number
 		end
 		return false
 	end
-	applySavedPersonalRestock(player, generation)
-	if grantedNewReward and player.Parent == Players then
-		RemoteService.Notify(player, "Seed shop restocked.", "Success")
+	local applied = applySavedPersonalRestock(player, generation)
+	if grantedNewReward and applied then
+		notifyStockRefreshed(player)
 	end
 	return true
 end
 
 local function refreshExpiredPaidSnapshots()
 	local now = os.time()
+	for _, player in Players:GetPlayers() do
+		if PlayerDataService.IsLoaded(player) then
+			local paidSnapshot = getEffectivePaidStockSnapshot(player)
+			if paidSnapshot and paidSnapshot.NaturalRefreshAt > now then
+				activePaidSnapshotExpiryByUserId[player.UserId] = paidSnapshot.NaturalRefreshAt
+			end
+		end
+	end
 	for userId, expiresAt in activePaidSnapshotExpiryByUserId do
 		if expiresAt <= now then
-			activePaidSnapshotExpiryByUserId[userId] = nil
-			playerStockByUserId[userId] = nil
 			local player = Players:GetPlayerByUserId(userId)
-			if player then
-				fireState(player)
+			local paidSnapshot = if player and PlayerDataService.IsLoaded(player)
+				then getEffectivePaidStockSnapshot(player)
+				else nil
+			if paidSnapshot and paidSnapshot.NaturalRefreshAt > now then
+				activePaidSnapshotExpiryByUserId[userId] = paidSnapshot.NaturalRefreshAt
+			else
+				activePaidSnapshotExpiryByUserId[userId] = nil
+				playerStockByUserId[userId] = nil
+				if player and PlayerDataService.IsLoaded(player) then
+					fireState(player)
+					notifyStockRefreshed(player)
+				end
 			end
 		end
 	end
@@ -741,13 +770,25 @@ function SeedShopService.Init(dependencies: {
 	end
 	nextRefreshTime = 0
 	ensureFreshStock()
+	lastBroadcastRefreshTime = nextRefreshTime
 	task.spawn(function()
 		while SeedShopConfig.Enabled do
 			task.wait(1)
-			local previousRefreshTime = nextRefreshTime
 			ensureFreshStock()
-			if nextRefreshTime ~= previousRefreshTime then
+			if nextRefreshTime ~= lastBroadcastRefreshTime then
 				broadcastState()
+				local refreshTime = os.time()
+				for _, player in Players:GetPlayers() do
+					if PlayerDataService.IsLoaded(player)
+						and activePaidSnapshotExpiryByUserId[player.UserId] == nil
+					then
+						local paidSnapshot = getEffectivePaidStockSnapshot(player)
+						if not paidSnapshot or paidSnapshot.NaturalRefreshAt <= refreshTime then
+							notifyStockRefreshed(player)
+						end
+					end
+				end
+				lastBroadcastRefreshTime = nextRefreshTime
 			end
 			refreshExpiredPaidSnapshots()
 		end

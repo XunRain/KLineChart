@@ -84,6 +84,7 @@ local function applyWeatherEffect(weatherId: string?)
 	stopAppliedEffect(appliedWeatherId)
 	appliedWeatherId = resolvedWeatherId
 	AudioController.SetWeatherMusicOverride(resolvedWeatherId)
+	AudioController.SetWeatherAmbient(resolvedWeatherId)
 	LightingStateController.SetWeatherActive(resolvedWeatherId)
 	startAppliedEffect(resolvedWeatherId)
 end

@@ -1,21 +1,24 @@
 --!strict
 
--- 本模块集中定义透明收获 Prompt 的跨端身份契约、输入键位、本地高亮与内置控制图标常量。
+-- 本模块集中定义视线锁定收获的运行时属性、代理 Prompt 输入、本地高亮与透明 UI 常量。
 
 export type HarvestTargetKind = "Plant" | "Fruit"
 
 local HarvestPromptConfig = {}
 
--- 服务端创建、HarvestService 识别及客户端展示共同使用的稳定 Prompt 名称，不应与其他交互 Prompt 混用。
-HarvestPromptConfig.PromptName = "HarvestPrompt"
--- 标记权威收获 Prompt 的布尔属性名；客户端只展示值严格为 true 的实例，不能据此替代服务端校验。
-HarvestPromptConfig.PromptMarkerAttribute = "KLineHarvestPrompt"
--- Prompt 携带稳定植物 Id 的属性名；客户端仅据此验证 ItemConfig 定义，不把植物名写入透明交互行。
+-- 客户端本地代理 Prompt 的稳定名称；它只承载跨输入触发生命周期，不作为服务端权威目标。
+HarvestPromptConfig.PromptName = "LocalHarvestPrompt"
+-- 运行时植物 Model 携带的稳定记录、品种与所有者属性；客户端据此筛选，服务端仍独立校验。
+HarvestPromptConfig.RecordIdAttribute = "PlantRecordId"
 HarvestPromptConfig.PlantIdAttribute = "PlantId"
--- Prompt 携带 Plant/Fruit 目标类型的属性名；未知值必须安全忽略。
-HarvestPromptConfig.TargetKindAttribute = "HarvestTargetKind"
--- Prompt 携带本地所有者 UserId 的现有属性名；客户端过滤显示，服务端仍独立验证所有权。
 HarvestPromptConfig.OwnerUserIdAttribute = "OwnerUserId"
+-- 本地代理 Prompt 携带的当前 Plant/Fruit 目标类型，仅用于诊断和 UI 生命周期；未知值必须安全忽略。
+HarvestPromptConfig.TargetKindAttribute = "HarvestTargetKind"
+-- 单次植物与重复果实由服务端维护的成熟布尔属性；客户端只选取严格为 true 的已流送目标。
+HarvestPromptConfig.HarvestReadyAttribute = "HarvestReady"
+HarvestPromptConfig.FruitMatureAttribute = "FruitMature"
+HarvestPromptConfig.FruitSlotIndexAttribute = "FruitSlotIndex"
+HarvestPromptConfig.RuntimeFruitMarkerAttribute = "KLineFruitVisual"
 -- 客户端允许解析的两个稳定目标类型；Plant 高亮整株，Fruit 只高亮对应运行时果实。
 HarvestPromptConfig.TargetKinds = {
 	Plant = "Plant" :: HarvestTargetKind,
@@ -24,16 +27,34 @@ HarvestPromptConfig.TargetKinds = {
 
 -- Custom 样式关闭不可透明的原生黑底，仅由客户端绘制透明交互行；Prompt 仍负责输入触发。
 HarvestPromptConfig.Style = Enum.ProximityPromptStyle.Custom
--- 全局排他保证同一客户端同时只激活一个收获或其他全局排他 Prompt。
-HarvestPromptConfig.Exclusivity = Enum.ProximityPromptExclusivity.OneGlobally
+-- 客户端始终只创建一个代理 Prompt；AlwaysShow 让其他 Prompt 仍可进入 PromptShown，再由控制器硬优先暂停收获，避免同键双触发。
+HarvestPromptConfig.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
 -- 键盘收获键；透明交互行使用 Roblox 内置 key_single 图标显示，Prompt 引擎处理实际输入。
 HarvestPromptConfig.KeyboardKeyCode = Enum.KeyCode.E
 -- 手柄收获键；透明交互行使用 Roblox 内置 xboxX 图标显示，Prompt 引擎处理实际输入。
 HarvestPromptConfig.GamepadKeyCode = Enum.KeyCode.ButtonX
--- Prompt 持续按住时间，单位为秒；触屏/鼠标由透明按钮桥接，键盘/手柄由引擎直接处理。
-HarvestPromptConfig.HoldDuration = 0.25
+-- 收获使用单次点击或按键，不要求持续按住；0 同时禁止显示 Hold 进度。
+HarvestPromptConfig.HoldDuration = 0
 -- 透明交互行唯一显示的动作文本；不得追加植物名、目标类型、数量或状态。
 HarvestPromptConfig.ActionText = "Harvest"
+-- 玩家角色根与植物 PrimaryPart 的最大水平采摘半径，单位 stud；只计算 XZ，绝不能混入 Y 或果实高度。
+HarvestPromptConfig.HorizontalHarvestRadius = 18
+-- 客户端候选刷新间隔，单位秒；约 12Hz，只遍历已缓存的运行时植物，不逐帧深度扫描 Workspace。
+HarvestPromptConfig.TargetRefreshInterval = 1 / 12
+-- 同一目标请求后在本地暂时跳过的秒数，避免属性回传前重复提交；其他成熟目标仍可被选中。
+HarvestPromptConfig.TargetSuppressionAfterRequest = 0.75
+-- 服务端同一玩家两次合法形状收获请求的最短间隔，单位秒；只限制请求频率，水平半径另由共享规则校验。
+HarvestPromptConfig.ServerRequestCooldown = 0.1
+-- 本地代理 Part 跟随角色根节点，Prompt 激活范围只覆盖角色与自身的微小偏差，不涉及目标植物距离。
+HarvestPromptConfig.ProxyActivationDistance = 16
+
+-- 判断角色与植物根是否处于共享水平采摘半径内；客户端用于筛选，服务端仍以权威位置重新校验。
+function HarvestPromptConfig.IsWithinHorizontalHarvestRadius(characterPosition: Vector3, plantPosition: Vector3): boolean
+	local deltaX = characterPosition.X - plantPosition.X
+	local deltaZ = characterPosition.Z - plantPosition.Z
+	local radius = HarvestPromptConfig.HorizontalHarvestRadius
+	return deltaX * deltaX + deltaZ * deltaZ <= radius * radius
+end
 
 -- 收获高亮只使用透明填充与受遮挡深度的白色轮廓，不穿透玩家或场景遮挡，并独立命名以免修改铲子的红色 Highlight。
 HarvestPromptConfig.Highlight = {
@@ -55,7 +76,8 @@ HarvestPromptConfig.Ui = {
 	NameSize = Vector2.new(240, 28),
 	BoundingBoxTopOffset = 0.45,
 	BoundingBoxBottomOffset = 0.35,
-	MaxDistance = 24,
+	-- Roblox BillboardGui 的 0 表示不设置最远显示距离，远处屏幕目标不会因世界距离隐藏。
+	MaxDistance = 0,
 	-- 左侧徽章与其外圈 Hold 进度；进度图使用 Roblox 内置 RadialFill，不触发任何玩法结果。
 	BadgeHostSize = Vector2.new(62, 62),
 	BadgeSize = Vector2.new(56, 56),
