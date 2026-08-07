@@ -25,6 +25,10 @@ if not configModule or not configModule:IsA("ModuleScript") then
 	return
 end
 local OpeningConfig = require(configModule)
+local networkConfigModule = shared:WaitForChild("NetworkConfig", 10)
+local NetworkConfig: any = if networkConfigModule and networkConfigModule:IsA("ModuleScript")
+	then require(networkConfigModule)
+	else nil
 
 type UiRefs = {
 	SurfaceGui: SurfaceGui,
@@ -64,6 +68,7 @@ local depthOfFieldEnabled: { [DepthOfFieldEffect]: boolean } = {}
 local anchoredRoots: { [BasePart]: boolean } = {}
 local promptServiceEnabled = ProximityPromptService.Enabled
 local renderName = string.format("KLineOpening_%d", player.UserId)
+local openingCompletedReported = false
 
 local function warnOnce(key: string, message: string)
 	if warned[key] then
@@ -71,6 +76,33 @@ local function warnOnce(key: string, message: string)
 	end
 	warned[key] = true
 	warn("[OpeningController] " .. message)
+end
+
+local function reportOpeningCompleted()
+	if openingCompletedReported then
+		return
+	end
+	openingCompletedReported = true
+	if type(NetworkConfig) ~= "table"
+		or type(NetworkConfig.FolderName) ~= "string"
+		or type(NetworkConfig.Events) ~= "table"
+		or type(NetworkConfig.Events.ReportOpeningCompleted) ~= "string"
+	then
+		warnOnce("AnalyticsConfig", "Opening analytics Remote config is unavailable; gameplay continues normally.")
+		return
+	end
+	local folder = ReplicatedStorage:WaitForChild(NetworkConfig.FolderName, 3)
+	local remote = folder and folder:FindFirstChild(NetworkConfig.Events.ReportOpeningCompleted)
+	if not remote or not remote:IsA("RemoteEvent") then
+		warnOnce("AnalyticsRemote", "Opening analytics Remote is unavailable; gameplay continues normally.")
+		return
+	end
+	local ok, err = pcall(function()
+		remote:FireServer()
+	end)
+	if not ok then
+		warnOnce("AnalyticsReport", "Opening analytics report failed safely: " .. tostring(err))
+	end
 end
 
 local function setText(instance: Instance?, value: string)
@@ -595,6 +627,7 @@ local function cleanup()
 	activeUi = nil
 	player:SetAttribute(OpeningConfig.Attributes.Done, true)
 	player:SetAttribute(OpeningConfig.Attributes.Active, false)
+	reportOpeningCompleted()
 end
 
 local function runOpening()
@@ -653,6 +686,8 @@ local function runOpening()
 	clonedInstance.Parent = Workspace
 	ui.SurfaceGui.Adornee = clonedInstance
 	ui.SurfaceGui.Enabled = true
+	ui.InnerFrame.BackgroundColor3 = OpeningConfig.Visual.InnerFrameBackgroundColor
+	ui.InnerFrame.BackgroundTransparency = OpeningConfig.Visual.InnerFrameBackgroundTransparency
 	setVisible(ui.Logo, OpeningConfig.ShowLogo)
 	startLogoTween(ui)
 	setVisible(ui.Skip, false)
@@ -964,6 +999,7 @@ end
 
 if player:GetAttribute(OpeningConfig.Attributes.Done) == true then
 	player:SetAttribute(OpeningConfig.Attributes.Active, false)
+	reportOpeningCompleted()
 	return
 end
 

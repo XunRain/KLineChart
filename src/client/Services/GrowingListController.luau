@@ -10,6 +10,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local HarvestAllIAPConfig = require(ReplicatedStorage.Shared.HarvestAllIAPConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local PlantGrowthIAPConfig = require(ReplicatedStorage.Shared.PlantGrowthIAPConfig)
 local DeveloperProductPromptController = require(script.Parent.DeveloperProductPromptController)
@@ -541,6 +542,10 @@ local function bindGui(): boolean
 	local frame = screen:FindFirstChild(PlantGrowthIAPConfig.FrameName)
 	local exitContainer = screen:FindFirstChild(PlantGrowthIAPConfig.ExitContainerName)
 	local exitButton = exitContainer and exitContainer:FindFirstChild(PlantGrowthIAPConfig.ExitButtonName)
+	local harvestAllInstance = exitContainer and exitContainer:FindFirstChild(HarvestAllIAPConfig.ButtonName)
+	local harvestAllButton = if harvestAllInstance and harvestAllInstance:IsA("GuiButton")
+		then harvestAllInstance
+		else nil
 	local header = frame and frame:FindFirstChild(PlantGrowthIAPConfig.HeaderName)
 	local headerText = header and header:FindFirstChild("TextLabel")
 	local headerFace = headerText and headerText:FindFirstChild("TextLabel")
@@ -596,6 +601,19 @@ local function bindGui(): boolean
 	exitContainer.Size = frame.Size
 	exitButton.AnchorPoint = Vector2.new(1, 0.5)
 	exitButton.Position = UDim2.new(0, 0, 0.5, 0)
+	if harvestAllInstance and not harvestAllButton then
+		warn("[GrowingListController] GrowingList.Exit.HarvestAllButton must be a GuiButton; optional entry ignored.")
+	elseif harvestAllButton then
+		-- 与 ExitButton 共用 X=0 停靠边缘，只保留工具人在 Studio 配置的纵向排列。
+		local studioPosition = harvestAllButton.Position
+		harvestAllButton.AnchorPoint = Vector2.new(1, harvestAllButton.AnchorPoint.Y)
+		harvestAllButton.Position = UDim2.new(0, 0, studioPosition.Y.Scale, studioPosition.Y.Offset)
+		local notification = harvestAllButton:FindFirstChild("Notification")
+		if notification and notification:IsA("GuiObject") then
+			-- 收获全部没有数量角标语义，隐藏从 ExitButton 克隆遗留的红色 Notification。
+			notification.Visible = false
+		end
+	end
 	local openPosition = frame.Position
 	local closedPosition = UDim2.new(
 		openPosition.X.Scale + frame.Size.X.Scale,

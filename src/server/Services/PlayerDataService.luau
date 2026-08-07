@@ -9,9 +9,12 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
+local EasterEggConfig = require(ReplicatedStorage.Shared.EasterEggConfig)
+local HarvestAllIAPConfig = require(ReplicatedStorage.Shared.HarvestAllIAPConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local PlantGrowthIAPConfig = require(ReplicatedStorage.Shared.PlantGrowthIAPConfig)
 local PlotExpansionConfig = require(ReplicatedStorage.Shared.PlotExpansionConfig)
+local ProduceCapacityIAPConfig = require(ReplicatedStorage.Shared.ProduceCapacityIAPConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.TutorialConfig)
 local DataStoreConfig = require(script.Parent.Parent.Config.DataStoreConfig)
 
@@ -56,9 +59,16 @@ type PlayerData = {
 		Single: number,
 		All: number,
 	},
+	PendingHarvestAllPurchase: {
+		ProductId: number,
+		RequestedAt: number,
+	}?,
+	HarvestAllCredits: number,
+	ClaimedEasterEggs: { [string]: boolean },
 	Inventory: {
 		Seeds: { [string]: number },
 		Produce: { [string]: number },
+		ProduceCapacity: number,
 		HotbarLayout: { [string]: string },
 	},
 	Plants: { [string]: PlantRecord },
@@ -119,9 +129,13 @@ local function defaultData(): PlayerData
 			Single = 0,
 			All = 0,
 		},
+		PendingHarvestAllPurchase = nil,
+		HarvestAllCredits = 0,
+		ClaimedEasterEggs = {},
 		Inventory = {
 			Seeds = ItemConfig.GetStartingSeeds(),
 			Produce = {},
+			ProduceCapacity = ProduceCapacityIAPConfig.BaseCapacity,
 			HotbarLayout = {},
 		},
 		Plants = {},
@@ -291,7 +305,7 @@ local function normalize(raw: any): PlayerData
 			Skipped = completed and rawTutorial.Skipped == true,
 		}
 	elseif not rawWasMissing and rawVersion < DataStoreConfig.SchemaVersion then
-		-- v1-v6 老档没有教程字段时直接完成，避免上线后强迫既有玩家重走新手流程。
+		-- v1-v8 老档没有教程字段时直接完成，避免 Schema 升级后强迫既有玩家重走新手流程。
 		normalized.Tutorial = {
 			Version = TutorialConfig.Version,
 			Step = TutorialConfig.Steps.Completed,
@@ -358,6 +372,34 @@ local function normalize(raw: any): PlayerData
 		normalized.GrowthSkipCredits.Single = math.max(0, math.floor(finiteNumber(raw.GrowthSkipCredits.Single, 0)))
 		normalized.GrowthSkipCredits.All = math.max(0, math.floor(finiteNumber(raw.GrowthSkipCredits.All, 0)))
 	end
+	normalized.HarvestAllCredits = math.clamp(
+		math.floor(finiteNumber(raw.HarvestAllCredits, 0)),
+		0,
+		MAX_SAFE_INTEGER
+	)
+	if type(raw.PendingHarvestAllPurchase) == "table" then
+		local productId = raw.PendingHarvestAllPurchase.ProductId
+		local requestedAt = math.max(0, math.floor(finiteNumber(raw.PendingHarvestAllPurchase.RequestedAt, 0)))
+		if type(productId) == "number"
+			and productId > 0
+			and productId == math.floor(productId)
+			and math.abs(productId) < math.huge
+			and requestedAt > 0
+			and os.time() - requestedAt < math.max(60, HarvestAllIAPConfig.PendingIntentTimeout)
+		then
+			normalized.PendingHarvestAllPurchase = {
+				ProductId = productId,
+				RequestedAt = requestedAt,
+			}
+		end
+	end
+	if type(raw.ClaimedEasterEggs) == "table" then
+		for _, reward in EasterEggConfig.Rewards do
+			if raw.ClaimedEasterEggs[reward.RewardId] == true then
+				normalized.ClaimedEasterEggs[reward.RewardId] = true
+			end
+		end
+	end
 	if type(raw.PendingPlantGrowthPurchases) == "table" then
 		for intentKey, intent in raw.PendingPlantGrowthPurchases do
 			if type(intentKey) == "string"
@@ -400,6 +442,7 @@ local function normalize(raw: any): PlayerData
 	end
 
 	if type(raw.Inventory) == "table" then
+		normalized.Inventory.ProduceCapacity = ProduceCapacityIAPConfig.NormalizeCapacity(raw.Inventory.ProduceCapacity)
 		for itemId, definition in ItemConfig.Items do
 			local seedCount = 0
 			if type(raw.Inventory.Seeds) == "table" then
@@ -408,7 +451,11 @@ local function normalize(raw: any): PlayerData
 			normalized.Inventory.Seeds[itemId] = math.min(seedCount, EconomyConfig.MaximumSeedInventory)
 
 			if type(raw.Inventory.Produce) == "table" then
-				normalized.Inventory.Produce[itemId] = math.max(0, math.floor(finiteNumber(raw.Inventory.Produce[itemId], 0)))
+				normalized.Inventory.Produce[itemId] = math.clamp(
+					math.floor(finiteNumber(raw.Inventory.Produce[itemId], 0)),
+					0,
+					ProduceCapacityIAPConfig.MaximumTrackedProduceUnits
+				)
 			end
 		end
 		if type(raw.Inventory.HotbarLayout) == "table" then

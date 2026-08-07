@@ -50,6 +50,7 @@ TutorialConfig.SkipButtonName = "SkipButton"
 TutorialConfig.SeedShopScreenName = "SeedShop"
 TutorialConfig.CarrotRowName = "KLineItem_Carrot"
 TutorialConfig.SeedShopShelfName = "Sheckles_Shelf"
+TutorialConfig.SeedShopRobuxShelfName = "Robux_Shelf"
 TutorialConfig.SeedShopBuyButtonName = "BuyButton"
 
 -- PlayerGui 下出售商店 ScreenGui 稳定名称；教程只读取 Enabled 和后代布局。
@@ -60,6 +61,13 @@ TutorialConfig.SellShopRuntimeRowPrefix = "KLineSellItem_"
 TutorialConfig.SellShopShelfName = "Sell_Shelf"
 -- 展开货架内最终出售按钮名称；教程仅高亮该 GuiButton，不代替玩家点击或提交交易。
 TutorialConfig.SellShopSellButtonName = "SellBtn"
+
+-- PlayerGui 传送入口稳定路径；商店未打开时教程只轻晃对应按钮，不把它作为 Focus 或世界箭头目标。
+TutorialConfig.TeleportButtonsScreenName = "TeleportButtons"
+TutorialConfig.TeleportButtonsContainerName = "TeleportButtons"
+TutorialConfig.TeleportSeedsButtonName = "SeedsButton"
+TutorialConfig.TeleportGardenButtonName = "GardenButton"
+TutorialConfig.TeleportSellButtonName = "SellButton"
 
 -- CollectionService 目标标签由 Studio 提供；客户端仅解析带标签的 BasePart。
 TutorialConfig.SeedShopNpcTag = "Tutorial_SeedShopNPC"
@@ -78,6 +86,29 @@ TutorialConfig.BeamNarrowScale = 0.35
 -- Streaming/界面目标的单次等待上限与可恢复重试间隔，避免任何客户端流程无限 yield。
 TutorialConfig.TargetWaitTimeout = 5
 TutorialConfig.TargetRetryInterval = 0.5
+
+-- 教程可见 GuiObject 轻晃参数；只允许客户端修改目标 Rotation，Enabled=false 可用于低动态模式。
+TutorialConfig.ButtonNudge = {
+	Enabled = true,
+	-- 所有档位的角度硬上限；客户端还会限制为不超过 5 度，避免错误配置造成过度运动。
+	MaxAngle = 5,
+	-- 商品行使用低干扰档位，五段 Tween 各 0.10 秒，一轮结束后停顿 1.15 秒。
+	Row = {
+		Angle = 2.5,
+		SecondaryAngle = 1.7,
+		ReturnAngle = 1.0,
+		SegmentDuration = 0.10,
+		PauseDuration = 1.15,
+	},
+	-- 传送与交易动作按钮使用更明显且更高频的档位，仍只围绕原始 Rotation 摆动。
+	Action = {
+		Angle = 4.0,
+		SecondaryAngle = 2.6,
+		ReturnAngle = 1.5,
+		SegmentDuration = 0.10,
+		PauseDuration = 0.40,
+	},
+}
 
 -- Focus 相对目标矩形的像素外扩与 Pointer 顶部间距；只用于运行时 Position/Size 定位。
 TutorialConfig.FocusPadding = 6

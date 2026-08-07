@@ -4,11 +4,12 @@
 
 return {
 	-- Live DataStore 的永久名称；随意修改会让线上玩家读到一套全新的空数据，迁移方案落地前禁止更改。
-	Name = "KLineChart_PlayerData_v1",
+	-- Name = "KLineChart_PlayerData_v1",
+	Name = "KLineChart_PlayerData_v2",
 	-- 玩家数据键前缀，最终键为该值拼接 UserId；随意修改等同于更换全部线上玩家的数据键。
 	KeyPrefix = "Player_",
-	-- 当前存档结构版本 7；v1-v6 会迁移旧品种标识并完整保留既有字段，缺 Tutorial 时视为已完成，只有全新 v7 档默认进入教程。
-	SchemaVersion = 7,
+	-- 当前存档结构版本 9；新增一键收获全部的持久 intent 与 credit。v1-v8 的货币、容量、教程、库存、植物、扩地、热栏、成长、补货和收据字段必须完整保留。
+	SchemaVersion = 9,
 	-- 自动保存并刷新会话锁心跳的间隔，单位为秒；必须明显短于 SessionLockTimeout。
 	AutoSaveInterval = 60,
 	-- 业务请求保存后的合并等待时间，单位为秒，用于降低连续变更造成的 DataStore 写入压力。

@@ -83,7 +83,7 @@ local function handleRequest(player: Player, destinationId: any)
 	end
 	local definition = TeleportConfig.GetDestination(destinationId)
 	if not definition then
-		RemoteService.Notify(player, "无效的传送目的地。", "Warning")
+		RemoteService.Notify(player, "Invalid teleport destination.", "Warning")
 		return
 	end
 
@@ -96,15 +96,15 @@ local function handleRequest(player: Player, destinationId: any)
 
 	local character = getLivingCharacter(player)
 	if not character then
-		RemoteService.Notify(player, "角色尚未准备好，无法传送。", "Warning")
+		RemoteService.Notify(player, "Your character is not ready to teleport.", "Warning")
 		return
 	end
 	local targetPivot = getDestinationPivot(player, definition)
 	if not targetPivot then
 		if definition.Kind == "PlayerGarden" then
-			RemoteService.Notify(player, "你的花园地块尚未分配，无法传送。", "Warning")
+			RemoteService.Notify(player, "Your garden plot has not been assigned yet.", "Warning")
 		else
-			RemoteService.Notify(player, "传送目的地暂不可用。", "Warning")
+			RemoteService.Notify(player, "The teleport destination is currently unavailable.", "Warning")
 		end
 		return
 	end

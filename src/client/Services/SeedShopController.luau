@@ -10,6 +10,7 @@ local TweenService = game:GetService("TweenService")
 
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local HudConfig = require(ReplicatedStorage.Shared.HudConfig)
+local ItemQualityVisualConfig = require(ReplicatedStorage.Shared.ItemQualityVisualConfig)
 local MarketConfig = require(ReplicatedStorage.Shared.MarketConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
@@ -769,6 +770,11 @@ local function bindItems(itemTemplate: Frame)
 		end
 		local rarity = mainFrame:FindFirstChild("Rarity")
 		setLayeredText(rarity and rarity:FindFirstChild("Rarity_Text"), item.Definition.Quality:upper())
+		ItemQualityVisualConfig.ApplyRarityGradient(
+			rarity,
+			item.Definition.Quality,
+			"SeedShop.ItemTemplate.Main_Frame.Rarity"
+		)
 		local viewport = mainFrame:FindFirstChild("ViewportFrame")
 		if viewport and viewport:IsA("ViewportFrame") then
 			viewport.Visible = true

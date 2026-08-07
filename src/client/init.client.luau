@@ -10,11 +10,14 @@ local Services = script.Services
 
 local AudioController = require(Services.AudioController)
 local BackpackController = require(Services.BackpackController)
+local ConfirmationDialogController = require(Services.ConfirmationDialogController)
 local DeveloperProductPromptController = require(Services.DeveloperProductPromptController)
+local EasterEggController = require(Services.EasterEggController)
 local GardenVisualController = require(Services.GardenVisualController)
 local GardenOwnerSignController = require(Services.GardenOwnerSignController)
 local GrowingListController = require(Services.GrowingListController)
 local HarvestPromptController = require(Services.HarvestPromptController)
+local HarvestAllController = require(Services.HarvestAllController)
 local HudCurrencyController = require(Services.HudCurrencyController)
 local InterfaceVisualController = require(Services.InterfaceVisualController)
 local LeaderboardController = require(Services.LeaderboardController)
@@ -40,18 +43,29 @@ local WeatherController = require(Services.WeatherController)
 InterfaceVisualController.Init()
 AudioController.Init()
 DeveloperProductPromptController.Init()
+ConfirmationDialogController.Init()
+NotificationController.Init()
+EasterEggController.Init()
 SeedShopController.Init({
 	InterfaceVisualController = InterfaceVisualController,
 	DeveloperProductPromptController = DeveloperProductPromptController,
 })
-BackpackController.Init({ InterfaceVisualController = InterfaceVisualController })
+BackpackController.Init({
+	InterfaceVisualController = InterfaceVisualController,
+	DeveloperProductPromptController = DeveloperProductPromptController,
+	NotificationController = NotificationController,
+})
 LightingStateController.Init()
 HudCurrencyController.Init()
-NotificationController.Init()
 GardenVisualController.Init()
 GardenOwnerSignController.Init()
 LeaderboardController.Init()
 HarvestPromptController.Init()
+HarvestAllController.Init({
+	ConfirmationDialogController = ConfirmationDialogController,
+	DeveloperProductPromptController = DeveloperProductPromptController,
+	NotificationController = NotificationController,
+})
 PlotExpansionController.Init()
 PlantingFxController.Init()
 PlantInteractionController.Init()

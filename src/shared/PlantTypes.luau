@@ -33,6 +33,8 @@ export type PlantRecord = {
 export type InventoryData = {
 	Seeds: { [string]: number },
 	Produce: { [string]: number },
+	-- 收获物总容量的服务端权威持久值；客户端复制值只用于展示。
+	ProduceCapacity: number,
 	-- 玩家热栏布局偏好，键为槽位字符串 "1".."10"，值为稳定 ToolKey 或空槽标记；不承载库存数量。
 	HotbarLayout: { [string]: string },
 }
@@ -41,6 +43,11 @@ export type PendingPlantGrowthPurchase = {
 	Scope: "Single" | "All",
 	ProductId: number,
 	RecordIds: { string },
+	RequestedAt: number,
+}
+
+export type PendingHarvestAllPurchase = {
+	ProductId: number,
 	RequestedAt: number,
 }
 
@@ -65,6 +72,8 @@ export type PlayerData = {
 		Single: number,
 		All: number,
 	},
+	PendingHarvestAllPurchase: PendingHarvestAllPurchase?,
+	HarvestAllCredits: number,
 	Inventory: InventoryData,
 	Plants: { [string]: PlantRecord },
 }

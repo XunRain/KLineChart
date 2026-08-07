@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local ProduceCapacityIAPConfig = require(ReplicatedStorage.Shared.ProduceCapacityIAPConfig)
 local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
 
 local InventoryService = {}
@@ -386,7 +387,31 @@ function InventoryService.IsHoldingShovel(player: Player): boolean
 	return false
 end
 
--- 从玩家数据快照刷新库存复制目录，并同步每种种子、产物与默认工具的唯一 Tool 和显示数量。
+-- 对 Inventory.Produce 中全部数值做防御性求和；坏值按 0 处理，结果在精确整数上限饱和。
+function InventoryService.GetProduceUsed(produce: any): number
+	if type(produce) ~= "table" then
+		return 0
+	end
+	local maximum = ProduceCapacityIAPConfig.MaximumTrackedProduceUnits
+	local total = 0
+	for _, rawCount in produce do
+		local count = 0
+		if type(rawCount) == "number"
+			and rawCount == rawCount
+			and math.abs(rawCount) < math.huge
+			and rawCount > 0
+		then
+			count = math.min(math.floor(rawCount), maximum)
+		end
+		if count >= maximum - total then
+			return maximum
+		end
+		total += count
+	end
+	return total
+end
+
+-- 从玩家数据快照刷新容量与库存复制目录，并同步每种种子、产物与默认工具的唯一 Tool 和显示数量。
 function InventoryService.Sync(player: Player)
 	local data = PlayerDataService.GetSnapshot(player)
 	if not data then
@@ -394,6 +419,16 @@ function InventoryService.Sync(player: Player)
 	end
 	local inventory = ensureFolder(player, "KLineInventory")
 	setIntValue(inventory, EconomyConfig.CurrencyName, data.Sheckles)
+	setIntValue(
+		inventory,
+		ProduceCapacityIAPConfig.CapacityValueName,
+		ProduceCapacityIAPConfig.NormalizeCapacity(data.Inventory.ProduceCapacity)
+	)
+	setIntValue(
+		inventory,
+		ProduceCapacityIAPConfig.UsedValueName,
+		InventoryService.GetProduceUsed(data.Inventory.Produce)
+	)
 	setValues(ensureFolder(inventory, "Seeds"), data.Inventory.Seeds)
 	setValues(ensureFolder(inventory, "Produce"), data.Inventory.Produce)
 	for itemId in ItemConfig.Items do

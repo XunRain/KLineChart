@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local DeveloperProductCatalogConfig = require(ReplicatedStorage.Shared.DeveloperProductCatalogConfig)
 local PlantGrowthIAPConfig = require(ReplicatedStorage.Shared.PlantGrowthIAPConfig)
 local SeedIAPConfig = require(ReplicatedStorage.Shared.SeedIAPConfig)
 local SeedShopRestockIAPConfig = require(ReplicatedStorage.Shared.SeedShopRestockIAPConfig)
@@ -17,6 +18,7 @@ local PlantGrowthPurchaseService = {}
 local PlayerDataService: any
 local PlantService: any
 local RemoteService: any
+local GameAnalyticsService: any
 local lastRequestAt: { [Player]: number } = {}
 local lastStateRequestAt: { [Player]: number } = {}
 local promptAttemptTimestamps: { [Player]: { number } } = {}
@@ -165,7 +167,7 @@ end
 local function notifyFailure(player: Player, reason: string?)
 	local messages: { [string]: string } = {
 		NoGrowingPlants = "No plants are currently in their first growth.",
-		ProductUnconfigured = "商品暂未配置",
+		ProductUnconfigured = "This growth product is not configured yet.",
 		PurchasePending = "Another growth purchase is still pending.",
 		PurchaseRateLimited = "Too many growth purchase attempts. Please wait a moment.",
 		CancelCooldown = "Please wait before preparing another growth purchase.",
@@ -269,6 +271,7 @@ local function handlePurchaseRequest(player: Player, payload: any)
 		if not configuredProductId
 			or isConfiguredSeedProductId(configuredProductId)
 			or SeedShopRestockIAPConfig.GetConfiguredProductId() == configuredProductId
+			or not DeveloperProductCatalogConfig.IsGloballyUnique(configuredProductId)
 		then
 			return false, "ProductUnconfigured"
 		end
@@ -310,6 +313,7 @@ local function handlePurchaseRequest(player: Player, payload: any)
 			RemoteService.Notify(player, "Could not prepare the purchase. Please try again.", "Warning")
 			return
 		end
+		GameAnalyticsService.OnDeveloperProductPrompted(player, "GrowthSkip:" .. scope)
 		RemoteService.GetEvent("PromptPlantGrowthProductPurchase"):FireClient(player, resolvedProductId)
 		return
 	end
@@ -326,7 +330,10 @@ end
 
 local function handleCancel(player: Player, productId: any)
 	local scope = PlantGrowthIAPConfig.GetScopeForProductId(productId)
-	if not scope or not PlayerDataService.IsLoaded(player) then
+	if not scope
+		or not DeveloperProductCatalogConfig.IsGloballyUnique(productId)
+		or not PlayerDataService.IsLoaded(player)
+	then
 		return
 	end
 	local nowClock = os.clock()
@@ -362,7 +369,10 @@ function PlantGrowthPurchaseService.ProcessReceipt(
 	purchaseId: string
 ): boolean
 	local scope = PlantGrowthIAPConfig.GetScopeForProductId(productId)
-	if not scope or not PlayerDataService.IsLoaded(player) then
+	if not scope
+		or not DeveloperProductCatalogConfig.IsGloballyUnique(productId)
+		or not PlayerDataService.IsLoaded(player)
+	then
 		return false
 	end
 	local now = os.time()
@@ -404,6 +414,9 @@ function PlantGrowthPurchaseService.ProcessReceipt(
 			"Success"
 		)
 	end
+	if grantedNewReward then
+		GameAnalyticsService.OnDeveloperProductGranted(player, "GrowthSkip:" .. scope)
+	end
 	if player.Parent == Players then
 		-- 首次 SaveNow 失败后的重复收据也必须把已在缓存中的成长结果重新同步到模型。
 		syncAllRecords(player)
@@ -417,6 +430,7 @@ function PlantGrowthPurchaseService.Init(dependencies: {
 	PlayerDataService: any,
 	PlantService: any,
 	RemoteService: any,
+	GameAnalyticsService: any,
 })
 	if initialized then
 		return
@@ -425,6 +439,7 @@ function PlantGrowthPurchaseService.Init(dependencies: {
 	PlayerDataService = dependencies.PlayerDataService
 	PlantService = dependencies.PlantService
 	RemoteService = dependencies.RemoteService
+	GameAnalyticsService = dependencies.GameAnalyticsService
 	RemoteService.GetEvent("RequestPlantGrowthProductPurchase").OnServerEvent:Connect(function(player, payload)
 		local ok, err = pcall(handlePurchaseRequest, player, payload)
 		if not ok then

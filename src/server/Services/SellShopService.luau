@@ -17,6 +17,7 @@ local InventoryService: any
 local RemoteService: any
 local MarketService: any
 local TutorialService: any
+local GameAnalyticsService: any
 local lastRequestAt: { [Player]: number } = {}
 
 local function sendSellResult(player: Player, payload: { [string]: any })
@@ -187,6 +188,7 @@ local function handleRequest(player: Player, payload: any)
 	local soldUnitPrice: number? = nil
 	local remainingCount: number? = nil
 	local soldItems = {}
+	local endingBalance = 0
 	local changed, reason = PlayerDataService.Update(player, function(data)
 		if not safeInteger(data.Sheckles, 0, EconomyConfig.MaximumSheckles) then return false, "InvalidBalance" end
 		for itemId, definition in ItemConfig.Items do
@@ -224,6 +226,7 @@ local function handleRequest(player: Player, payload: any)
 		end
 		if soldCount <= 0 then return false, "NoProduce" end
 		data.Sheckles += payout
+		endingBalance = data.Sheckles
 		return true, ""
 	end)
 	if not changed then
@@ -257,6 +260,7 @@ local function handleRequest(player: Player, payload: any)
 	for _, soldItem in soldItems do
 		TutorialService.OnProduceSold(player, soldItem.ItemId, soldItem.SoldCount)
 	end
+	GameAnalyticsService.OnProduceSold(player, soldItems, payout, endingBalance)
 end
 
 -- 注入数据、库存与 Remote 服务，并注册出售请求及玩家离开冷却清理。
@@ -266,12 +270,14 @@ function SellShopService.Init(dependencies: {
 	RemoteService: any,
 	MarketService: any?,
 	TutorialService: any,
+	GameAnalyticsService: any,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	InventoryService = dependencies.InventoryService
 	RemoteService = dependencies.RemoteService
 	MarketService = dependencies.MarketService
 	TutorialService = dependencies.TutorialService
+	GameAnalyticsService = dependencies.GameAnalyticsService
 	RemoteService.GetEvent("RequestSellProduce").OnServerEvent:Connect(function(player, actionId)
 		local ok, err = pcall(function()
 			handleRequest(player, actionId)
@@ -292,6 +298,9 @@ function SellShopService.Init(dependencies: {
 	)
 	if prompt then
 		prompt.Enabled = SellShopConfig.Enabled
+		prompt.Triggered:Connect(function(player)
+			GameAnalyticsService.OnShopOpened(player, "Steven")
+		end)
 	end
 end
 

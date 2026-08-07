@@ -959,6 +959,26 @@ function PlantService.UpdateRepeatRecord(record: PlantRecord)
 	PlantService.SyncGrowthRecord(record)
 end
 
+-- 按玩家当前权威存档完整校正运行时植物：删除已不存在记录并同步仍存在记录，不创建或修改其他玩家模型。
+function PlantService.SyncPlayerRecords(player: Player)
+	local snapshot = PlayerDataService.GetSnapshot(player)
+	if not snapshot then
+		return
+	end
+	local removed: { string } = {}
+	for recordId, owner in ownerByRecord do
+		if owner == player and snapshot.Plants[recordId] == nil then
+			table.insert(removed, recordId)
+		end
+	end
+	for _, recordId in removed do
+		PlantService.RemoveRecord(recordId)
+	end
+	for _, record in snapshot.Plants do
+		PlantService.SyncGrowthRecord(record)
+	end
+end
+
 -- 清理指定玩家拥有的全部运行时植物模型与映射。
 function PlantService.DestroyPlayer(player: Player)
 	local toRemove = {}

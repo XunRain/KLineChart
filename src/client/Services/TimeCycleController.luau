@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块读取服务端昼夜 Attribute，并驱动本地基础光照、夜晚 UI 与夜间视觉资源。
+-- 本模块读取服务端昼夜 Attribute，并驱动本地基础光照、白天太阳、夜晚 UI 与夜间视觉资源。
 
 local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
@@ -27,9 +27,12 @@ local _durationConnection: RBXScriptConnection? = nil
 local nightModel: Model? = nil
 local nightAtmosphere: Atmosphere? = nil
 local nightAtmosphereTween: Tween? = nil
+local activeMemeSun: BasePart? = nil
+local retiringMemeSuns: { [BasePart]: boolean } = {}
 local warnMissingNightAsset = false
 local warnMissingNightAtmosphere = false
 local warnMissingNightTimeLabel = false
+local warnMissingMemeSun = false
 local elapsedSinceLightingUpdate = 0
 local lastNightDebugAt = 0
 
@@ -46,8 +49,8 @@ local NIGHT_RING_PADDING = 1.18
 local NIGHT_RING_PIXELS_PER_STUD = 2
 local NIGHT_RING_HEIGHT_OFFSET = 1.62
 local NIGHT_TEMPLATE_BEAMS_ENABLED = true
-local NIGHT_MOON_HEIGHT = 230
-local NIGHT_MOON_OUTSIDE_PADDING = 90
+local CELESTIAL_HEIGHT = 230
+local CELESTIAL_OUTSIDE_PADDING = 90
 
 type NightCircleTarget = {
 	Center: Vector3,
@@ -229,7 +232,7 @@ local function getModelHorizontalCenter(model: Model): Vector3
 	return cframe.Position
 end
 
-local function getMoonTargetPosition(): Vector3?
+local function getCelestialTargetPosition(): Vector3?
 	local baseTarget = getNightCircleTarget()
 	if not baseTarget then
 		return nil
@@ -245,10 +248,10 @@ local function getMoonTargetPosition(): Vector3?
 	end
 
 	local radius = math.max(baseTarget.Coverage, NIGHT_CIRCLE_MIN_COVERAGE) * 0.5
-	local distance = radius + NIGHT_MOON_OUTSIDE_PADDING
+	local distance = radius + CELESTIAL_OUTSIDE_PADDING
 	return Vector3.new(
 		baseTarget.Center.X + direction.X * distance,
-		baseTarget.Center.Y + NIGHT_MOON_HEIGHT,
+		baseTarget.Center.Y + CELESTIAL_HEIGHT,
 		baseTarget.Center.Z + direction.Z * distance
 	)
 end
@@ -320,7 +323,7 @@ local function setCircleEffectsEnabled(circle: BasePart, enabled: boolean)
 end
 
 local function refreshMoonVisual(model: Model)
-	local targetPosition = getMoonTargetPosition()
+	local targetPosition = getCelestialTargetPosition()
 	if not targetPosition then
 		debugNightVisual("refreshMoonVisual：缺少地基目标，月亮位置保持模板默认值", false)
 		return
@@ -344,6 +347,131 @@ local function refreshMoonVisual(model: Model)
 	end
 
 	debugNightVisual(string.format("月亮已定位：parts=%d, position=(%s)", movedParts, formatVector3(targetPosition)), true)
+end
+
+local function stripBaseScripts(root: Instance)
+	for _, descendant in root:GetDescendants() do
+		if descendant:IsA("BaseScript") then
+			descendant:Destroy()
+		end
+	end
+end
+
+local function refreshMemeSunVisual(sun: BasePart)
+	local targetPosition = getCelestialTargetPosition()
+	if targetPosition then
+		sun.CFrame = CFrame.new(targetPosition) * sun.CFrame.Rotation
+	end
+end
+
+local function startMemeSun()
+	local currentSun = activeMemeSun
+	if currentSun and currentSun.Parent then
+		refreshMemeSunVisual(currentSun)
+		return
+	end
+	if currentSun then
+		currentSun:Destroy()
+		activeMemeSun = nil
+	end
+
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local template = if assets then assets:FindFirstChild("MemeSun") else nil
+	if not template or not template:IsA("BasePart") then
+		if not warnMissingMemeSun then
+			warn("[TimeCycleController] 缺少 ReplicatedStorage.Assets.MemeSun BasePart，白天太阳已跳过。")
+			warnMissingMemeSun = true
+		end
+		return
+	end
+
+	local sun = template:Clone()
+	sun.Name = "ActiveMemeSun"
+	sun.Anchored = true
+	sun.CanCollide = false
+	sun.CanTouch = false
+	sun.CanQuery = false
+	sun.CastShadow = false
+	stripBaseScripts(sun)
+	for _, descendant in sun:GetDescendants() do
+		setEffectEnabled(descendant, true)
+	end
+	refreshMemeSunVisual(sun)
+
+	sun.Parent = getTemporaryFolder()
+	activeMemeSun = sun
+end
+
+local function stopMemeSunEffects(sun: BasePart, clearParticles: boolean): number
+	local remainingLifetime = 0
+	for _, descendant in sun:GetDescendants() do
+		if descendant:IsA("ParticleEmitter") then
+			descendant.Enabled = false
+			if clearParticles then
+				descendant:Clear()
+			else
+				remainingLifetime = math.max(remainingLifetime, descendant.Lifetime.Max)
+			end
+		elseif descendant:IsA("Trail") then
+			descendant.Enabled = false
+			if clearParticles then
+				descendant:Clear()
+			else
+				remainingLifetime = math.max(remainingLifetime, descendant.Lifetime)
+			end
+		elseif descendant:IsA("Beam") then
+			descendant.Enabled = false
+		end
+	end
+	return remainingLifetime
+end
+
+local function destroyRetiringMemeSun(sun: BasePart)
+	if retiringMemeSuns[sun] ~= true then
+		return
+	end
+	retiringMemeSuns[sun] = nil
+	if sun.Parent then
+		sun:Destroy()
+	end
+end
+
+local function clearRetiringMemeSuns()
+	for sun in pairs(retiringMemeSuns) do
+		stopMemeSunEffects(sun, true)
+		destroyRetiringMemeSun(sun)
+	end
+end
+
+local function stopMemeSun(clearParticles: boolean)
+	local sun = activeMemeSun
+	if sun then
+		activeMemeSun = nil
+		retiringMemeSuns[sun] = true
+	end
+
+	if clearParticles then
+		clearRetiringMemeSuns()
+		return
+	end
+	if not sun then
+		return
+	end
+
+	local remainingLifetime = stopMemeSunEffects(sun, false)
+	sun.Transparency = 1
+	task.delay(remainingLifetime + 0.1, function()
+		destroyRetiringMemeSun(sun)
+	end)
+end
+
+local function setMemeSunActive(active: boolean, clearParticles: boolean?)
+	if active then
+		clearRetiringMemeSuns()
+		startMemeSun()
+	else
+		stopMemeSun(clearParticles == true)
+	end
 end
 
 local function setTemplateCircleBeamsEnabled(circle: BasePart, enabled: boolean)
@@ -629,6 +757,25 @@ local function startNightModel()
 	debugNightModelState(model, "夜晚模型淡入任务已创建", true)
 end
 
+local function clearEffectsUnder(root: Instance)
+	local function clearEffect(effect: Instance)
+		if effect:IsA("ParticleEmitter") then
+			effect.Enabled = false
+			effect:Clear()
+		elseif effect:IsA("Beam") then
+			effect.Enabled = false
+		elseif effect:IsA("Trail") then
+			effect.Enabled = false
+			effect:Clear()
+		end
+	end
+
+	clearEffect(root)
+	for _, descendant in root:GetDescendants() do
+		clearEffect(descendant)
+	end
+end
+
 local function stopNightModel()
 	local model = nightModel
 	if not model then
@@ -640,6 +787,9 @@ local function stopNightModel()
 	for _, descendant in model:GetDescendants() do
 		if descendant:IsA("BasePart") then
 			TweenService:Create(descendant, tweenInfo, { Transparency = 1 }):Play()
+		end
+		if descendant.Name == "Moon" then
+			clearEffectsUnder(descendant)
 		end
 	end
 	task.delay(2.1, function()
@@ -698,7 +848,16 @@ local function applyPhase(forceTransition: boolean)
 	local progress = getPhaseProgress(phase)
 	local phaseChanged = activePhaseId ~= phase.PhaseId
 	activePhaseId = phase.PhaseId
-	setNightVisualActive(phase.PhaseId == "Night")
+	if phase.PhaseId == "Day" then
+		setNightVisualActive(false)
+		setMemeSunActive(true)
+	elseif phase.PhaseId == "Night" then
+		setMemeSunActive(false, true)
+		setNightVisualActive(true)
+	else
+		setMemeSunActive(false)
+		setNightVisualActive(false)
+	end
 	LightingStateController.SetBaseTarget(buildLightingPatch(phase, progress), if forceTransition or phaseChanged then 3 else 0.25)
 end
 
@@ -771,7 +930,7 @@ local function bindWorkspaceAttributes()
 	end)
 end
 
--- 初始化昼夜 Attribute 监听、本地光照驱动和夜晚 UI；重复调用不会重复绑定。
+-- 初始化昼夜 Attribute 监听、本地光照和昼夜视觉；重复调用不会重复绑定。
 function TimeCycleController.Init()
 	if initialized then
 		return

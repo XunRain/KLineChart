@@ -22,6 +22,8 @@
 
 KLineChart 已实现首版种植与存档代码，但尚未完成 Studio Play 验收：
 
+- “收获全部成熟作物”商品新增权威报价、部分容量确认、持久 intent、迟到收据 credit 与幂等结算；需覆盖取消不弹窗、数字变化重报价、重复收据、保存失败、单株收获并发和多玩家隔离。
+
 - 当前应测试 Carrot 单次收获，以及 Strawberry、Blueberry 重复收获、时间戳成长、离线成长、种子扣除、产物增加和重新加入恢复。
 - 应验证 `Workspace.Gardens.Plot1..Plot8` 分配、两个 `PlantAreaColumn` 范围、相对 `SpawnPoint` 的恢复位置以及玩家离开后的清理。
 - 应验证种植 Remote 的非法 Tool、错误植物 ID、越界、超距、过密、超容量、无库存和高频请求拒绝。

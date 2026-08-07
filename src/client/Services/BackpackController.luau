@@ -10,6 +10,7 @@ local UserInputService = game:GetService("UserInputService")
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
+local ProduceCapacityIAPConfig = require(ReplicatedStorage.Shared.ProduceCapacityIAPConfig)
 local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
 local ViewportPreviewCamera = require(script.Parent.Parent.Components.ViewportPreviewCamera)
 
@@ -24,10 +25,14 @@ local hotbarFrame: Frame? = nil
 local inventoryFrame: Frame? = nil
 local gridFrame: ScrollingFrame? = nil
 local searchBox: TextBox? = nil
-local totalStockText: TextLabel? = nil
+local capacityGroup: Frame? = nil
+local capacityText: TextLabel? = nil
+local expandCapacityButton: TextButton? = nil
 local toggleButton: ImageButton? = nil
 local outsideCloseButton: TextButton? = nil
 local InterfaceVisualController: any = nil
+local DeveloperProductPromptController: any = nil
+local NotificationController: any = nil
 
 local HOTBAR_SLOTS_FULL = 10
 local HOTBAR_SLOTS_MINI = 5
@@ -36,7 +41,8 @@ local SLOT_GAP = 5
 local HOTBAR_SELECTED_SCALE = 1.16
 local INVENTORY_ROWS_FULL = 4
 local INVENTORY_ROWS_MINI = 2
-local INVENTORY_HEADER_SIZE = 40
+local INVENTORY_HEADER_SIZE_FULL = 40
+local INVENTORY_HEADER_SIZE_MINI = 72
 local HOTBAR_Z_INDEX = 2
 local HOTBAR_SLOT_Z_INDEX = 5
 local INVENTORY_Z_INDEX = 20
@@ -63,6 +69,7 @@ local hotbarTools: { [number]: Tool? } = {}
 local inventoryTools: { Tool } = {}
 local toolConnections: { [Tool]: { RBXScriptConnection } } = {}
 local containerConnections: { RBXScriptConnection } = {}
+local capacityConnections: { RBXScriptConnection } = {}
 local selectedCategory = "All"
 local pendingRefresh = false
 local activeHotbarSlots: { any } = {}
@@ -70,6 +77,8 @@ local dragCandidate: any = nil
 local dragState: any = nil
 local refreshLayout = function() end
 local requestSaveHotbarLayout = function() end
+local updateCapacityDisplay = function() end
+local rebindCapacityState = function() end
 local saveHotbarLayoutEvent: RemoteEvent? = nil
 local savedHotbarLayout: { [number]: string } = {}
 local savedHotbarLayoutReady = false
@@ -121,7 +130,9 @@ local function getSlotGap(): number
 end
 
 local function getInventoryHeaderSize(): number
-	return scalePixel(INVENTORY_HEADER_SIZE, 24)
+	return if isMiniLayout()
+		then scalePixel(INVENTORY_HEADER_SIZE_MINI, 64)
+		else scalePixel(INVENTORY_HEADER_SIZE_FULL, 36)
 end
 
 local function getScaledTextSize(baseSize: number, minimum: number): number
@@ -130,6 +141,10 @@ end
 
 local function getSearchWidth(): number
 	return scalePixel(190, 112)
+end
+
+local function getCapacityGroupWidth(): number
+	return scalePixel(122, 96)
 end
 
 local function getSearchInset(): number
@@ -662,28 +677,112 @@ local function collectCurrentTools(): { Tool }
 	return tools
 end
 
-local function isConfiguredProduceTool(tool: Tool): boolean
-	if tool:GetAttribute("KLineItemTool") ~= true or tool:GetAttribute("KLineItemType") ~= "Produce" then
-		return false
+local function getCapacityState(): (number?, number?)
+	local inventory = player:FindFirstChild("KLineInventory")
+	if not inventory or not inventory:IsA("Folder") then
+		return nil, nil
 	end
-	local itemId = tool:GetAttribute("ItemId")
-	return type(itemId) == "string" and itemId ~= "" and ItemConfig.Get(itemId) ~= nil
+	local capacityValue = inventory:FindFirstChild(ProduceCapacityIAPConfig.CapacityValueName)
+	local usedValue = inventory:FindFirstChild(ProduceCapacityIAPConfig.UsedValueName)
+	if not capacityValue or not capacityValue:IsA("IntValue") or not usedValue or not usedValue:IsA("IntValue") then
+		return nil, nil
+	end
+	local capacity = ProduceCapacityIAPConfig.GetValidCapacity(capacityValue.Value)
+	local used = usedValue.Value
+	if not capacity or used < 0 or used > ProduceCapacityIAPConfig.MaximumTrackedProduceUnits then
+		return nil, nil
+	end
+	return capacity, used
 end
 
-local function updateTotalStockText(tools: { Tool })
-	local label = totalStockText
+local function formatCapacityValue(value: number): string
+	if value < 1000 then
+		return tostring(value)
+	end
+	return NumberFormatter.Abbreviate(value, if isMiniLayout() then 1 else 2)
+end
+
+local function setExpandButtonEnabled(enabled: boolean)
+	local button = expandCapacityButton
+	if not button then
+		return
+	end
+	button.Active = enabled
+	button.Interactable = enabled
+	button.AutoButtonColor = enabled
+	button.Selectable = enabled
+	button.BackgroundColor3 = if enabled then Color3.fromRGB(48, 123, 194) else Color3.fromRGB(65, 70, 78)
+	button.TextTransparency = if enabled then 0 else 0.45
+end
+
+updateCapacityDisplay = function()
+	local label = capacityText
 	if not label then
 		return
 	end
-	local total = 0
-	for _, tool in tools do
-		if isConfiguredProduceTool(tool) then
-			total += getCount(tool) or 0
+	local capacity, used = getCapacityState()
+	if not capacity or not used then
+		label.Text = "--/--"
+		label.TextColor3 = Color3.new(1, 1, 1)
+		setExpandButtonEnabled(false)
+		return
+	end
+	label.Text = string.format("%s/%s", formatCapacityValue(used), formatCapacityValue(capacity))
+	label.TextColor3 = if used >= capacity then Color3.fromRGB(255, 216, 74) else Color3.new(1, 1, 1)
+	local configured = ProduceCapacityIAPConfig.UseMarketplacePurchases
+		and ProduceCapacityIAPConfig.GetProductId() ~= nil
+	local pending = DeveloperProductPromptController and DeveloperProductPromptController.IsPending()
+	setExpandButtonEnabled(configured and not pending and ProduceCapacityIAPConfig.CanExpand(capacity))
+end
+
+local function requestCapacityPurchase()
+	local capacity = getCapacityState()
+	if not capacity then
+		NotificationController.Show(ProduceCapacityIAPConfig.LoadingNotice)
+		return
+	end
+	local productId = ProduceCapacityIAPConfig.GetProductId()
+	if not ProduceCapacityIAPConfig.UseMarketplacePurchases or not productId then
+		NotificationController.Show(ProduceCapacityIAPConfig.UnconfiguredNotice)
+		return
+	end
+	if not ProduceCapacityIAPConfig.CanExpand(capacity) then
+		NotificationController.Show(ProduceCapacityIAPConfig.MaximumNotice)
+		return
+	end
+	local prompted = DeveloperProductPromptController.Prompt(productId)
+	if not prompted then
+		NotificationController.Show(ProduceCapacityIAPConfig.PromptFailedNotice)
+	end
+	updateCapacityDisplay()
+end
+
+rebindCapacityState = function()
+	for _, connection in capacityConnections do
+		connection:Disconnect()
+	end
+	table.clear(capacityConnections)
+	local inventory = player:FindFirstChild("KLineInventory")
+	if not inventory or not inventory:IsA("Folder") then
+		updateCapacityDisplay()
+		return
+	end
+	table.insert(capacityConnections, inventory.ChildAdded:Connect(function()
+		task.defer(rebindCapacityState)
+	end))
+	table.insert(capacityConnections, inventory.ChildRemoved:Connect(function()
+		task.defer(rebindCapacityState)
+	end))
+	for _, valueName in {
+		ProduceCapacityIAPConfig.CapacityValueName,
+		ProduceCapacityIAPConfig.UsedValueName,
+	} do
+		local value = inventory:FindFirstChild(valueName)
+		if value and value:IsA("IntValue") then
+			table.insert(capacityConnections, value:GetPropertyChangedSignal("Value"):Connect(updateCapacityDisplay))
 		end
 	end
-	local decimalPlaces = if isMiniLayout() then 1 else 2
-	label.Text = "Total Stock: " .. NumberFormatter.Abbreviate(total, decimalPlaces)
-	label.Visible = selectedCategory == "Fruits"
+	updateCapacityDisplay()
 end
 
 local function toolStillHeld(tool: Tool, present: { [Tool]: boolean }): boolean
@@ -949,23 +1048,83 @@ end
 local function updateInventoryStaticLayout(panel: Frame, panelPixelSize: Vector2)
 	local headerSize = getInventoryHeaderSize()
 	local searchInset = getSearchInset()
-	local searchWidth = getSearchWidth()
+	local panelWidth = math.max(1, panelPixelSize.X)
+	local panelHeight = math.max(1, panelPixelSize.Y)
+	local gap = scalePixel(6, 4)
+	local capacityWidth = math.min(getCapacityGroupWidth(), math.floor(panelWidth * 0.5))
 	local header = panel:FindFirstChild("Header")
 	if header and header:IsA("GuiObject") then
 		header.Position = UDim2.fromScale(0, 0)
-		header.Size = UDim2.fromScale(1, headerSize / math.max(1, panelPixelSize.Y))
+		header.Size = UDim2.fromScale(1, headerSize / panelHeight)
 
 		local title = header:FindFirstChild("Title")
 		if title and title:IsA("GuiObject") then
-			title.Position = UDim2.fromScale(8 / math.max(1, panelPixelSize.X), 0)
-			title.Size = UDim2.fromScale(0.36, 1)
+			local titleInset = scalePixel(8, 5)
+			if isMiniLayout() then
+				local firstRowHeight = math.floor(headerSize * 0.5)
+				local titleWidth = math.max(1, panelWidth - capacityWidth - searchInset - gap - titleInset)
+				title.Position = UDim2.fromScale(titleInset / panelWidth, 0)
+				title.Size = UDim2.fromScale(titleWidth / panelWidth, firstRowHeight / headerSize)
+			else
+				local searchWidth = math.min(getSearchWidth(), math.floor(panelWidth * 0.42))
+				local groupX = panelWidth - searchWidth - searchInset - gap - capacityWidth
+				local titleWidth = math.max(1, groupX - gap - titleInset)
+				title.Position = UDim2.fromScale(titleInset / panelWidth, 0)
+				title.Size = UDim2.fromScale(titleWidth / panelWidth, 1)
+			end
 		end
 	end
 	local search = searchBox
 	if search then
-		search.Position = UDim2.fromScale(1 - (searchWidth + searchInset) / math.max(1, panelPixelSize.X), searchInset / math.max(1, headerSize))
-		search.Size = UDim2.fromScale(searchWidth / math.max(1, panelPixelSize.X), (headerSize - searchInset * 2) / math.max(1, headerSize))
+		if isMiniLayout() then
+			local firstRowHeight = math.floor(headerSize * 0.5)
+			search.Position = UDim2.fromScale(searchInset / panelWidth, (firstRowHeight + searchInset) / headerSize)
+			search.Size = UDim2.fromScale(
+				(panelWidth - searchInset * 2) / panelWidth,
+				math.max(1, headerSize - firstRowHeight - searchInset * 2) / headerSize
+			)
+		else
+			local searchWidth = math.min(getSearchWidth(), math.floor(panelWidth * 0.42))
+			search.Position = UDim2.fromScale((panelWidth - searchWidth - searchInset) / panelWidth, searchInset / headerSize)
+			search.Size = UDim2.fromScale(searchWidth / panelWidth, (headerSize - searchInset * 2) / headerSize)
+		end
 		search.TextSize = getScaledTextSize(12, 9)
+	end
+	local group = capacityGroup
+	if group then
+		local groupHeight: number
+		if isMiniLayout() then
+			local firstRowHeight = math.floor(headerSize * 0.5)
+			groupHeight = math.max(1, firstRowHeight - searchInset * 2)
+			group.Position = UDim2.fromScale(
+				(panelWidth - capacityWidth - searchInset) / panelWidth,
+				searchInset / headerSize
+			)
+		else
+			groupHeight = math.max(1, headerSize - searchInset * 2)
+			local searchWidth = math.min(getSearchWidth(), math.floor(panelWidth * 0.42))
+			group.Position = UDim2.fromScale(
+				(panelWidth - searchWidth - searchInset - gap - capacityWidth) / panelWidth,
+				searchInset / headerSize
+			)
+		end
+		group.Size = UDim2.fromScale(capacityWidth / panelWidth, groupHeight / headerSize)
+		local buttonSize = math.min(groupHeight, scalePixel(28, 22))
+		local groupGap = scalePixel(4, 2)
+		local label = capacityText
+		if label then
+			label.Size = UDim2.fromScale(math.max(1, capacityWidth - buttonSize - groupGap) / capacityWidth, 1)
+			label.TextSize = getScaledTextSize(12, 9)
+		end
+		local button = expandCapacityButton
+		if button then
+			button.Size = UDim2.fromScale(buttonSize / capacityWidth, buttonSize / groupHeight)
+			button.TextSize = getScaledTextSize(18, 13)
+		end
+		local layout = group:FindFirstChildOfClass("UIListLayout")
+		if layout then
+			layout.Padding = UDim.new(groupGap / capacityWidth, 0)
+		end
 	end
 	local sideBar = panel:FindFirstChild("SideBar")
 	if sideBar and sideBar:IsA("GuiObject") then
@@ -974,11 +1133,7 @@ local function updateInventoryStaticLayout(panel: Frame, panelPixelSize: Vector2
 		sideBar.Size = UDim2.fromScale(sidebarWidth / math.max(1, panelPixelSize.X), 1)
 		sideBar.Visible = true
 	end
-	local stockLabel = totalStockText
-	if stockLabel then
-		stockLabel.Size = UDim2.fromScale(1, scalePixel(30, 24) / math.max(1, panelPixelSize.Y))
-		stockLabel.TextSize = getScaledTextSize(11, 8)
-	end
+	updateCapacityDisplay()
 end
 
 local function canUseInputForSlot(input: InputObject): boolean
@@ -1128,10 +1283,6 @@ local function renderInventory()
 	if not parent then
 		return
 	end
-	local stockLabel = totalStockText
-	if stockLabel then
-		stockLabel.Visible = selectedCategory == "Fruits"
-	end
 	clearLayout(parent)
 	local slotCount = getHotbarSlotCount()
 	local panelPixelSize = getTemplateInventoryPixelSize(slotCount)
@@ -1186,7 +1337,6 @@ refreshLayout = function()
 	else
 		assignNewTools(tools)
 	end
-	updateTotalStockText(tools)
 	renderHotbar()
 	renderInventory()
 end
@@ -1389,6 +1539,50 @@ local function buildGui()
 	local title = newText(header, "Title", "Backpack", UDim2.fromScale(0.36, 1), UDim2.fromScale(8 / math.max(1, initialPanelPixelSize.X), 0))
 	title.TextSize = getScaledTextSize(14, 10)
 	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.TextScaled = false
+
+	local capacity = Instance.new("Frame")
+	capacity.Name = "CapacityGroup"
+	capacity.BackgroundTransparency = 1
+	capacity.BorderSizePixel = 0
+	capacity.Parent = header
+	capacityGroup = capacity
+
+	local capacityLayout = Instance.new("UIListLayout")
+	capacityLayout.FillDirection = Enum.FillDirection.Horizontal
+	capacityLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	capacityLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	capacityLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	capacityLayout.Parent = capacity
+
+	local capacityLabel = newText(capacity, "CapacityText", "--/--", UDim2.fromScale(0.72, 1), UDim2.fromScale(0, 0))
+	capacityLabel.LayoutOrder = 1
+	capacityLabel.TextScaled = false
+	capacityLabel.TextWrapped = false
+	capacityLabel.TextXAlignment = Enum.TextXAlignment.Right
+	capacityLabel.TextYAlignment = Enum.TextYAlignment.Center
+	capacityText = capacityLabel
+
+	local expandButton = Instance.new("TextButton")
+	expandButton.Name = "ExpandCapacityButton"
+	expandButton.AutoButtonColor = false
+	expandButton.BackgroundColor3 = Color3.fromRGB(48, 123, 194)
+	expandButton.BackgroundTransparency = 0
+	expandButton.BorderSizePixel = 0
+	expandButton.Font = Enum.Font.GothamBold
+	expandButton.LayoutOrder = 2
+	expandButton.Size = UDim2.fromScale(0.24, 1)
+	expandButton.Text = "+"
+	expandButton.TextColor3 = Color3.new(1, 1, 1)
+	expandButton.TextScaled = false
+	expandButton.TextSize = getScaledTextSize(18, 13)
+	expandButton.Parent = capacity
+	expandCapacityButton = expandButton
+	local expandCorner = Instance.new("UICorner")
+	expandCorner.CornerRadius = UDim.new(0.25, 0)
+	expandCorner.Parent = expandButton
+	expandButton.Activated:Connect(requestCapacityPurchase)
+	setExpandButtonEnabled(false)
 
 	local search = Instance.new("TextBox")
 	search.Name = "Search"
@@ -1408,6 +1602,7 @@ local function buildGui()
 	)
 	search.Text = ""
 	search.TextColor3 = Color3.new(1, 1, 1)
+	search.TextScaled = false
 	search.TextSize = getScaledTextSize(12, 9)
 	search.Parent = header
 	searchBox = search
@@ -1437,21 +1632,6 @@ local function buildGui()
 		makeCategoryButton(categories, category, index)
 	end
 
-	local stockLabel = newText(
-		categories,
-		"TotalStockText",
-		"Total Stock: 0",
-		UDim2.fromScale(1, scalePixel(30, 24) / math.max(1, initialPanelPixelSize.Y)),
-		UDim2.fromScale(0, 0)
-	)
-	stockLabel.LayoutOrder = 5
-	stockLabel.TextSize = getScaledTextSize(11, 8)
-	stockLabel.TextXAlignment = Enum.TextXAlignment.Center
-	stockLabel.TextYAlignment = Enum.TextYAlignment.Center
-	stockLabel.Visible = selectedCategory == "Fruits"
-	stockLabel.ZIndex = 20
-	totalStockText = stockLabel
-
 	local grid = Instance.new("ScrollingFrame")
 	grid.Name = "ScrollingFrame"
 	grid.Active = true
@@ -1464,6 +1644,7 @@ local function buildGui()
 	grid.Parent = inventory
 	gridFrame = grid
 	setZIndexRecursive(inventory, INVENTORY_Z_INDEX)
+	updateInventoryStaticLayout(inventory, initialPanelPixelSize)
 end
 
 local function bindTool(tool: Tool)
@@ -1559,22 +1740,28 @@ local function bindHotbarLayoutRemotes()
 	requestRemote:FireServer()
 end
 
--- 初始化模板式背包 UI，并监听玩家 Backpack 与 Character 中的 Tool 变化。
-function BackpackController.Init(dependencies: { InterfaceVisualController: any }?)
+-- 注入独占界面、开发者商品弹窗与通用 Notice，并监听 Tool 和服务端容量复制值变化。
+function BackpackController.Init(dependencies: {
+	InterfaceVisualController: any,
+	DeveloperProductPromptController: any,
+	NotificationController: any,
+})
 	if initialized then
 		return
 	end
 	initialized = true
-	if dependencies then
-		InterfaceVisualController = dependencies.InterfaceVisualController
-	end
+	InterfaceVisualController = dependencies.InterfaceVisualController
+	DeveloperProductPromptController = dependencies.DeveloperProductPromptController
+	NotificationController = dependencies.NotificationController
 
 	pcall(function()
 		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 	end)
 	buildGui()
 	rebindContainers()
+	rebindCapacityState()
 	bindHotbarLayoutRemotes()
+	DeveloperProductPromptController.ConnectChanged(updateCapacityDisplay)
 
 	player.CharacterAdded:Connect(function()
 		task.defer(rebindContainers)
@@ -1582,6 +1769,13 @@ function BackpackController.Init(dependencies: { InterfaceVisualController: any 
 	player.ChildAdded:Connect(function(child)
 		if child:IsA("Backpack") then
 			task.defer(rebindContainers)
+		elseif child.Name == "KLineInventory" and child:IsA("Folder") then
+			task.defer(rebindCapacityState)
+		end
+	end)
+	player.ChildRemoved:Connect(function(child)
+		if child.Name == "KLineInventory" then
+			task.defer(rebindCapacityState)
 		end
 	end)
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)

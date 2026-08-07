@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
+local DeveloperProductCatalogConfig = require(ReplicatedStorage.Shared.DeveloperProductCatalogConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local PlantGrowthIAPConfig = require(ReplicatedStorage.Shared.PlantGrowthIAPConfig)
 local SeedIAPConfig = require(ReplicatedStorage.Shared.SeedIAPConfig)
@@ -19,6 +20,7 @@ local PlayerDataService: any
 local InventoryService: any
 local RemoteService: any
 local TutorialService: any
+local GameAnalyticsService: any
 local lastRequestAt: { [Player]: number } = {}
 local lastProductRequestAt: { [Player]: number } = {}
 local lastRestockRequestAt: { [Player]: number } = {}
@@ -384,6 +386,7 @@ local function handleRequest(player: Player, payload: any)
 
 	local purchaseTime = os.time()
 	local remainingStock = currentStock - amount
+	local endingBalance = 0
 	local changed, reason = PlayerDataService.Update(player, function(data)
 		local balance = data.Sheckles
 		local seedCount = data.Inventory.Seeds[itemId]
@@ -413,6 +416,7 @@ local function handleRequest(player: Player, payload: any)
 			data.SeedShopPaidStockSnapshot = nil
 		end
 		data.Sheckles = balance - totalPrice
+		endingBalance = data.Sheckles
 		data.Inventory.Seeds[itemId] = seedCount + amount
 		return true, ""
 	end)
@@ -440,6 +444,7 @@ local function handleRequest(player: Player, payload: any)
 		"Success"
 	)
 	TutorialService.OnSeedPurchased(player, itemId, amount)
+	GameAnalyticsService.OnSeedPurchased(player, itemId, amount, totalPrice, endingBalance)
 end
 
 -- 校验固定种子包请求；测试模式直接发货，正式模式只向客户端下发权威商品 ID 打开官方弹窗。
@@ -486,10 +491,15 @@ local function handleProductRequest(player: Player, payload: any)
 		if not productId
 			or isConfiguredGrowthProductId(productId)
 			or SeedShopRestockIAPConfig.GetConfiguredProductId() == productId
+			or not DeveloperProductCatalogConfig.IsGloballyUnique(productId)
 		then
 			RemoteService.Notify(player, "This product is not configured yet.", "Warning")
 			return
 		end
+		GameAnalyticsService.OnDeveloperProductPrompted(
+			player,
+			string.format("SeedPack:%s:%d", itemId, amount)
+		)
 		RemoteService.GetEvent("PromptSeedProductPurchase"):FireClient(player, productId)
 		return
 	end
@@ -632,10 +642,11 @@ local function handleManualRestock(player: Player)
 
 	if SeedShopRestockIAPConfig.UseMarketplacePurchases then
 		local productId = SeedShopRestockIAPConfig.GetProductId()
-		if not productId then
+		if not productId or not DeveloperProductCatalogConfig.IsGloballyUnique(productId) then
 			RemoteService.Notify(player, "This product is not configured yet.", "Warning")
 			return
 		end
+		GameAnalyticsService.OnDeveloperProductPrompted(player, "SeedShopRestock")
 		RemoteService.GetEvent("PromptSeedShopRestockPurchase"):FireClient(player, productId)
 		return
 	end
@@ -654,7 +665,10 @@ end
 
 -- 以收据 PurchaseId 幂等递增并保存个人刷新代次；只有 SaveNow 成功后才更新该玩家运行时库存。
 function SeedShopService.ProcessRestockReceipt(player: Player, productId: number, purchaseId: string): boolean
-	if SeedShopRestockIAPConfig.GetProductId() ~= productId or purchaseId == "" then
+	if SeedShopRestockIAPConfig.GetProductId() ~= productId
+		or not DeveloperProductCatalogConfig.IsGloballyUnique(productId)
+		or purchaseId == ""
+	then
 		return false
 	end
 	local saved, saveReason, generation, grantedNewReward = settleNextRefreshGeneration(player, purchaseId)
@@ -663,6 +677,9 @@ function SeedShopService.ProcessRestockReceipt(player: Player, productId: number
 			warn(string.format("[SeedShopService] 个人刷新收据等待重试 %s：%s", player.Name, tostring(saveReason)))
 		end
 		return false
+	end
+	if grantedNewReward then
+		GameAnalyticsService.OnDeveloperProductGranted(player, "SeedShopRestock")
 	end
 	local applied = applySavedPersonalRestock(player, generation)
 	if grantedNewReward and applied then
@@ -707,11 +724,13 @@ function SeedShopService.Init(dependencies: {
 	InventoryService: any,
 	RemoteService: any,
 	TutorialService: any,
+	GameAnalyticsService: any,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	InventoryService = dependencies.InventoryService
 	RemoteService = dependencies.RemoteService
 	TutorialService = dependencies.TutorialService
+	GameAnalyticsService = dependencies.GameAnalyticsService
 
 	RemoteService.GetEvent("RequestBuySeed").OnServerEvent:Connect(function(player, payload)
 		local ok, err = pcall(function()
@@ -758,7 +777,7 @@ function SeedShopService.Init(dependencies: {
 		refreshSettlementBusyByUserId[player.UserId] = nil
 		activePaidSnapshotExpiryByUserId[player.UserId] = nil
 	end)
-	NpcPromptService.Configure(
+	local prompt = NpcPromptService.Configure(
 		SeedShopConfig.NpcFolderName,
 		SeedShopConfig.NpcModelName,
 		SeedShopConfig.NpcRootName,
@@ -768,6 +787,11 @@ function SeedShopService.Init(dependencies: {
 		SeedShopConfig.PromptObjectText,
 		SeedShopConfig.MaximumInteractionDistance
 	)
+	if prompt then
+		prompt.Triggered:Connect(function(player)
+			GameAnalyticsService.OnShopOpened(player, "Sam")
+		end)
+	end
 
 	if not getSeedShopRoot() then
 		warn("[SeedShopService] 缺少 Sam 的商店根节点，种子购买将安全拒绝")

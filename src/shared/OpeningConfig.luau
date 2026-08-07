@@ -69,6 +69,9 @@ OpeningConfig.Timing = {
 
 -- 镜头距离与位移单位为 studs，FOV/Blur 为 Roblox 原生值；调整会影响移动端构图与眩晕感。
 OpeningConfig.Visual = {
+	-- 仅作用于开场克隆 UI 的 InnerFrame 背景；透明度取值范围为 0（不透明）到 1（完全透明）。
+	InnerFrameBackgroundColor = Color3.fromRGB(10, 14, 22),
+	InnerFrameBackgroundTransparency = 0.4,
 	-- 模板前段 FOV 为 45 + 5*Quad(InOut)，后段为 55 - 15*Back(InOut)。
 	OpeningFov = 45,
 	PushFovDelta = 5,

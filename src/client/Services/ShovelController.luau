@@ -9,6 +9,7 @@ local Workspace = game:GetService("Workspace")
 
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
+local ConfirmationDialogController = require(script.Parent.ConfirmationDialogController)
 
 type TargetInfo = {
 	Model: Model,
@@ -33,10 +34,6 @@ local lastPointerPosition = Vector2.new()
 local progressGui: ScreenGui? = nil
 local progressRing: Frame? = nil
 local progressValue: NumberValue? = nil
-local messageGui: ScreenGui? = nil
-local confirmTarget: TargetInfo? = nil
-local confirmConnections: { RBXScriptConnection } = {}
-local confirmClones: { Instance } = {}
 
 local function isShovelTool(tool: Instance?): boolean
 	if not tool or not tool:IsA("Tool") then
@@ -229,106 +226,22 @@ local function createProgressGui(): ScreenGui
 	return screenGui
 end
 
-local function setTextPair(label: TextLabel, text: string)
-	label.Text = text
-	local childLabel = label:FindFirstChild("TextLabel")
-	if childLabel and childLabel:IsA("TextLabel") then
-		childLabel.Text = text
-	end
-end
-
-local function cleanupConfirm()
-	for _, connection in confirmConnections do
-		connection:Disconnect()
-	end
-	table.clear(confirmConnections)
-	for _, clone in confirmClones do
-		clone:Destroy()
-	end
-	table.clear(confirmClones)
-	confirmTarget = nil
-	if messageGui then
-		messageGui.Enabled = false
-	end
-end
-
-local function findMessageTemplate(): (ScreenGui?, TextLabel?, TextLabel?, Frame?, TextButton?, TextButton?)
-	local playerGui = player:WaitForChild("PlayerGui")
-	local gui = messageGui or playerGui:FindFirstChild("Message")
-	if not gui or not gui:IsA("ScreenGui") then
-		return nil, nil, nil, nil, nil, nil
-	end
-	messageGui = gui
-	local mainPage = gui:FindFirstChild("MainPage")
-	local header = mainPage and mainPage:FindFirstChild("Header")
-	local title = header and header:FindFirstChild("Title")
-	local exitButton = header and header:FindFirstChild("ExitButton")
-	local content = mainPage and mainPage:FindFirstChild("Content")
-	local messageFrame = content and content:FindFirstChild("Message")
-	local messageLabel = messageFrame and messageFrame:FindFirstChild("TextLabel")
-	local options = mainPage and mainPage:FindFirstChild("Options")
-	local template = options and options:FindFirstChild("Template")
-	if title and title:IsA("TextLabel")
-		and messageLabel and messageLabel:IsA("TextLabel")
-		and options and options:IsA("Frame")
-		and template and template:IsA("TextButton")
-		and exitButton and exitButton:IsA("TextButton")
-	then
-		return gui, title, messageLabel, options, template, exitButton
-	end
-	return nil, nil, nil, nil, nil, nil
-end
-
-local function createMessageOption(template: TextButton, options: Frame, text: string, order: number): TextButton
-	local button = template:Clone()
-	button.Name = "ShovelOption" .. tostring(order)
-	button.Visible = true
-	button.LayoutOrder = order
-	button.Active = true
-	button.AutoButtonColor = true
-	local textLabel = button:FindFirstChild("TextLabel")
-	if textLabel and textLabel:IsA("TextLabel") then
-		setTextPair(textLabel, text)
-	end
-	local greenGradient = button:FindFirstChild("GreenGradient")
-	local redGradient = button:FindFirstChild("RedGradient")
-	if greenGradient and greenGradient:IsA("UIGradient") then
-		greenGradient.Enabled = order == 1
-	end
-	if redGradient and redGradient:IsA("UIGradient") then
-		redGradient.Enabled = order ~= 1
-	end
-	button.Parent = options
-	table.insert(confirmClones, button)
-	return button
-end
-
 local function showConfirm(target: TargetInfo)
-	local gui, title, messageLabel, options, template, exitButton = findMessageTemplate()
-	if not (gui and title and messageLabel and options and template and exitButton) then
-		warn("[ShovelController] 缺少模板 Message UI：请从模板复制 StarterGui.Message 到当前体验。")
-		return
+	local shown = ConfirmationDialogController.Show({
+		Title = ShovelConfig.ConfirmTitle,
+		Body = ShovelConfig.ConfirmBody,
+		ConfirmText = ShovelConfig.ConfirmText,
+		CancelText = ShovelConfig.CancelText,
+		OnConfirm = function()
+			clearHighlight()
+			if requestRemote then
+				requestRemote:FireServer(target.RecordId)
+			end
+		end,
+	})
+	if not shown then
+		warn("[ShovelController] 通用确认弹窗正忙或模板缺失，已取消本次铲除确认。")
 	end
-	cleanupConfirm()
-	confirmTarget = target
-	setTextPair(title, ShovelConfig.ConfirmTitle)
-	setTextPair(messageLabel, ShovelConfig.ConfirmBody)
-	template.Visible = false
-	exitButton.Visible = false
-	exitButton.Active = false
-
-	local confirmButton = createMessageOption(template, options, ShovelConfig.ConfirmText, 1)
-	local cancelButton = createMessageOption(template, options, ShovelConfig.CancelText, 2)
-	table.insert(confirmConnections, confirmButton.Activated:Connect(function()
-		local selectedTarget = confirmTarget
-		cleanupConfirm()
-		clearHighlight()
-		if selectedTarget and requestRemote then
-			requestRemote:FireServer(selectedTarget.RecordId)
-		end
-	end))
-	table.insert(confirmConnections, cancelButton.Activated:Connect(cleanupConfirm))
-	gui.Enabled = true
 end
 
 local function setCurrentTarget(target: TargetInfo?)

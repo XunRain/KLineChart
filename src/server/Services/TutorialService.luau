@@ -10,6 +10,7 @@ local TutorialConfig = require(ReplicatedStorage.Shared.TutorialConfig)
 local TutorialService = {}
 local PlayerDataService: any
 local RemoteService: any
+local GameAnalyticsService: any
 local initialized = false
 
 local function makeState(player: Player): { [string]: any }?
@@ -61,6 +62,7 @@ local function advance(player: Player, expectedStep: TutorialConfig.TutorialStep
 	if not changed then
 		return false
 	end
+	GameAnalyticsService.OnTutorialAdvanced(player, nextStep)
 	PlayerDataService.RequestSave(player)
 	sendState(player)
 	if nextStep == TutorialConfig.Steps.Completed then
@@ -156,10 +158,14 @@ local function skip(player: Player)
 	if not PlayerDataService.IsLoaded(player) then
 		return
 	end
+	local skippedAtStep = "Unknown"
 	local changed = PlayerDataService.Update(player, function(data)
 		local tutorial = data.Tutorial
 		if tutorial.Completed == true or tutorial.Step == TutorialConfig.Steps.Completed then
 			return false, "TutorialAlreadyCompleted"
+		end
+		if type(tutorial.Step) == "string" then
+			skippedAtStep = tutorial.Step
 		end
 		tutorial.Version = TutorialConfig.Version
 		tutorial.Step = TutorialConfig.Steps.Completed
@@ -170,19 +176,30 @@ local function skip(player: Player)
 	if not changed then
 		return
 	end
-	PlayerDataService.RequestSave(player)
+	local saved, saveReason = PlayerDataService.SaveNow(player)
+	if not saved then
+		warn(string.format("[TutorialService] Skip save pending for %s: %s", player.Name, tostring(saveReason)))
+		PlayerDataService.RequestSave(player)
+	else
+		GameAnalyticsService.OnTutorialSkipped(player, skippedAtStep)
+	end
 	sendState(player)
 	RemoteService.Notify(player, TutorialConfig.SkippedMessage, "Info")
 end
 
 -- 注入权威存档与 Remote 服务，并注册状态请求和受限跳过入口；重复初始化安全返回。
-function TutorialService.Init(dependencies: { PlayerDataService: any, RemoteService: any })
+function TutorialService.Init(dependencies: {
+	PlayerDataService: any,
+	RemoteService: any,
+	GameAnalyticsService: any,
+})
 	if initialized then
 		return
 	end
 	initialized = true
 	PlayerDataService = dependencies.PlayerDataService
 	RemoteService = dependencies.RemoteService
+	GameAnalyticsService = dependencies.GameAnalyticsService
 	RemoteService.GetEvent("RequestTutorialState").OnServerEvent:Connect(function(player)
 		sendState(player)
 	end)

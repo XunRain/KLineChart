@@ -13,6 +13,7 @@ local PlayerDataService: any
 local PlotService: any
 local InventoryService: any
 local RemoteService: any
+local GameAnalyticsService: any
 local lastRequestAt: { [Player]: number } = {}
 
 local function getNextExpansion(ownedExpansions: number): { [string]: number }?
@@ -41,20 +42,21 @@ local function handleRequest(player: Player)
 		return
 	end
 	if not PlayerDataService.IsLoaded(player) then
-		notify(player, "玩家数据尚未加载，无法扩建花园。", "Warning")
+		notify(player, "Player data is still loading. Your garden cannot be expanded yet.", "Warning")
 		return
 	end
 	if not PlotService.GetPlot(player) then
-		notify(player, "尚未分配花园地块，无法扩建。", "Warning")
+		notify(player, "Your garden plot has not been assigned yet.", "Warning")
 		return
 	end
 	if not PlotService.HasExpansionTargets(player) then
-		notify(player, "当前地块缺少扩建所需部件，请检查 Studio 模板。", "Warning")
+		notify(player, "This garden plot cannot be expanded right now. Please try again later.", "Warning")
 		return
 	end
 
 	local newLevel = 0
 	local price = 0
+	local endingBalance = 0
 	local changed, reason = PlayerDataService.Update(player, function(data)
 		local owned = math.max(0, math.floor(tonumber(data.OwnedExpansions) or 0))
 		local nextExpansion = getNextExpansion(owned)
@@ -70,6 +72,7 @@ local function handleRequest(player: Player)
 		end
 
 		data.Sheckles -= nextPrice
+		endingBalance = data.Sheckles
 		data.OwnedExpansions = math.max(owned + 1, math.floor(tonumber(nextExpansion.Expansion) or owned + 1))
 		newLevel = data.OwnedExpansions
 		price = nextPrice
@@ -78,25 +81,26 @@ local function handleRequest(player: Player)
 
 	if not changed then
 		local messages: { [string]: string } = {
-			MaxLevel = "花园已经扩建到最大等级。",
-			InvalidPrice = "扩建价格配置无效。",
-			InsufficientSheckles = string.format("%s 余额不足，无法扩建。", EconomyConfig.CurrencyName),
-			DataBusy = "数据处理中，请稍后重试。",
+			MaxLevel = "Your garden is already fully expanded.",
+			InvalidPrice = "Garden expansion is temporarily unavailable.",
+			InsufficientSheckles = "Not enough Sheckles to expand.",
+			DataBusy = "Your data is busy. Please try again.",
 		}
 		local reasonKey = if type(reason) == "string" then reason else ""
-		notify(player, messages[reasonKey] or "扩建失败，请稍后重试。", "Warning")
+		notify(player, messages[reasonKey] or "Garden expansion failed. Please try again.", "Warning")
 		return
 	end
 
 	local applied, applyReason = PlotService.ApplyExpansion(player, newLevel)
 	if not applied then
 		warn(string.format("[PlotExpansionService] 扩建尺寸应用失败 %s：%s", player.Name, tostring(applyReason)))
-		notify(player, "扩建已购买，但地块视觉应用失败，请重新进入服务器检查。", "Warning")
+		notify(player, "The expansion was purchased, but the plot could not update. Please rejoin the server.", "Warning")
 	else
-		notify(player, string.format("花园扩建成功，消耗 %d %s。", price, EconomyConfig.CurrencyName), "Success")
+		notify(player, string.format("Garden expanded successfully. Spent %d %s.", price, EconomyConfig.CurrencyName), "Success")
 	end
 	PlayerDataService.RequestSave(player)
 	InventoryService.Sync(player)
+	GameAnalyticsService.OnPlotExpanded(player, newLevel, price, endingBalance)
 end
 
 -- 注入存档、地块、库存与 Remote 服务，并注册扩地请求和玩家离开清理。
@@ -105,11 +109,13 @@ function PlotExpansionService.Init(dependencies: {
 	PlotService: any,
 	InventoryService: any,
 	RemoteService: any,
+	GameAnalyticsService: any,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	PlotService = dependencies.PlotService
 	InventoryService = dependencies.InventoryService
 	RemoteService = dependencies.RemoteService
+	GameAnalyticsService = dependencies.GameAnalyticsService
 
 	RemoteService.GetEvent("RequestExpandPlot").OnServerEvent:Connect(function(player)
 		local ok, err = pcall(function()
@@ -118,7 +124,7 @@ function PlotExpansionService.Init(dependencies: {
 		end)
 		if not ok then
 			warn(string.format("[PlotExpansionService] 扩地请求处理失败 %s：%s", player.Name, tostring(err)))
-			notify(player, "扩建失败，请稍后重试。", "Warning")
+			notify(player, "Garden expansion failed. Please try again.", "Warning")
 		end
 	end)
 

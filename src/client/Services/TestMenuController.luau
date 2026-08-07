@@ -114,7 +114,7 @@ local function createMenu(requestEvent: RemoteEvent): ScreenGui
 	title.Font = Enum.Font.GothamBold
 	title.TextColor3 = Color3.fromRGB(244, 247, 252)
 	title.TextSize = 18
-	title.Text = "白名单测试功能"
+	title.Text = "Whitelist Test Menu"
 	title.Parent = panel
 
 	local content = Instance.new("ScrollingFrame")

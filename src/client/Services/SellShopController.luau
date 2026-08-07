@@ -11,6 +11,7 @@ local Workspace = game:GetService("Workspace")
 
 local HudConfig = require(ReplicatedStorage.Shared.HudConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local ItemQualityVisualConfig = require(ReplicatedStorage.Shared.ItemQualityVisualConfig)
 local MarketConfig = require(ReplicatedStorage.Shared.MarketConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
@@ -764,6 +765,11 @@ local function configureRow(row: Frame, itemId: string, definition: ItemConfig.I
 	end
 	local rarity = main:FindFirstChild("Rarity")
 	setFirstText(rarity, { "Rarity_Text" }, definition.Quality:upper())
+	ItemQualityVisualConfig.ApplyRarityGradient(
+		rarity,
+		definition.Quality,
+		"SellShop.ItemTemplate.Main_Frame.Rarity"
+	)
 	local priceBase = main:FindFirstChild("Price_Text")
 	local priceText = getLayeredText(priceBase)
 	local priceFace = priceText and priceText.Face

@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local HarvestPromptConfig = require(ReplicatedStorage.Shared.HarvestPromptConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local ProduceCapacityIAPConfig = require(ReplicatedStorage.Shared.ProduceCapacityIAPConfig)
 local PlantGrowthService = require(script.Parent.PlantGrowthService)
 
 local HarvestService = {}
@@ -15,6 +16,7 @@ local InventoryService: any
 local PlantService: any
 local RemoteService: any
 local TutorialService: any
+local GameAnalyticsService: any
 local locks: { [string]: boolean } = {}
 local lastRequestAt: { [Player]: number } = {}
 
@@ -39,6 +41,15 @@ local function getAliveCharacterRoot(player: Player): BasePart?
 		return nil
 	end
 	return root
+end
+
+local function hasProduceCapacity(data: any, yieldAmount: number): boolean
+	local capacity = ProduceCapacityIAPConfig.GetValidCapacity(data.Inventory.ProduceCapacity)
+	if not capacity or not isPositiveInteger(yieldAmount) then
+		return false
+	end
+	local used = InventoryService.GetProduceUsed(data.Inventory.Produce)
+	return yieldAmount <= capacity and used <= capacity - yieldAmount
 end
 
 local function handleRequest(player: Player, rawRecordId: any, rawTargetKind: any, rawFruitSlotIndex: any)
@@ -159,6 +170,9 @@ local function handleRequest(player: Player, rawRecordId: any, rawTargetKind: an
 			then
 				return false, "NotReady"
 			end
+			if not hasProduceCapacity(data, definition.YieldAmount) then
+				return false, "ProduceInventoryFull"
+			end
 			data.Inventory.Produce[record.plantId] = (data.Inventory.Produce[record.plantId] or 0)
 				+ definition.YieldAmount
 			data.Plants[recordId] = nil
@@ -169,6 +183,9 @@ local function handleRequest(player: Player, rawRecordId: any, rawTargetKind: an
 			local slotIndex = fruitSlotIndex
 			if definition.HarvestType ~= "Repeat" or not regrowTime or not slotCount or not slotIndex then
 				return false, "RegrowConfigMissing"
+			end
+			if not hasProduceCapacity(data, definition.YieldAmount) then
+				return false, "ProduceInventoryFull"
 			end
 			PlantGrowthService.AdvanceRepeatRecord(
 				record,
@@ -200,6 +217,8 @@ local function handleRequest(player: Player, rawRecordId: any, rawTargetKind: an
 	if not changed then
 		if reason == "NotReady" then
 			RemoteService.Notify(player, "This plant is not ready yet.", "Info")
+		elseif reason == "ProduceInventoryFull" then
+			RemoteService.Notify(player, ProduceCapacityIAPConfig.FullNotice, "Warning")
 		end
 		finish()
 		return
@@ -217,6 +236,11 @@ local function handleRequest(player: Player, rawRecordId: any, rawTargetKind: an
 	RemoteService.Notify(player, string.format("Harvested %s.", definition and definition.DisplayName or "produce"), "Success")
 	if harvestedPlantId then
 		TutorialService.OnProduceHarvested(player, harvestedPlantId)
+		GameAnalyticsService.OnProduceHarvested(
+			player,
+			harvestedPlantId,
+			if definition then definition.YieldAmount else 0
+		)
 	end
 	finish()
 end
@@ -228,12 +252,14 @@ function HarvestService.Init(dependencies: {
 	PlantService: any,
 	RemoteService: any,
 	TutorialService: any,
+	GameAnalyticsService: any,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	InventoryService = dependencies.InventoryService
 	PlantService = dependencies.PlantService
 	RemoteService = dependencies.RemoteService
 	TutorialService = dependencies.TutorialService
+	GameAnalyticsService = dependencies.GameAnalyticsService
 
 	RemoteService.GetEvent("RequestHarvestTarget").OnServerEvent:Connect(function(player, recordId, targetKind, fruitSlotIndex)
 		local ok, err = pcall(function()

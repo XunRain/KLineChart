@@ -14,6 +14,8 @@ local InventoryService: any
 local PlantService: any
 local TutorialService: any
 local LeaderboardService: any
+local EasterEggService: any
+local GameAnalyticsService: any
 local characterConnections: { [Player]: RBXScriptConnection } = {}
 local loadingPlayers: { [Player]: boolean } = {}
 
@@ -23,6 +25,7 @@ local function cleanup(player: Player)
 		connection:Disconnect()
 		characterConnections[player] = nil
 	end
+	GameAnalyticsService.PlayerRemoving(player)
 	LeaderboardService.PlayerRemoving(player)
 	PlantService.DestroyPlayer(player)
 	PlotService.Release(player)
@@ -71,8 +74,10 @@ local function loadPlayer(player: Player)
 		end
 		return
 	end
+	GameAnalyticsService.PlayerReady(player)
 	TutorialService.PlayerReady(player)
 	LeaderboardService.PlayerReady(player)
+	EasterEggService.PlayerReady(player)
 
 	local function onCharacter(character: Model)
 		task.defer(function()
@@ -107,6 +112,8 @@ function PlayerLifecycleService.Init(dependencies: {
 	PlantService: any,
 	TutorialService: any,
 	LeaderboardService: any,
+	EasterEggService: any,
+	GameAnalyticsService: any,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	PlotService = dependencies.PlotService
@@ -114,6 +121,8 @@ function PlayerLifecycleService.Init(dependencies: {
 	PlantService = dependencies.PlantService
 	TutorialService = dependencies.TutorialService
 	LeaderboardService = dependencies.LeaderboardService
+	EasterEggService = dependencies.EasterEggService
+	GameAnalyticsService = dependencies.GameAnalyticsService
 
 	Players.PlayerAdded:Connect(function(player)
 		task.spawn(loadPlayer, player)

@@ -123,44 +123,44 @@ local function handleRequest(player: Player, actionId: any)
 	local now = os.clock()
 	local previous = lastRequestAt[player]
 	if previous and now - previous < math.max(0, TestMenuConfig.RequestCooldown) then
-		RemoteService.Notify(player, "测试操作过快，请稍后重试。", "Warning")
+		RemoteService.Notify(player, "Test actions are being requested too quickly. Please try again.", "Warning")
 		return
 	end
 	lastRequestAt[player] = now
 	local action = TestMenuConfig.GetAction(actionId)
 	if not action or not isSafeAction(action) then
-		RemoteService.Notify(player, "未知或无效的测试动作。", "Warning")
+		RemoteService.Notify(player, "Unknown or invalid test action.", "Warning")
 		return
 	end
 
 	if action.Kind == "StartWeather" or action.Kind == "ClearWeather" then
 		local ok, reason = runWeatherAction(action)
 		if not ok then
-			RemoteService.Notify(player, string.format("测试天气操作失败：%s", tostring(reason)), "Warning")
+			RemoteService.Notify(player, string.format("Test weather action failed: %s", tostring(reason)), "Warning")
 			return
 		end
-		RemoteService.Notify(player, string.format("已执行%s。", action.DisplayText), "Success")
+		RemoteService.Notify(player, string.format("Executed: %s.", action.DisplayText), "Success")
 		return
 	end
 
 	if action.Kind == "ForceTimePhase" or action.Kind == "ResumeTimeCycle" then
 		local ok, reason = runTimeCycleAction(action)
 		if not ok then
-			RemoteService.Notify(player, string.format("测试昼夜操作失败：%s", tostring(reason)), "Warning")
+			RemoteService.Notify(player, string.format("Test time-of-day action failed: %s", tostring(reason)), "Warning")
 			return
 		end
-		RemoteService.Notify(player, string.format("已执行%s。", action.DisplayText), "Success")
+		RemoteService.Notify(player, string.format("Executed: %s.", action.DisplayText), "Success")
 		return
 	end
 
 	if not PlayerDataService.IsLoaded(player) then
-		RemoteService.Notify(player, "玩家数据尚未加载，测试奖励未发放。", "Warning")
+		RemoteService.Notify(player, "Player data is still loading. Test reward was not granted.", "Warning")
 		return
 	end
 	if action.Kind == "ResetTutorial" then
 		local changed, reason = TutorialService.Reset(player)
 		if not changed then
-			RemoteService.Notify(player, string.format("教程重置失败：%s", tostring(reason)), "Warning")
+			RemoteService.Notify(player, string.format("Tutorial reset failed: %s", tostring(reason)), "Warning")
 		end
 		return
 	end
@@ -175,16 +175,16 @@ local function handleRequest(player: Player, actionId: any)
 		changed, reason = grantSeed(player, action)
 	end
 	if not changed then
-		RemoteService.Notify(player, string.format("测试奖励发放失败：%s", tostring(reason)), "Warning")
+		RemoteService.Notify(player, string.format("Test reward failed: %s", tostring(reason)), "Warning")
 		return
 	end
 
 	PlayerDataService.RequestSave(player)
 	InventoryService.Sync(player)
 	if action.Kind == "ClearCurrency" then
-		RemoteService.Notify(player, "已清空金币。", "Success")
+		RemoteService.Notify(player, "Cleared all Sheckles.", "Success")
 	else
-		RemoteService.Notify(player, string.format("已发放%s。", action.DisplayText), "Success")
+		RemoteService.Notify(player, string.format("Granted %s.", action.DisplayText), "Success")
 	end
 end
 

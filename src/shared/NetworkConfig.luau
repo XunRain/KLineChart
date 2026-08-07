@@ -10,6 +10,16 @@ return {
 		RequestPlant = "RequestPlant",
 		-- 客户端到服务端：只提交植物 recordId、Plant/Fruit 目标类型与可选果实槽编号；服务端重新校验所有权、模型、成熟状态、槽位、限频与事务锁，绝不接受品种、数量或奖励。
 		RequestHarvestTarget = "RequestHarvestTarget",
+		-- 客户端到服务端：无参数请求“一键收获全部成熟作物”权威报价；客户端不得提交成熟目标、容量或奖励数量。
+		RequestHarvestAllQuote = "RequestHarvestAllQuote",
+		-- 服务端到单个客户端：返回 NoMature/NoCapacity/Confirm 等权威报价结果；客户端只负责展示。
+		HarvestAllQuoteResult = "HarvestAllQuoteResult",
+		-- 客户端到服务端：唯一参数为服务端短期报价 token；服务端重算数字，变化时只返回新报价而不弹窗。
+		ConfirmHarvestAllQuote = "ConfirmHarvestAllQuote",
+		-- 服务端到单个客户端：唯一参数为全局唯一权威商品 ID；只用于打开官方弹窗，完成事件绝不发货。
+		PromptHarvestAllProductPurchase = "PromptHarvestAllProductPurchase",
+		-- 客户端到服务端：官方弹窗取消或本地打开失败时只回报权威商品 ID，用于清理匹配持久 intent。
+		CancelHarvestAllProductPurchase = "CancelHarvestAllProductPurchase",
 		-- 客户端到服务端：唯一参数为植物 recordId 字符串；服务端重新校验铲子、所有权、距离、冷却和存档记录后才删除整株植物。
 		RequestShovelPlant = "RequestShovelPlant",
 		-- 服务端到全部客户端：参数依次为权威种植面位置 Vector3、plantId 字符串和植物记录 recordId；仅用于播放本地播种特效，不参与成长或库存结算。
@@ -78,6 +88,8 @@ return {
 		TutorialStateChanged = "TutorialStateChanged",
 		-- 客户端到服务端：无参数请求跳过尚未完成的教程；服务端重新校验存档并持久化完成状态。
 		RequestSkipTutorial = "RequestSkipTutorial",
+		-- 早期客户端到服务端：开场完成或安全跳过清理后无参数上报一次；服务端仅在数据与角色/地块 Ready 后接受，参数和重复请求均忽略。
+		ReportOpeningCompleted = "ReportOpeningCompleted",
 		-- 服务端到单个客户端：参数依次为消息字符串和可选级别字符串；仅用于界面提示，不承载任何权威状态或结算结果。
 		Notify = "Notify",
 	},

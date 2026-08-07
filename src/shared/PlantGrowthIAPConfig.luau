@@ -27,7 +27,7 @@ PlantGrowthIAPConfig.StateRefreshInterval = 1
 -- 未决购买超过该秒数后允许安全清理；迟到收据仍会转为持久 credit，不能直接丢弃已付款权益。
 PlantGrowthIAPConfig.PendingIntentTimeout = 15 * 60
 
--- Single 与 All 的正式开发者商品 ID；两个正数 ID 必须互不重复且不得复用种子或商店刷新商品 ID。
+-- Single 与 All 的正式开发者商品 ID；两个正数 ID 必须互不重复且不得复用种子、刷新、容量或收获全部商品 ID。
 PlantGrowthIAPConfig.ProductIds = {
 	Single = 3629440139,
 	All = 3629441072,

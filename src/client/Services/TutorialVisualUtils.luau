@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块管理教程本地世界箭头与 Studio-owned Pointer/Focus，并在步骤切换或重生时完整复位。
+-- 本模块管理教程本地世界箭头、Studio-owned Pointer/Focus 与可见控件轻晃，并在步骤切换或重生时完整复位。
 
 local CollectionService = game:GetService("CollectionService")
 local GuiService = game:GetService("GuiService")
@@ -31,6 +31,29 @@ type BeamState = {
 	Width1: number,
 }
 
+type ButtonNudgeSettings = {
+	Angle: number,
+	SecondaryAngle: number,
+	ReturnAngle: number,
+	SegmentDuration: number,
+	PauseDuration: number,
+}
+
+type NudgeProfile = "Row" | "Action"
+
+type GuiNudgeTarget = {
+	Target: GuiObject,
+	Profile: NudgeProfile,
+}
+
+type GuiNudgeBinding = {
+	Target: GuiObject,
+	Profile: NudgeProfile,
+	OriginalRotation: number,
+	Tween: Tween?,
+	Generation: number,
+}
+
 local TutorialVisualUtils = {}
 local player = Players.LocalPlayer
 local activeStep: TutorialConfig.TutorialStep? = nil
@@ -48,6 +71,8 @@ local retryAccumulated = 0
 local startedAt = 0
 local warnShown: { [string]: boolean } = {}
 local fallbackNotice: ((string) -> ())? = nil
+local guiNudgeBindings: { [GuiObject]: GuiNudgeBinding } = {}
+local nextGuiNudgeGeneration = 0
 local FOCUS_ACTIVE_STROKE_TRANSPARENCY = 0.3
 
 local function warnOnce(key: string, message: string, notify: boolean)
@@ -71,6 +96,69 @@ local function cancelBeamTweens()
 		tween:Cancel()
 	end
 	table.clear(beamTweens)
+end
+
+local function resolveFiniteNumber(value: any, fallback: number, minimum: number, maximum: number): number
+	if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
+		return fallback
+	end
+	return math.clamp(value, minimum, maximum)
+end
+
+local function resolveButtonNudgeSettings(profile: NudgeProfile): ButtonNudgeSettings?
+	local rawConfig = TutorialConfig.ButtonNudge
+	if type(rawConfig) ~= "table" or rawConfig.Enabled ~= true then
+		return nil
+	end
+	local maxAngle = resolveFiniteNumber(rawConfig.MaxAngle, 5, 0, 5)
+	if maxAngle <= 0 then
+		return nil
+	end
+	local rawProfile = if profile == "Row" then rawConfig.Row else rawConfig.Action
+	if type(rawProfile) ~= "table" then
+		return nil
+	end
+	local fallbackAngle = if profile == "Row" then 2.5 else 4.0
+	local fallbackSecondaryAngle = if profile == "Row" then 1.7 else 2.6
+	local fallbackReturnAngle = if profile == "Row" then 1.0 else 1.5
+	local fallbackPauseDuration = if profile == "Row" then 1.15 else 0.40
+	local angle = resolveFiniteNumber(rawProfile.Angle, fallbackAngle, 0, maxAngle)
+	if angle <= 0 then
+		return nil
+	end
+	return {
+		Angle = angle,
+		SecondaryAngle = resolveFiniteNumber(rawProfile.SecondaryAngle, fallbackSecondaryAngle, 0, maxAngle),
+		ReturnAngle = resolveFiniteNumber(rawProfile.ReturnAngle, fallbackReturnAngle, 0, maxAngle),
+		SegmentDuration = resolveFiniteNumber(rawProfile.SegmentDuration, 0.10, 0.03, 1),
+		PauseDuration = resolveFiniteNumber(rawProfile.PauseDuration, fallbackPauseDuration, 0, 10),
+	}
+end
+
+local function clearGuiNudgeBinding(binding: GuiNudgeBinding)
+	local target = binding.Target
+	if guiNudgeBindings[target] == binding then
+		guiNudgeBindings[target] = nil
+	end
+	binding.Generation += 1
+	local tween = binding.Tween
+	if tween then
+		binding.Tween = nil
+		tween:Cancel()
+	end
+	if target.Parent then
+		target.Rotation = binding.OriginalRotation
+	end
+end
+
+local function clearGuiNudges()
+	local bindings: { GuiNudgeBinding } = {}
+	for _, binding in guiNudgeBindings do
+		table.insert(bindings, binding)
+	end
+	for _, binding in bindings do
+		clearGuiNudgeBinding(binding)
+	end
 end
 
 local function clearArrow()
@@ -217,28 +305,10 @@ local function isActuallyVisible(gui: GuiObject): boolean
 	return true
 end
 
-local function findSeedShopTarget(): GuiObject?
-	local playerGui = player:FindFirstChildOfClass("PlayerGui")
-	local screenCandidate = playerGui and playerGui:FindFirstChild(TutorialConfig.SeedShopScreenName)
-	if not screenCandidate or not screenCandidate:IsA("ScreenGui") or not screenCandidate.Enabled then
-		return nil
-	end
-	local expansionCandidate = screenCandidate:FindFirstChild(TutorialConfig.SeedShopShelfName, true)
-	if expansionCandidate and expansionCandidate:IsA("GuiObject") and isActuallyVisible(expansionCandidate) then
-		local primaryCandidate = expansionCandidate:FindFirstChild(TutorialConfig.SeedShopBuyButtonName, true)
-		if primaryCandidate and primaryCandidate:IsA("GuiObject") and isActuallyVisible(primaryCandidate) then
-			return primaryCandidate
-		end
-	end
-	local rowCandidate = screenCandidate:FindFirstChild(TutorialConfig.CarrotRowName, true)
-	if rowCandidate and rowCandidate:IsA("GuiObject") and isActuallyVisible(rowCandidate) then
-		local buttonCandidate = rowCandidate:FindFirstChildWhichIsA("GuiButton", true)
-		return buttonCandidate or rowCandidate
-	end
-	return nil
-end
-
 local function findVisibleGuiButton(root: GuiObject): GuiButton?
+	if root:IsA("GuiButton") and isActuallyVisible(root) then
+		return root
+	end
 	for _, child in root:GetChildren() do
 		if child:IsA("GuiButton") and isActuallyVisible(child) then
 			return child
@@ -252,16 +322,194 @@ local function findVisibleGuiButton(root: GuiObject): GuiButton?
 	return nil
 end
 
-local function findSellShopTarget(): GuiObject?
+local function isNudgeTargetUsable(target: GuiObject): boolean
+	if not target.Parent or not isActuallyVisible(target) then
+		return false
+	end
+	if target:IsA("GuiButton") then
+		return target.Active and target.Interactable
+	end
+	return true
+end
+
+local function playGuiNudgeTween(
+	binding: GuiNudgeBinding,
+	generation: number,
+	duration: number,
+	offset: number,
+	easingStyle: Enum.EasingStyle,
+	easingDirection: Enum.EasingDirection
+): boolean
+	local target = binding.Target
+	if guiNudgeBindings[target] ~= binding
+		or binding.Generation ~= generation
+		or not isNudgeTargetUsable(target)
+	then
+		return false
+	end
+	local tween = TweenService:Create(
+		target,
+		TweenInfo.new(duration, easingStyle, easingDirection),
+		{ Rotation = binding.OriginalRotation + offset }
+	)
+	binding.Tween = tween
+	tween:Play()
+	local playbackState = tween.Completed:Wait()
+	if guiNudgeBindings[target] ~= binding or binding.Generation ~= generation then
+		return false
+	end
+	binding.Tween = nil
+	return playbackState == Enum.PlaybackState.Completed and isNudgeTargetUsable(target)
+end
+
+local function runGuiNudgeLoop(binding: GuiNudgeBinding, settings: ButtonNudgeSettings)
+	local generation = binding.Generation
+	local offsets = {
+		-settings.Angle,
+		settings.Angle,
+		-settings.SecondaryAngle,
+		settings.ReturnAngle,
+		0,
+	}
+	while guiNudgeBindings[binding.Target] == binding and binding.Generation == generation do
+		for index, offset in offsets do
+			local easingStyle = if index == #offsets then Enum.EasingStyle.Quad else Enum.EasingStyle.Sine
+			local easingDirection = if index == #offsets
+				then Enum.EasingDirection.Out
+				else Enum.EasingDirection.InOut
+			if not playGuiNudgeTween(
+				binding,
+				generation,
+				settings.SegmentDuration,
+				offset,
+				easingStyle,
+				easingDirection
+			) then
+				return
+			end
+		end
+		if settings.PauseDuration > 0 then
+			task.wait(settings.PauseDuration)
+		end
+	end
+end
+
+local function setGuiNudgeTargets(targets: { GuiNudgeTarget })
+	local desired: { [GuiObject]: NudgeProfile } = {}
+	for _, targetSpec in targets do
+		local target = targetSpec.Target
+		local profile = targetSpec.Profile
+		if isNudgeTargetUsable(target) and resolveButtonNudgeSettings(profile) then
+			local existingProfile = desired[target]
+			if not existingProfile or profile == "Action" then
+				desired[target] = profile
+			end
+		end
+	end
+
+	local removals: { GuiNudgeBinding } = {}
+	for target, binding in guiNudgeBindings do
+		local desiredProfile = desired[target]
+		if not desiredProfile or desiredProfile ~= binding.Profile then
+			table.insert(removals, binding)
+		end
+	end
+	for _, binding in removals do
+		clearGuiNudgeBinding(binding)
+	end
+
+	for target, profile in desired do
+		if not guiNudgeBindings[target] then
+			local settings = resolveButtonNudgeSettings(profile)
+			if not settings then
+				continue
+			end
+			nextGuiNudgeGeneration += 1
+			local binding: GuiNudgeBinding = {
+				Target = target,
+				Profile = profile,
+				OriginalRotation = target.Rotation,
+				Tween = nil,
+				Generation = nextGuiNudgeGeneration,
+			}
+			guiNudgeBindings[target] = binding
+			task.spawn(runGuiNudgeLoop, binding, settings)
+		end
+	end
+end
+
+local function findRowNudgeTarget(row: GuiObject): GuiObject
+	local mainCandidate = row:FindFirstChild("Main_Frame")
+	if mainCandidate and mainCandidate:IsA("GuiObject") and isActuallyVisible(mainCandidate) then
+		return mainCandidate
+	end
+	return row
+end
+
+local function findTeleportNudgeTarget(buttonName: string): GuiObject?
+	local playerGui = player:FindFirstChildOfClass("PlayerGui")
+	local screenCandidate = playerGui and playerGui:FindFirstChild(TutorialConfig.TeleportButtonsScreenName)
+	if not screenCandidate or not screenCandidate:IsA("ScreenGui") or not screenCandidate.Enabled then
+		return nil
+	end
+	local container = screenCandidate:FindFirstChild(TutorialConfig.TeleportButtonsContainerName)
+	local buttonCandidate = container and container:FindFirstChild(buttonName)
+	if buttonCandidate and buttonCandidate:IsA("GuiButton") and isNudgeTargetUsable(buttonCandidate) then
+		return buttonCandidate
+	end
+	return nil
+end
+
+local function findSeedShopTargets(): (GuiObject?, { GuiNudgeTarget }, boolean)
+	local playerGui = player:FindFirstChildOfClass("PlayerGui")
+	local screenCandidate = playerGui and playerGui:FindFirstChild(TutorialConfig.SeedShopScreenName)
+	if not screenCandidate or not screenCandidate:IsA("ScreenGui") or not screenCandidate.Enabled then
+		return nil, {}, false
+	end
+	local rowCandidate = screenCandidate:FindFirstChild(TutorialConfig.CarrotRowName, true)
+	if not rowCandidate or not rowCandidate:IsA("GuiObject") or not isActuallyVisible(rowCandidate) then
+		return nil, {}, true
+	end
+	local shelfCandidate = screenCandidate:FindFirstChild(TutorialConfig.SeedShopShelfName, true)
+	local shelf: GuiObject? = if shelfCandidate and shelfCandidate:IsA("GuiObject") then shelfCandidate else nil
+	if shelf
+		and isActuallyVisible(shelf)
+		and shelf.LayoutOrder == rowCandidate.LayoutOrder + 1
+	then
+		local buyCandidate = shelf:FindFirstChild(TutorialConfig.SeedShopBuyButtonName, true)
+		if buyCandidate and buyCandidate:IsA("GuiButton") and isActuallyVisible(buyCandidate) then
+			return buyCandidate, { { Target = buyCandidate, Profile = "Action" } }, true
+		end
+		return findVisibleGuiButton(rowCandidate) or rowCandidate, {}, true
+	end
+	local robuxShelfCandidate = screenCandidate:FindFirstChild(TutorialConfig.SeedShopRobuxShelfName, true)
+	if robuxShelfCandidate
+		and robuxShelfCandidate:IsA("GuiObject")
+		and isActuallyVisible(robuxShelfCandidate)
+		and robuxShelfCandidate.LayoutOrder == rowCandidate.LayoutOrder + 1
+	then
+		return findVisibleGuiButton(rowCandidate) or rowCandidate, {}, true
+	end
+	local rowButton = findVisibleGuiButton(rowCandidate)
+	local nudgeTargets: { GuiNudgeTarget } = {
+		{ Target = findRowNudgeTarget(rowCandidate), Profile = "Row" },
+	}
+	if rowButton then
+		return rowButton, nudgeTargets, true
+	end
+	return rowCandidate, nudgeTargets, true
+end
+
+local function findSellShopTargets(): (GuiObject?, { GuiNudgeTarget }, boolean)
 	local playerGui = player:FindFirstChildOfClass("PlayerGui")
 	local screenCandidate = playerGui and playerGui:FindFirstChild(TutorialConfig.SellShopScreenName)
 	if not screenCandidate or not screenCandidate:IsA("ScreenGui") or not screenCandidate.Enabled then
-		return nil
+		return nil, {}, false
 	end
 	local rowName = TutorialConfig.SellShopRuntimeRowPrefix .. TutorialConfig.CarrotItemId
 	local rowCandidate = screenCandidate:FindFirstChild(rowName, true)
 	if not rowCandidate or not rowCandidate:IsA("GuiObject") or not isActuallyVisible(rowCandidate) then
-		return nil
+		return nil, {}, true
 	end
 	local shelfCandidate = screenCandidate:FindFirstChild(TutorialConfig.SellShopShelfName, true)
 	local shelf: GuiObject? = if shelfCandidate and shelfCandidate:IsA("GuiObject") then shelfCandidate else nil
@@ -271,19 +519,53 @@ local function findSellShopTarget(): GuiObject?
 	then
 		local sellCandidate = shelf:FindFirstChild(TutorialConfig.SellShopSellButtonName, true)
 		if sellCandidate and sellCandidate:IsA("GuiButton") and isActuallyVisible(sellCandidate) then
-			return sellCandidate
+			return sellCandidate, { { Target = sellCandidate, Profile = "Action" } }, true
 		end
+		return findVisibleGuiButton(rowCandidate) or rowCandidate, {}, true
 	end
-	return findVisibleGuiButton(rowCandidate) or rowCandidate
+	local rowButton = findVisibleGuiButton(rowCandidate)
+	local nudgeTargets: { GuiNudgeTarget } = {
+		{ Target = findRowNudgeTarget(rowCandidate), Profile = "Row" },
+	}
+	if rowButton then
+		return rowButton, nudgeTargets, true
+	end
+	return rowCandidate, nudgeTargets, true
+end
+
+local function findActiveGuiTargets(): (GuiObject?, { GuiNudgeTarget })
+	if activeStep == TutorialConfig.Steps.BuyCarrot then
+		local target, nudgeTargets, shopOpen = findSeedShopTargets()
+		if not shopOpen then
+			local teleportTarget = findTeleportNudgeTarget(TutorialConfig.TeleportSeedsButtonName)
+			if teleportTarget then
+				table.insert(nudgeTargets, { Target = teleportTarget, Profile = "Action" })
+			end
+		end
+		return target, nudgeTargets
+	elseif activeStep == TutorialConfig.Steps.PlantCarrot then
+		local nudgeTargets: { GuiNudgeTarget } = {}
+		local teleportTarget = findTeleportNudgeTarget(TutorialConfig.TeleportGardenButtonName)
+		if teleportTarget then
+			table.insert(nudgeTargets, { Target = teleportTarget, Profile = "Action" })
+		end
+		return nil, nudgeTargets
+	elseif activeStep == TutorialConfig.Steps.SellCarrot then
+		local target, nudgeTargets, shopOpen = findSellShopTargets()
+		if not shopOpen then
+			local teleportTarget = findTeleportNudgeTarget(TutorialConfig.TeleportSellButtonName)
+			if teleportTarget then
+				table.insert(nudgeTargets, { Target = teleportTarget, Profile = "Action" })
+			end
+		end
+		return target, nudgeTargets
+	end
+	return nil, {}
 end
 
 local function findActiveGuiTarget(): GuiObject?
-	if activeStep == TutorialConfig.Steps.BuyCarrot then
-		return findSeedShopTarget()
-	elseif activeStep == TutorialConfig.Steps.SellCarrot then
-		return findSellShopTarget()
-	end
-	return nil
+	local target = findActiveGuiTargets()
+	return target
 end
 
 local function convertTargetRect(target: GuiObject, tutorialScreen: ScreenGui): (Vector2, Vector2)
@@ -302,10 +584,15 @@ local function convertTargetRect(target: GuiObject, tutorialScreen: ScreenGui): 
 end
 
 local function updateGuiTarget()
-	if activeStep ~= TutorialConfig.Steps.BuyCarrot and activeStep ~= TutorialConfig.Steps.SellCarrot then
+	if activeStep ~= TutorialConfig.Steps.BuyCarrot
+		and activeStep ~= TutorialConfig.Steps.PlantCarrot
+		and activeStep ~= TutorialConfig.Steps.SellCarrot
+	then
+		setGuiNudgeTargets({})
 		return
 	end
-	local target = findActiveGuiTarget()
+	local target, nudgeTargets = findActiveGuiTargets()
+	setGuiNudgeTargets(nudgeTargets)
 	if not target then
 		local binding = guiBinding
 		if binding then
@@ -412,7 +699,8 @@ end
 local function resolveWorldTarget(): BasePart?
 	local step = activeStep
 	if step == TutorialConfig.Steps.BuyCarrot then
-		if findSeedShopTarget() and canDisplayGuiBinding(guiBinding) then
+		local guiTarget = findSeedShopTargets()
+		if guiTarget and canDisplayGuiBinding(guiBinding) then
 			return nil
 		end
 		return getTaggedPart(TutorialConfig.SeedShopNpcTag)
@@ -422,7 +710,8 @@ local function resolveWorldTarget(): BasePart?
 	elseif step == TutorialConfig.Steps.HarvestCarrot then
 		return findHarvestTarget()
 	elseif step == TutorialConfig.Steps.SellCarrot then
-		if findSellShopTarget() and canDisplayGuiBinding(guiBinding) then
+		local guiTarget = findSellShopTargets()
+		if guiTarget and canDisplayGuiBinding(guiBinding) then
 			return nil
 		end
 		return getTaggedPart(TutorialConfig.SellShopNpcTag)
@@ -560,6 +849,7 @@ function TutorialVisualUtils.Stop()
 	activeStep = nil
 	stopConnections()
 	clearArrow()
+	clearGuiNudges()
 	restoreGui()
 	fallbackNotice = nil
 	table.clear(warnShown)
@@ -577,6 +867,7 @@ function TutorialVisualUtils.Start(step: TutorialConfig.TutorialStep, onFallback
 	retryAccumulated = TutorialConfig.TargetRetryInterval
 	characterConnection = player.CharacterAdded:Connect(function()
 		clearArrow()
+		clearGuiNudges()
 		retryAccumulated = TutorialConfig.TargetRetryInterval
 	end)
 	renderConnection = RunService.PreRender:Connect(function(deltaTime)
