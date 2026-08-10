@@ -60,6 +60,14 @@ return {
 		},
 	},
 
+	-- 扩地后种植面的内部接缝规则；服务端用它权威拒绝新种植，客户端用同一规则避免发送无效请求。
+	PlantingBoundary = {
+		-- 每个 BedSection 连接处黄色抬高边框的实际宽度，单位 stud；当前 Studio 模板为 1，修改资源宽度时必须同步调整。
+		InternalSeamWidth = 1,
+		-- 接缝比较的浮点容差，单位 stud；只吸收 CFrame/Size 小数误差，不应扩大成额外的玩法禁种边距。
+		ComparisonEpsilon = 0.02,
+	},
+
 	-- Expand 牌子的 Studio 层级契约；所有 Plot 应拥有 Signs/Expand/CorePart，CorePart 下放 SurfaceGui 或 BillboardGui 模板。
 	Sign = {
 		SignsFolderName = "Signs",

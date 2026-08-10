@@ -18,6 +18,7 @@ local GardenOwnerSignController = require(Services.GardenOwnerSignController)
 local GrowingListController = require(Services.GrowingListController)
 local HarvestPromptController = require(Services.HarvestPromptController)
 local HarvestAllController = require(Services.HarvestAllController)
+local HarvestFeedbackController = require(Services.HarvestFeedbackController)
 local HudCurrencyController = require(Services.HudCurrencyController)
 local InterfaceVisualController = require(Services.InterfaceVisualController)
 local LeaderboardController = require(Services.LeaderboardController)
@@ -55,6 +56,7 @@ BackpackController.Init({
 	DeveloperProductPromptController = DeveloperProductPromptController,
 	NotificationController = NotificationController,
 })
+HarvestFeedbackController.Init({ BackpackController = BackpackController })
 LightingStateController.Init()
 HudCurrencyController.Init()
 GardenVisualController.Init()

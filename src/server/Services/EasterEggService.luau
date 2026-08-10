@@ -199,7 +199,7 @@ local function bindMarker(marker: BasePart, reward: EasterEggConfig.RewardDefini
 	end)
 end
 
--- 将三个彩蛋的永久领取状态同步为玩家级 Attribute，供本地展示在 Ready 前安全隐藏。
+-- 将所有已配置彩蛋的永久领取状态同步为玩家级 Attribute，供本地展示在 Ready 前安全隐藏。
 function EasterEggService.PlayerReady(player: Player)
 	local snapshot = PlayerDataService.GetSnapshot(player)
 	for _, reward in EasterEggConfig.Rewards do
@@ -208,7 +208,7 @@ function EasterEggService.PlayerReady(player: Player)
 	end
 end
 
--- 注入存档、库存与通知依赖，并校正 Workspace.EasterEggs 中三个既有 Marker 的运行时属性和 Prompt。
+-- 注入存档、库存与通知依赖，并校正 Workspace.EasterEggs 中已配置 Marker 的运行时属性和 Prompt。
 function EasterEggService.Init(dependencies: {
 	PlayerDataService: any,
 	InventoryService: any,

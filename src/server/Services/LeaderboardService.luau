@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块权威持久化金币、累计游玩时间和产物库存全局榜，并向各客户端发送含 Self 行的只读快照。
+-- 本模块权威持久化历史累计财富、累计游玩时间和产物库存全局榜，并向各客户端发送含 Self 行的只读快照。
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
@@ -23,7 +23,7 @@ type PlayerSession = {
 	JoinedAt: number,
 	BasePlaytime: number,
 	HasSafePlaytimeBase: boolean,
-	LastCoins: number,
+	LastLifetimeWealth: number,
 	LastStock: number,
 	WriteBusy: boolean,
 	Closing: boolean,
@@ -75,6 +75,10 @@ local function safeInteger(value: any): number
 		return 0
 	end
 	return math.clamp(math.floor(value), 0, LeaderboardConfig.MaximumValue)
+end
+
+local function isMonotonicBoard(boardId: BoardId): boolean
+	return boardId == "Coins" or boardId == "Playtime"
 end
 
 local function keyForUserId(userId: number): string
@@ -149,7 +153,7 @@ local function writeBoardValue(boardId: BoardId, userId: number, value: number):
 	local key = keyForUserId(userId)
 	local normalizedValue = safeInteger(value)
 	if studioMemoryMode[boardId] then
-		studioValues[boardId][key] = if boardId == "Playtime"
+		studioValues[boardId][key] = if isMonotonicBoard(boardId)
 			then math.max(safeInteger(studioValues[boardId][key]), normalizedValue)
 			else normalizedValue
 		return true
@@ -158,7 +162,7 @@ local function writeBoardValue(boardId: BoardId, userId: number, value: number):
 	local lastError: any = "UnknownError"
 	for attempt = 1, LeaderboardConfig.MaxRetries do
 		local ok, result = pcall(function()
-			if boardId == "Playtime" then
+			if isMonotonicBoard(boardId) then
 				stores[boardId]:UpdateAsync(key, function(remoteValue)
 					return math.max(safeInteger(remoteValue), normalizedValue)
 				end)
@@ -178,7 +182,7 @@ local function writeBoardValue(boardId: BoardId, userId: number, value: number):
 	warnStoreFailure(boardId, "写入", lastError)
 	if RunService:IsStudio() then
 		studioMemoryMode[boardId] = true
-		studioValues[boardId][key] = if boardId == "Playtime"
+		studioValues[boardId][key] = if isMonotonicBoard(boardId)
 			then math.max(safeInteger(studioValues[boardId][key]), normalizedValue)
 			else normalizedValue
 		return true
@@ -203,11 +207,11 @@ end
 local function readPlayerMetrics(player: Player, session: PlayerSession): (number, number)
 	local snapshot = PlayerDataService.GetSnapshot(player)
 	if not snapshot then
-		return session.LastCoins, session.LastStock
+		return session.LastLifetimeWealth, session.LastStock
 	end
 
-	local coins = safeInteger(snapshot.Sheckles)
-	return coins, stockFromSnapshot(snapshot)
+	local lifetimeWealth = safeInteger(snapshot.LifetimeShecklesEarned)
+	return lifetimeWealth, stockFromSnapshot(snapshot)
 end
 
 local function currentPlaytime(session: PlayerSession): number
@@ -255,8 +259,8 @@ local function writePlayerMetrics(player: Player, waitForBusy: boolean): boolean
 	end
 
 	local callOk, allWritten = pcall(function(): boolean
-		local coins, stock = readPlayerMetrics(player, session)
-		local coinsWritten = writeBoardValue("Coins", player.UserId, coins)
+		local lifetimeWealth, stock = readPlayerMetrics(player, session)
+		local wealthWritten = writeBoardValue("Coins", player.UserId, lifetimeWealth)
 		local stockWritten = writeBoardValue("Stock", player.UserId, stock)
 		local playtimeReady = ensurePlaytimeBase(player, session)
 		local playtimeWritten = false
@@ -268,7 +272,7 @@ local function writePlayerMetrics(player: Player, waitForBusy: boolean): boolean
 				player.Name
 			))
 		end
-		return coinsWritten and stockWritten and playtimeWritten
+		return wealthWritten and stockWritten and playtimeWritten
 	end)
 
 	if sessions[player] == session then
@@ -418,8 +422,8 @@ local function currentBoardValue(boardId: BoardId, player: Player): number?
 		return nil
 	end
 	if boardId == "Coins" then
-		local coins = readPlayerMetrics(player, session)
-		return coins
+		local lifetimeWealth = readPlayerMetrics(player, session)
+		return lifetimeWealth
 	elseif boardId == "Stock" then
 		return session.LastStock
 	end
@@ -562,14 +566,14 @@ function LeaderboardService.PlayerReady(player: Player)
 		JoinedAt = os.time(),
 		BasePlaytime = 0,
 		HasSafePlaytimeBase = false,
-		LastCoins = 0,
+		LastLifetimeWealth = 0,
 		LastStock = 0,
 		WriteBusy = false,
 		Closing = false,
 	}
 	sessions[player] = temporarySession
-	local coins, stock = readPlayerMetrics(player, temporarySession)
-	temporarySession.LastCoins = coins
+	local lifetimeWealth, stock = readPlayerMetrics(player, temporarySession)
+	temporarySession.LastLifetimeWealth = lifetimeWealth
 	temporarySession.LastStock = stock
 	userNameCache[player.UserId] = player.Name
 	requestRefresh()

@@ -12,11 +12,13 @@
 
 KLineChart 已实现第一版种植与存档基础：
 
-- `src/shared/ItemConfig.luau` 是植物成长、收获类型、初始种子、预制模型名称、视觉成长参数和交互限制的单一来源；当前有 Carrot、Strawberry 与 Blueberry。
-- `PlayerDataService` 使用原生 `UpdateAsync`、`Version = 2`、会话锁、深度补全、自动保存与保存防抖；v1 或缺失 `Sheckles` 的档案安全补 5，Live DataStore 失败时拒绝加载，Studio 才允许内存降级。
-- `PlotService` 适配 `Workspace.Gardens.Plot1..Plot8`，优先使用 `Visual.PlantAreaColumn1/2`，以 `SpawnPoint` 保存植物局部坐标。
+- `src/shared/ItemConfig.luau` 是植物成长、收获类型、初始种子、预制模型名称、视觉成长参数和交互限制的单一来源；当前新玩家所有品种初始种子均为 0，只通过 5 Sheckles 起步并到商店购买种子。
+- `PlayerDataService` 使用原生 `UpdateAsync`、`SchemaVersion = 10`、会话锁、深度补全、自动保存与保存防抖；旧版或缺失 `Sheckles` 的档案安全补 5，Live DataStore 失败时拒绝加载，Studio 才允许内存降级。
+- `PlayerDataService` Schema v10 保存 `LifetimeShecklesEarned`：新档以初始 5 Sheckles 起算，v1-v9 以升级时当前余额为基线；每次成功的 `PlayerDataService.Update` 会自动把 Sheckles 正向净增量计入该字段，从而覆盖出售、测试菜单加币及未来金币内购等全部权威到账，消费和清空金币不会降低累计值。Coins OrderedDataStore 使用独立历史财富命名空间并以 `UpdateAsync(max)` 保证跨服写入只增不减。
+- `PlotService` 适配 `Workspace.Gardens.Plot1..Plot8`，优先使用 `Visual.PlantAreaColumn1/2`，以 `SpawnPoint` 保存植物局部坐标；`PlotPlantingBounds` 按 `PlotExpansionConfig` 在客户端和服务端共同排除每级扩地之间 1 stud 宽的内部黄色接缝。恢复旧档时先按当前合法种植范围解析，失败后仅允许仍在 `Visual.GardenTotalArea` 内的旧边缘或接缝坐标原位恢复，不放宽新种植请求。
 - `PlantingService`、`HarvestService`、`InventoryService` 和 `PlantService` 分别拥有请求校验、收获事务、库存物化和运行时植物模型职责。
 - 客户端 `PlantInteractionController` 只提交种植命中点，`PlantVisualController` 以约 12Hz 驱动预制植株与挂点果实的时间戳成长；最终库存与成熟判断均由服务端决定。
+- 客户端 `PlantHoverTooltipController` 会区分外层植物与 `RuntimeFruits` 中的具体果实：树体使用 `PlantedAt + GrowthTime`，正在生长的果实使用只读 `FruitNextReadyAt` 显示剩余时间，成熟果实不显示倒计时。
 - `PlantService` 从 `ReplicatedStorage.Assets.Plants` 严格验证并克隆 Carrot、Strawberry、Blueberry，并按品种 `PlacementOffsetY` 调整运行时 Root 高度；重复收获品种从 `Assets.Fruits` 按 `BodyRoot` 的 `FruitSlot=true` Attachment 创建视觉果实，缺资源时种植失败并退种，不生成几何降级。
 - 无 Handle 种子 Tool 仍是代码侧交互载体。动态市场首版已实现；FarmShop 的 `PriceCurveGraph` 使用服务端最近 10 次价格历史绘制走势并显示 Guide 最高/中间/最低价；Rain 天气 UI 与无声音本地雨天视觉已进入首版接入；昼夜切换首版已新增独立时间循环和本地光照合成，暂不影响市场价格、成长、出售或存档，Bloodmoon、Goldmoon、Rainbow Moon、其他天气和事件仍未实现。
 - `TestMenuService` 与 `TestMenuController` 已提供代码测试菜单；当前 `TestMenuConfig.AllowAllPlayers=false`，仅白名单玩家可见可用，如需短期全员测试才临时改为 true。客户端按“种子 / 金币 / 天气”一级分类展开二级动作并只提交 `ActionId`，服务端从 `TestMenuConfig` 权威读取种子、金币、天气或昼夜动作；天气动作通过注入的 `WeatherService` 强制开始 Rain 或清空当前天气，昼夜动作通过注入的 `TimeCycleService` 强制切换 Day/Sunset/Night 或恢复自动循环。

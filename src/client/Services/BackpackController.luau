@@ -1420,6 +1420,11 @@ function BackpackController.IsInventoryOpen(): boolean
 	return inventoryOpen
 end
 
+-- 返回运行时快捷栏 Frame，供需要跟随其实际布局的本地反馈 UI 定位；调用方不得修改快捷栏属性。
+function BackpackController.GetHotbarFrame(): Frame?
+	return hotbarFrame
+end
+
 local function makeCategoryButton(parent: Instance, category: string, order: number): TextButton
 	local button = Instance.new("TextButton")
 	button.Name = category

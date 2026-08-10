@@ -1,6 +1,6 @@
 --!strict
 
--- 本模块按玩家领取状态在三个彩蛋点本地展示种子模型，并驱动轻量悬浮与旋转动画。
+-- 本模块按玩家领取状态在已配置彩蛋点本地展示种子模型，并驱动轻量悬浮与旋转动画。
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -247,7 +247,7 @@ local function refreshMarkers()
 	end
 end
 
--- 监听 Ready、永久领取 Attribute 与 Streaming 节点，仅维护最多三个本地展示绑定。
+-- 监听 Ready、永久领取 Attribute 与 Streaming 节点，仅维护配置范围内的本地展示绑定。
 function EasterEggController.Init()
 	if initialized then
 		return

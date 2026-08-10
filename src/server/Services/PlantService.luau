@@ -843,8 +843,8 @@ function PlantService.GetRuntimeFruit(recordId: string, slotIndex: number): Mode
 	return nil
 end
 
--- 根据权威植物记录克隆并验证预制模型，再注册模型与所有者映射。
-function PlantService.SpawnRecord(player: Player, record: PlantRecord): (boolean, string?)
+-- 根据权威植物记录克隆并验证预制模型；恢复旧档时可启用花园总范围内的边缘坐标兼容。
+function PlantService.SpawnRecord(player: Player, record: PlantRecord, allowLegacyBoundary: boolean?): (boolean, string?)
 	if modelsByRecord[record.recordId] then
 		return false, "PlantAlreadySpawned"
 	end
@@ -853,7 +853,14 @@ function PlantService.SpawnRecord(player: Player, record: PlantRecord): (boolean
 		player,
 		Vector3.new(record.position.x, record.position.y, record.position.z)
 	)
-	local worldPosition = requestedWorldPosition and PlotService.ResolvePlantPosition(player, requestedWorldPosition)
+	local worldPosition: Vector3? = nil
+	if requestedWorldPosition then
+		if allowLegacyBoundary == true then
+			worldPosition = PlotService.ResolveStoredPlantPosition(player, requestedWorldPosition)
+		else
+			worldPosition = PlotService.ResolvePlantPosition(player, requestedWorldPosition)
+		end
+	end
 	if not folder or not worldPosition then
 		return false, "PlotStructureMissing"
 	end
@@ -897,7 +904,7 @@ function PlantService.RestorePlayer(player: Player): (boolean, string?)
 		return false, "DataNotLoaded"
 	end
 	for _, record in data.Plants do
-		local ok, reason = PlantService.SpawnRecord(player, record)
+		local ok, reason = PlantService.SpawnRecord(player, record, true)
 		if not ok then
 			PlantService.DestroyPlayer(player)
 			return false, reason or "PlantRestoreFailed"

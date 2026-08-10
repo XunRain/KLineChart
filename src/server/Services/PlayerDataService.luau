@@ -41,6 +41,7 @@ type PlayerData = {
 		Skipped: boolean,
 	},
 	Sheckles: number,
+	LifetimeShecklesEarned: number,
 	OwnedExpansions: number,
 	ProcessedDeveloperProductReceipts: { [string]: number },
 	SeedShopRefreshGeneration: number,
@@ -120,6 +121,7 @@ local function defaultData(): PlayerData
 			Skipped = false,
 		},
 		Sheckles = EconomyConfig.StartingSheckles,
+		LifetimeShecklesEarned = EconomyConfig.StartingSheckles,
 		OwnedExpansions = 0,
 		ProcessedDeveloperProductReceipts = {},
 		SeedShopRefreshGeneration = 0,
@@ -280,6 +282,7 @@ local function normalize(raw: any): PlayerData
 	local rawWasMissing = type(raw) ~= "table"
 	local rawVersion = if type(raw) == "table" then finiteNumber(raw.Version, 0) else 0
 	local rawTutorial = if type(raw) == "table" then raw.Tutorial else nil
+	local rawLifetimeShecklesEarned = if type(raw) == "table" then raw.LifetimeShecklesEarned else nil
 	if rawWasMissing then
 		raw = {}
 	end
@@ -317,6 +320,15 @@ local function normalize(raw: any): PlayerData
 		math.floor(finiteNumber(raw.Sheckles, EconomyConfig.StartingSheckles)),
 		0,
 		EconomyConfig.MaximumSheckles
+	)
+	-- v1-v9 无法还原已消费的历史收入，只能以升级时的当前余额作为累计财富基线。
+	local lifetimeShecklesFallback = if rawWasMissing or rawVersion < 10
+		then normalized.Sheckles
+		else EconomyConfig.StartingSheckles
+	normalized.LifetimeShecklesEarned = math.clamp(
+		math.floor(finiteNumber(rawLifetimeShecklesEarned, lifetimeShecklesFallback)),
+		0,
+		EconomyConfig.MaximumLifetimeSheckles
 	)
 	normalized.OwnedExpansions = math.clamp(
 		math.floor(finiteNumber(raw.OwnedExpansions, 0)),
@@ -635,7 +647,7 @@ function PlayerDataService.Load(player: Player): (boolean, string?)
 	return true
 end
 
--- 在玩家权威缓存上执行不可 yield 的事务回调，回调拒绝或报错时回滚全部内存改动。
+-- 在玩家权威缓存上执行不可 yield 的事务回调，并把本次余额正向净增量自动计入历史财富。
 function PlayerDataService.Update(
 	player: Player,
 	mutator: (PlayerData) -> (boolean?, string?)
@@ -659,6 +671,25 @@ function PlayerDataService.Update(
 		entry.Busy = false
 		return false, if callOk then reason or "TransactionRejected" else tostring(accepted)
 	end
+
+	local currentSheckles = entry.Data.Sheckles
+	if type(currentSheckles) ~= "number"
+		or currentSheckles ~= currentSheckles
+		or math.abs(currentSheckles) == math.huge
+		or currentSheckles ~= math.floor(currentSheckles)
+		or currentSheckles < 0
+		or currentSheckles > EconomyConfig.MaximumSheckles
+	then
+		entry.Data = before
+		entry.Busy = false
+		return false, "InvalidCurrency"
+	end
+
+	local earnedThisTransaction = math.max(0, currentSheckles - before.Sheckles)
+	entry.Data.LifetimeShecklesEarned = math.min(
+		EconomyConfig.MaximumLifetimeSheckles,
+		before.LifetimeShecklesEarned + earnedThisTransaction
+	)
 
 	entry.Revision += 1
 	entry.Dirty = true

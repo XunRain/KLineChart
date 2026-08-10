@@ -233,7 +233,12 @@ local function handleRequest(player: Player, rawRecordId: any, rawTargetKind: an
 	InventoryService.Sync(player)
 	RemoteService.GetEvent("AudioCue"):FireAllClients("Harvest", harvestPosition)
 	local definition = harvestedPlantId and ItemConfig.Get(harvestedPlantId)
-	RemoteService.Notify(player, string.format("Harvested %s.", definition and definition.DisplayName or "produce"), "Success")
+	if harvestedPlantId and definition then
+		RemoteService.GetEvent("HarvestFeedback"):FireClient(player, {
+			ItemId = harvestedPlantId,
+			Amount = definition.YieldAmount,
+		})
+	end
 	if harvestedPlantId then
 		TutorialService.OnProduceHarvested(player, harvestedPlantId)
 		GameAnalyticsService.OnProduceHarvested(

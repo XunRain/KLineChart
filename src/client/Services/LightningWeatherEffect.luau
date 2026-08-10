@@ -3,12 +3,18 @@
 -- 本模块播放模板参数的雷暴降雨、同步雷柱、命中辉光与空间雷声，不产生伤害。
 
 local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
+local WeatherConfig = require(ReplicatedStorage.Shared.WeatherConfig)
 local LightingStateController = require(script.Parent.LightingStateController)
 local RainWeatherEffect = require(script.Parent.RainWeatherEffect)
+local LightningTuning = WeatherConfig.LightningTuning
+local BoltTuning = LightningTuning.Bolt
+local ImpactTuning = LightningTuning.Impact
+local ThunderTuning = LightningTuning.Thunder
 
 type VisiblePart = {
 	Part: BasePart,
@@ -97,13 +103,13 @@ local function createSegment(
 	visibleParts: { VisiblePart }
 )
 	local offset = endPosition - startPosition
-	local length = math.max(0.05, offset.Magnitude)
+	local length = math.max(0, BoltTuning.MinimumSegmentLength, offset.Magnitude)
 	local midpoint = startPosition:Lerp(endPosition, 0.5)
 	local main = createVisualPart(
 		parent,
 		"LightningMain",
 		Vector3.new(thickness, thickness, length),
-		Color3.fromRGB(235, 245, 255),
+		BoltTuning.MainColor,
 		1
 	)
 	main.CFrame = CFrame.lookAt(midpoint, endPosition)
@@ -111,12 +117,16 @@ local function createSegment(
 	local glow = createVisualPart(
 		parent,
 		"LightningGlow",
-		Vector3.new(thickness * 3, thickness * 3, length),
-		Color3.fromRGB(180, 200, 255),
+		Vector3.new(
+			thickness * BoltTuning.GlowThicknessMultiplier,
+			thickness * BoltTuning.GlowThicknessMultiplier,
+			length
+		),
+		BoltTuning.GlowColor,
 		1
 	)
 	glow.CFrame = main.CFrame
-	table.insert(visibleParts, { Part = glow, TargetTransparency = 0.55 })
+	table.insert(visibleParts, { Part = glow, TargetTransparency = BoltTuning.GlowTransparency })
 end
 
 local function createImpactSphere(
@@ -130,13 +140,13 @@ local function createImpactSphere(
 ): BasePart
 	local sphere = createVisualPart(parent, name, Vector3.new(startSize, startSize, startSize), color, targetTransparency)
 	sphere.Shape = Enum.PartType.Ball
-	sphere.Position = position + Vector3.new(0, startSize * 0.15, 0)
+	sphere.Position = position + Vector3.new(0, startSize * ImpactTuning.VerticalOffsetScale, 0)
 	local light = Instance.new("PointLight")
 	light.Color = color
-	light.Brightness = 3
-	light.Range = 28
+	light.Brightness = ImpactTuning.PointLightBrightness
+	light.Range = ImpactTuning.PointLightRange
 	light.Parent = sphere
-	local tween = TweenService:Create(sphere, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+	local tween = TweenService:Create(sphere, TweenInfo.new(math.max(0, ImpactTuning.ExpansionDuration), Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Size = Vector3.new(endSize, endSize, endSize),
 		Transparency = 1,
 	})
@@ -168,24 +178,34 @@ local function playThunder(position: Vector3, parent: Instance)
 	end
 	local holder = Instance.new("Part")
 	holder.Name = "ThunderOrigin"
-	holder.Size = Vector3.new(0.2, 0.2, 0.2)
+	local originSize = math.max(0, ThunderTuning.OriginSize)
+	holder.Size = Vector3.new(originSize, originSize, originSize)
 	holder.Transparency = 1
 	holder.Anchored = true
 	holder.CanCollide = false
 	holder.CanQuery = false
 	holder.CanTouch = false
-	holder.Position = position + Vector3.new(0, 3, 0)
+	holder.Position = position + Vector3.new(0, math.max(0, ThunderTuning.OriginHeight), 0)
 	holder.Parent = parent
 	local source = sources[random:NextInteger(1, #sources)]
 	local sound = source:Clone() :: Sound
 	sound.Looped = false
-	sound.Volume = 2
-	sound.RollOffMinDistance = 10
-	sound.RollOffMaxDistance = 7000
+	sound.Volume = math.max(0, ThunderTuning.Volume)
+	local rollOffFirst = math.max(0, ThunderTuning.RollOffMinDistance)
+	local rollOffSecond = math.max(0, ThunderTuning.RollOffMaxDistance)
+	sound.RollOffMinDistance = math.min(rollOffFirst, rollOffSecond)
+	sound.RollOffMaxDistance = math.max(rollOffFirst, rollOffSecond)
 	sound.TimePosition = 0
 	sound.Parent = holder
 	sound:Play()
-	Debris:AddItem(holder, math.max(15, sound.TimeLength + 2))
+	Debris:AddItem(
+		holder,
+		math.max(
+			0,
+			ThunderTuning.MinimumCleanupDelay,
+			sound.TimeLength + math.max(0, ThunderTuning.TimeLengthPadding)
+		)
+	)
 end
 
 local function renderStrike(position: Vector3)
@@ -193,39 +213,61 @@ local function renderStrike(position: Vector3)
 	strikeRoot.Name = "LightningStrike"
 	strikeRoot.Parent = getActiveFolder()
 	local visibleParts: { VisiblePart } = {}
-	local points: { Vector3 } = { position + Vector3.new(0, 150, 0) }
-	local segmentCount = 10
+	local height = math.max(0, BoltTuning.Height)
+	local segmentCount = math.max(1, math.floor(BoltTuning.SegmentCount))
+	local horizontalOffset = math.abs(BoltTuning.HorizontalOffset)
+	local points: { Vector3 } = { position + Vector3.new(0, height, 0) }
 	for index = 1, segmentCount do
 		local alpha = index / segmentCount
-		local horizontalScale = math.sin(alpha * math.pi) * 18
+		local horizontalScale = math.sin(alpha * math.pi) * horizontalOffset
 		local point = position
 			+ Vector3.new(
 				random:NextNumber(-horizontalScale, horizontalScale),
-				150 * (1 - alpha),
+				height * (1 - alpha),
 				random:NextNumber(-horizontalScale, horizontalScale)
 			)
 		if index == segmentCount then
-			point = position + Vector3.new(0, 0.5, 0)
+			point = position + Vector3.new(0, BoltTuning.GroundOffset, 0)
 		end
 		table.insert(points, point)
 	end
 	for index = 1, segmentCount do
-		local thickness = 2.5 - ((index - 1) / math.max(1, segmentCount - 1))
+		local thicknessAlpha = (index - 1) / math.max(1, segmentCount - 1)
+		local thickness = BoltTuning.StartThickness
+			+ (BoltTuning.EndThickness - BoltTuning.StartThickness) * thicknessAlpha
 		createSegment(strikeRoot, points[index], points[index + 1], thickness, visibleParts)
 	end
 
-	local branchStartIndex = random:NextInteger(3, 7)
+	local branchIndexFirst = math.floor(BoltTuning.BranchStartIndexMin)
+	local branchIndexSecond = math.floor(BoltTuning.BranchStartIndexMax)
+	local branchStartIndexMin = math.clamp(math.min(branchIndexFirst, branchIndexSecond), 1, #points)
+	local branchStartIndexMax = math.clamp(math.max(branchIndexFirst, branchIndexSecond), branchStartIndexMin, #points)
+	local branchStartIndex = random:NextInteger(branchStartIndexMin, branchStartIndexMax)
 	local branchStart = points[branchStartIndex]
 	local branchPoint = branchStart
-	for index = 1, 3 do
+	local branchSegmentCount = math.max(0, math.floor(BoltTuning.BranchSegmentCount))
+	local branchHorizontalOffset = math.abs(BoltTuning.BranchHorizontalOffset)
+	local branchVerticalFirst = BoltTuning.BranchVerticalOffsetMin
+	local branchVerticalSecond = BoltTuning.BranchVerticalOffsetMax
+	local branchVerticalMin = math.min(branchVerticalFirst, branchVerticalSecond)
+	local branchVerticalMax = math.max(branchVerticalFirst, branchVerticalSecond)
+	for index = 1, branchSegmentCount do
 		local nextPoint = branchPoint
-			+ Vector3.new(random:NextNumber(-18, 18), random:NextNumber(-16, -8), random:NextNumber(-18, 18))
-		createSegment(strikeRoot, branchPoint, nextPoint, math.max(0.7, 1.5 - index * 0.2), visibleParts)
+			+ Vector3.new(
+				random:NextNumber(-branchHorizontalOffset, branchHorizontalOffset),
+				random:NextNumber(branchVerticalMin, branchVerticalMax),
+				random:NextNumber(-branchHorizontalOffset, branchHorizontalOffset)
+			)
+		local branchThickness = math.max(
+			BoltTuning.BranchMinimumThickness,
+			BoltTuning.BranchThicknessStart - index * BoltTuning.BranchThicknessStep
+		)
+		createSegment(strikeRoot, branchPoint, nextPoint, branchThickness, visibleParts)
 		branchPoint = nextPoint
 	end
 
 	for _, visiblePart in visibleParts do
-		local tween = TweenService:Create(visiblePart.Part, TweenInfo.new(0.05, Enum.EasingStyle.Linear), {
+		local tween = TweenService:Create(visiblePart.Part, TweenInfo.new(math.max(0, BoltTuning.AppearDuration), Enum.EasingStyle.Linear), {
 			Transparency = visiblePart.TargetTransparency,
 		})
 		tween:Play()
@@ -233,18 +275,34 @@ local function renderStrike(position: Vector3)
 			tween:Destroy()
 		end)
 	end
-	createImpactSphere(strikeRoot, "ImpactCore", position, 3, 15, Color3.fromRGB(235, 245, 255), 0.15)
-	createImpactSphere(strikeRoot, "ImpactGlow", position, 6, 25, Color3.fromRGB(180, 200, 255), 0.55)
+	createImpactSphere(
+		strikeRoot,
+		"ImpactCore",
+		position,
+		ImpactTuning.CoreStartSize,
+		ImpactTuning.CoreEndSize,
+		BoltTuning.MainColor,
+		ImpactTuning.CoreTransparency
+	)
+	createImpactSphere(
+		strikeRoot,
+		"ImpactGlow",
+		position,
+		ImpactTuning.GlowStartSize,
+		ImpactTuning.GlowEndSize,
+		BoltTuning.GlowColor,
+		ImpactTuning.GlowTransparency
+	)
 	-- 雷柱一秒后销毁，但雷声需要继续播放，因此声音挂在天气根节点而不是单次雷柱下。
 	playThunder(position, getActiveFolder())
-	task.delay(0.3, function()
+	task.delay(math.max(0, BoltTuning.FadeDelay), function()
 		if not strikeRoot.Parent then
 			return
 		end
 		for _, visiblePart in visibleParts do
 			local part = visiblePart.Part
 			if part.Parent then
-				local tween = TweenService:Create(part, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				local tween = TweenService:Create(part, TweenInfo.new(math.max(0, BoltTuning.FadeDuration), Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 					Transparency = 1,
 				})
 				tween:Play()
@@ -254,7 +312,7 @@ local function renderStrike(position: Vector3)
 			end
 		end
 	end)
-	Debris:AddItem(strikeRoot, 1.1)
+	Debris:AddItem(strikeRoot, math.max(0, BoltTuning.Lifetime))
 end
 
 local function isFiniteVector3(position: Vector3): boolean

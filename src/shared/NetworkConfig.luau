@@ -24,6 +24,8 @@ return {
 		RequestShovelPlant = "RequestShovelPlant",
 		-- 服务端到全部客户端：参数依次为权威种植面位置 Vector3、plantId 字符串和植物记录 recordId；仅用于播放本地播种特效，不参与成长或库存结算。
 		PlantingFx = "PlantingFx",
+		-- 仅服务端到单个客户端：参数为 { ItemId = 稳定植物 ID, Amount = 本次权威收获数量 }；客户端只用于聚合展示快捷栏上方的收获反馈。
+		HarvestFeedback = "HarvestFeedback",
 		-- 仅服务端到客户端：参数为白名单 cue 名和可选世界坐标；当前承载权威购买、收获与种子库存刷新反馈，不接受客户端上行。
 		AudioCue = "AudioCue",
 		-- 白名单客户端到服务端：唯一参数为稳定 ActionId 字符串；服务端重新检查开关、UserId、冷却与动作配置，绝不接受客户端数量、SeedId 或目标库存。

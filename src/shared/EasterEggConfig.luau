@@ -10,13 +10,13 @@ export type RewardDefinition = {
 	PlantNumber: number,
 	-- 成功领取时加入该品种种子库存的正整数数量。
 	Amount: number,
-	-- 悬浮动画相位角，单位为度；错开相位可避免三个模型同步运动。
+	-- 悬浮动画相位角，单位为度；错开相位可避免各展示模型同步运动。
 	PhaseDegrees: number,
 }
 
 local EasterEggConfig = {}
 
--- 场景节点名称均为稳定契约；代码只处理该 Folder 下配置列出的三个 BasePart。
+-- 场景节点名称均为稳定契约；代码只处理该 Folder 下配置列出的 BasePart。
 EasterEggConfig.FolderName = "EasterEggs"
 EasterEggConfig.AttachmentName = "KLineEasterEggAttachment"
 EasterEggConfig.PromptName = "KLineEasterEggPrompt"
@@ -32,6 +32,7 @@ EasterEggConfig.Rewards = {
 	{ RewardId = "SeedReward01", MarkerName = "1", PlantNumber = 1, Amount = 1, PhaseDegrees = 0 },
 	{ RewardId = "SeedReward02", MarkerName = "2", PlantNumber = 2, Amount = 1, PhaseDegrees = 120 },
 	{ RewardId = "SeedReward03", MarkerName = "3", PlantNumber = 3, Amount = 1, PhaseDegrees = 240 },
+	{ RewardId = "SeedReward04", MarkerName = "4", PlantNumber = 4, Amount = 1, PhaseDegrees = 300 },
 } :: { RewardDefinition }
 
 EasterEggConfig.Prompt = {
@@ -58,7 +59,7 @@ EasterEggConfig.Visual = {
 	FloatAmplitude = 0.1,
 	FloatPeriod = 1.8,
 	SpinDegreesPerSecond = 30,
-	-- Streaming 事件丢失时只低频回查三个固定 Marker，不逐帧扫描 Workspace。
+	-- Streaming 事件丢失时只低频回查配置中的固定 Marker，不逐帧扫描 Workspace。
 	StreamingFallbackInterval = 2,
 }
 

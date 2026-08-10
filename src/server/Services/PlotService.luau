@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local PlotExpansionConfig = require(ReplicatedStorage.Shared.PlotExpansionConfig)
+local PlotPlantingBounds = require(ReplicatedStorage.Shared.PlotPlantingBounds)
 
 local PlotService = {}
 local plotByPlayer: { [Player]: Model } = {}
@@ -222,7 +223,7 @@ local function candidateAreas(plot: Model): { BasePart }
 	return areas
 end
 
--- 将客户端命中点投影到服务端确认的玩家种植面顶面，越界时返回 nil。
+-- 将请求点投影到服务端确认的玩家种植面顶面，越界时返回 nil。
 function PlotService.ResolvePlantPosition(player: Player, requested: Vector3): Vector3?
 	local plot = plotByPlayer[player]
 	if not plot then
@@ -234,9 +235,35 @@ function PlotService.ResolvePlantPosition(player: Player, requested: Vector3): V
 		if math.abs(localPoint.X) <= half.X
 			and math.abs(localPoint.Z) <= half.Z
 			and math.abs(localPoint.Y) <= half.Y + ItemConfig.Limits.AreaVerticalTolerance
+			and not PlotPlantingBounds.IsInternalExpansionSeam(plot, area, requested)
 		then
 			return area.CFrame:PointToWorldSpace(Vector3.new(localPoint.X, half.Y, localPoint.Z))
 		end
+	end
+	return nil
+end
+
+-- 恢复存档植物时优先使用当前种植面，旧边缘坐标只在仍位于整个花园范围内时保留原位置。
+function PlotService.ResolveStoredPlantPosition(player: Player, requested: Vector3): Vector3?
+	local currentPosition = PlotService.ResolvePlantPosition(player, requested)
+	if currentPosition then
+		return currentPosition
+	end
+	local plot = plotByPlayer[player]
+	if not plot then
+		return nil
+	end
+	local legacyArea = plot:FindFirstChild("GardenTotalArea", true)
+	if not legacyArea or not legacyArea:IsA("BasePart") then
+		return nil
+	end
+	local localPoint = legacyArea.CFrame:PointToObjectSpace(requested)
+	local half = legacyArea.Size * 0.5
+	if math.abs(localPoint.X) <= half.X
+		and math.abs(localPoint.Z) <= half.Z
+		and math.abs(localPoint.Y) <= half.Y + ItemConfig.Limits.AreaVerticalTolerance
+	then
+		return requested
 	end
 	return nil
 end

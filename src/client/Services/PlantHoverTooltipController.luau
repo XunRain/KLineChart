@@ -1,6 +1,6 @@
 --!strict
 
--- 本控制器通过桌面鼠标或单根未被 UI 消费的触摸指针显示植物名与首次成长剩余时间。
+-- 本控制器通过桌面鼠标或单根未被 UI 消费的触摸指针显示植物名、植株或果实的剩余成长时间。
 
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
@@ -44,6 +44,7 @@ local fadeTween: Tween? = nil
 local tooltipRequestedVisible = false
 local activePlant: Model? = nil
 local activePlantId: string? = nil
+local activeFruit: Model? = nil
 local activeTargetConnections: { RBXScriptConnection } = {}
 
 local function getFiniteNumber(value: any): number?
@@ -216,6 +217,7 @@ local function clearActivePlant()
 	disconnectTargetConnections()
 	activePlant = nil
 	activePlantId = nil
+	activeFruit = nil
 	setTooltipVisible(false)
 end
 
@@ -266,6 +268,21 @@ local function resolvePlantFromPart(part: BasePart): (Model?, ItemConfig.ItemDef
 	return current, definition
 end
 
+local function resolveRuntimeFruitFromPart(part: BasePart, plant: Model): Model?
+	local current: Instance? = part
+	while current and current ~= plant do
+		if current:IsA("Model") and current:GetAttribute(HarvestPromptConfig.RuntimeFruitMarkerAttribute) == true then
+			local container = current.Parent
+			if container and container:IsA("Folder") and container.Name == "RuntimeFruits" and container.Parent == plant then
+				return current
+			end
+			return nil
+		end
+		current = current.Parent
+	end
+	return nil
+end
+
 local function isPlantTruss(part: BasePart): boolean
 	if part:GetAttribute("KLinePlantTruss") == true or string.match(part.Name, "^PlantTruss") then
 		return true
@@ -312,14 +329,14 @@ local function collectPlantsFolders(): { Instance }
 end
 
 -- 仅查询各地块 Plants，透明根节点、未显示成长零件与攀爬柱会沿同一射线继续穿透。
-local function raycastPlant(mousePosition: Vector2): (Model?, ItemConfig.ItemDefinition?)
+local function raycastPlant(mousePosition: Vector2): (Model?, ItemConfig.ItemDefinition?, Model?)
 	local camera = Workspace.CurrentCamera
 	if not camera then
-		return nil, nil
+		return nil, nil, nil
 	end
 	local folders = collectPlantsFolders()
 	if #folders == 0 then
-		return nil, nil
+		return nil, nil, nil
 	end
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
@@ -333,25 +350,25 @@ local function raycastPlant(mousePosition: Vector2): (Model?, ItemConfig.ItemDef
 	for _ = 1, MAX_RAYCAST_SKIPS do
 		local result = Workspace:Raycast(origin, direction * remainingDistance, params)
 		if not result then
-			return nil, nil
+			return nil, nil, nil
 		end
 		local hit = result.Instance
 		if hit:IsA("BasePart") and isVisiblePlantPart(hit) then
 			local model, definition = resolvePlantFromPart(hit)
 			if model and definition then
-				return model, definition
+				return model, definition, resolveRuntimeFruitFromPart(hit, model)
 			end
 			-- 可见但契约非法的几何必须阻挡悬浮查询，不能透射到后方另一株植物。
-			return nil, nil
+			return nil, nil, nil
 		end
 		local traveled = (result.Position - origin).Magnitude + RAYCAST_SKIP_DISTANCE
 		if traveled >= remainingDistance then
-			return nil, nil
+			return nil, nil, nil
 		end
 		origin = result.Position + direction * RAYCAST_SKIP_DISTANCE
 		remainingDistance -= traveled
 	end
-	return nil, nil
+	return nil, nil, nil
 end
 
 local function isPlantStillValid(model: Model, plantId: string): boolean
@@ -365,16 +382,27 @@ local function isPlantStillValid(model: Model, plantId: string): boolean
 	return getPlantsFolderAncestor(model) ~= nil
 end
 
-local function setActivePlant(model: Model, definition: ItemConfig.ItemDefinition)
-	if activePlant == model and activePlantId == definition.Id then
+local function isFruitStillValid(fruit: Model, plant: Model): boolean
+	local container = fruit.Parent
+	return fruit:GetAttribute(HarvestPromptConfig.RuntimeFruitMarkerAttribute) == true
+		and container ~= nil
+		and container:IsA("Folder")
+		and container.Name == "RuntimeFruits"
+		and container.Parent == plant
+end
+
+local function setActivePlant(model: Model, definition: ItemConfig.ItemDefinition, fruit: Model?)
+	if activePlant == model and activePlantId == definition.Id and activeFruit == fruit then
 		return
 	end
 	disconnectTargetConnections()
 	activePlant = model
 	activePlantId = definition.Id
+	activeFruit = fruit
 	if not ensureTooltipUi() then
 		activePlant = nil
 		activePlantId = nil
+		activeFruit = nil
 		return
 	end
 	local resolvedNameLabel = nameLabel
@@ -391,6 +419,19 @@ local function setActivePlant(model: Model, definition: ItemConfig.ItemDefinitio
 			clearActivePlant()
 		end
 	end))
+	if fruit then
+		local resolvedFruit = fruit
+		table.insert(activeTargetConnections, resolvedFruit.Destroying:Connect(function()
+			if activeFruit == resolvedFruit then
+				clearActivePlant()
+			end
+		end))
+		table.insert(activeTargetConnections, resolvedFruit.AncestryChanged:Connect(function()
+			if activeFruit == resolvedFruit and not resolvedFruit.Parent then
+				clearActivePlant()
+			end
+		end))
+	end
 	setTooltipVisible(true)
 end
 
@@ -417,21 +458,28 @@ end
 
 local function updateTimer(now: number)
 	local model = activePlant
+	local fruit = activeFruit
 	local resolvedTimerLabel = timerLabel
 	if not model or not resolvedTimerLabel then
 		return
 	end
-	local plantedAt = model:GetAttribute("PlantedAt")
-	local growthTime = model:GetAttribute("GrowthTime")
-	local resolvedPlantedAt = getFiniteNumber(plantedAt)
-	local resolvedGrowthTime = getFiniteNumber(growthTime)
-	if not resolvedPlantedAt or not resolvedGrowthTime or resolvedGrowthTime < 0 then
-		resolvedTimerLabel.Text = ""
-		resolvedTimerLabel.Visible = false
-		return
+
+	local finishAt: number?
+	if fruit then
+		local isMature = fruit:GetAttribute(HarvestPromptConfig.FruitMatureAttribute) == true
+		local isGrowing = fruit:GetAttribute("FruitGrowing") == true
+		if not isMature and isGrowing then
+			finishAt = getFiniteNumber(fruit:GetAttribute("FruitNextReadyAt"))
+		end
+	else
+		local resolvedPlantedAt = getFiniteNumber(model:GetAttribute("PlantedAt"))
+		local resolvedGrowthTime = getFiniteNumber(model:GetAttribute("GrowthTime"))
+		if resolvedPlantedAt and resolvedGrowthTime and resolvedGrowthTime >= 0 then
+			finishAt = getFiniteNumber(resolvedPlantedAt + resolvedGrowthTime)
+		end
 	end
-	local finishAt = getFiniteNumber(resolvedPlantedAt + resolvedGrowthTime)
-	if not finishAt then
+
+	if not finishAt or finishAt <= 0 then
 		resolvedTimerLabel.Text = ""
 		resolvedTimerLabel.Visible = false
 		return
@@ -583,15 +631,15 @@ local function refreshHoveredPlant(pointerPosition: Vector2)
 		clearActivePlant()
 		return
 	end
-	local model, definition = raycastPlant(pointerPosition)
+	local model, definition, fruit = raycastPlant(pointerPosition)
 	if not model or not definition then
 		clearActivePlant()
 		return
 	end
-	setActivePlant(model, definition)
+	setActivePlant(model, definition, fruit)
 end
 
--- 初始化鼠标/首根未被 UI 消费的 Touch 悬浮查询与代码生成 UI；该控制器只读运行时植物属性。
+-- 初始化鼠标/首根未被 UI 消费的 Touch 悬浮查询与代码生成 UI；该控制器只读运行时植株与果实属性。
 function PlantHoverTooltipController.Init()
 	if initialized then
 		return
@@ -628,7 +676,11 @@ function PlantHoverTooltipController.Init()
 		end
 		local model = activePlant
 		local plantId = activePlantId
-		if model and plantId and not isPlantStillValid(model, plantId) then
+		local fruit = activeFruit
+		if model
+			and plantId
+			and (not isPlantStillValid(model, plantId) or (fruit ~= nil and not isFruitStillValid(fruit, model)))
+		then
 			clearActivePlant()
 		end
 		if HarvestPromptController.IsPointerNearActiveUi(pointerPosition, HARVEST_PROMPT_PADDING) then

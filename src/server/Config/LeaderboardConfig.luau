@@ -4,8 +4,8 @@
 
 return {
 	StoreNames = {
-		-- 金币榜 OrderedDataStore 的永久名称；修改会切换到一套全新的线上榜单，迁移前禁止更改。
-		Coins = "KLineChart_Leaderboard_Coins_v1",
+		-- 历史累计财富榜 OrderedDataStore 的永久名称；与旧实时余额榜隔离，后续迁移前禁止更改。
+		Coins = "KLineChart_Leaderboard_LifetimeWealth_v1",
 		-- 累计游玩时间榜 OrderedDataStore 的永久名称；值为跨会话累计秒数，迁移前禁止更改。
 		Playtime = "KLineChart_Leaderboard_Playtime_v1",
 		-- 农作物库存榜 OrderedDataStore 的永久名称；值只统计已配置产物，不含种子和已种植模型。

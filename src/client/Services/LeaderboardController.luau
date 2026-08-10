@@ -1,6 +1,6 @@
 --!strict
 
--- 本控制器在本地复用 Workspace 三块 SurfaceGui 模板，渲染全局 Top10 与当前玩家专属 Self 行。
+-- 本控制器在本地复用 Workspace 三块 SurfaceGui 模板，渲染历史财富、游玩时间、产物库存 Top10 与当前玩家专属 Self 行。
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")

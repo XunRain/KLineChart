@@ -9,6 +9,7 @@ local Workspace = game:GetService("Workspace")
 
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
+local PlotPlantingBounds = require(ReplicatedStorage.Shared.PlotPlantingBounds)
 
 local PlantInteractionController = {}
 local player = Players.LocalPlayer
@@ -16,12 +17,12 @@ local toolConnections: { [Tool]: RBXScriptConnection } = {}
 local MAX_RAYCAST_HITS = 32
 local RAYCAST_EPSILON = 0.02
 
-local function getOwnPlantingTargets(): ({ BasePart }, Folder?)
+local function getOwnPlantingTargets(): ({ BasePart }, Folder?, Model?)
 	local areas: { BasePart } = {}
 	local plantsFolder: Folder? = nil
 	local gardens = Workspace:FindFirstChild("Gardens")
 	if not gardens then
-		return areas, nil
+		return areas, nil, nil
 	end
 	for _, plot in gardens:GetChildren() do
 		if plot:IsA("Model") and plot:GetAttribute("OwnerUserId") == player.UserId then
@@ -44,10 +45,10 @@ local function getOwnPlantingTargets(): ({ BasePart }, Folder?)
 					table.insert(areas, fallback)
 				end
 			end
-			break
+			return areas, plantsFolder, plot
 		end
 	end
-	return areas, plantsFolder
+	return areas, plantsFolder, nil
 end
 
 local function isPlantingArea(part: BasePart, areas: { BasePart }): boolean
@@ -90,7 +91,7 @@ local function raycastPlantingArea(): RaycastResult?
 	if not camera then
 		return nil
 	end
-	local areas, plantsFolder = getOwnPlantingTargets()
+	local areas, plantsFolder, plot = getOwnPlantingTargets()
 	if #areas == 0 then
 		return nil
 	end
@@ -120,6 +121,9 @@ local function raycastPlantingArea(): RaycastResult?
 			return nil
 		end
 		if isPlantingArea(hit, areas) then
+			if plot and PlotPlantingBounds.IsInternalExpansionSeam(plot, hit, result.Position) then
+				return nil
+			end
 			return result
 		end
 		if not plantsFolder or not hit:IsDescendantOf(plantsFolder) or not canSkipPlantPart(hit) then

@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local WeatherConfig = require(ReplicatedStorage.Shared.WeatherConfig)
+local LightningTuning = WeatherConfig.LightningTuning
 
 type WeatherEntry = {
 	WeatherId: string,
@@ -57,6 +58,12 @@ local function getClearGap(): number
 	local minimum = math.max(0, math.floor(finiteNumber(WeatherConfig.ClearGapMin, 20)))
 	local maximum = math.max(minimum, math.floor(finiteNumber(WeatherConfig.ClearGapMax, 60)))
 	return random:NextInteger(minimum, maximum)
+end
+
+local function getOrderedNonNegativeRange(first: number, second: number): (number, number)
+	local safeFirst = math.max(0, finiteNumber(first, 0))
+	local safeSecond = math.max(0, finiteNumber(second, 0))
+	return math.min(safeFirst, safeSecond), math.max(safeFirst, safeSecond)
 end
 
 local function buildWeatherEntry(weatherId: string, definition: WeatherDefinition, timeNow: number): WeatherEntry
@@ -119,11 +126,19 @@ local function buildStrikeRaycastParams(): RaycastParams
 end
 
 local function raycastRandomPoint(areaCFrame: CFrame, areaSize: Vector3): Vector3
-	local halfX = math.max(1, areaSize.X * 0.5)
-	local halfZ = math.max(1, areaSize.Z * 0.5)
-	local localOffset = Vector3.new(random:NextNumber(-halfX, halfX), 256, random:NextNumber(-halfZ, halfZ))
+	local placement = LightningTuning.Placement
+	local minimumHalfExtent = math.max(0, placement.MinimumAreaHalfExtent)
+	local halfX = math.max(minimumHalfExtent, areaSize.X * 0.5)
+	local halfZ = math.max(minimumHalfExtent, areaSize.Z * 0.5)
+	local raycastOriginHeight = math.max(0, placement.RaycastOriginHeight)
+	local raycastDepth = math.max(0, placement.RaycastDepth)
+	local localOffset = Vector3.new(
+		random:NextNumber(-halfX, halfX),
+		raycastOriginHeight,
+		random:NextNumber(-halfZ, halfZ)
+	)
 	local origin = areaCFrame:PointToWorldSpace(localOffset)
-	local result = Workspace:Raycast(origin, Vector3.new(0, -512, 0), buildStrikeRaycastParams())
+	local result = Workspace:Raycast(origin, Vector3.new(0, -raycastDepth, 0), buildStrikeRaycastParams())
 	if result then
 		return result.Position
 	end
@@ -131,10 +146,13 @@ local function raycastRandomPoint(areaCFrame: CFrame, areaSize: Vector3): Vector
 end
 
 local function getLightningStrikePosition(): Vector3
+	local placement = LightningTuning.Placement
 	local references: { BasePart } = {}
 	local gardens = Workspace:FindFirstChild("Gardens")
 	if gardens then
-		for index = 1, 8 do
+		local firstPlotIndex = math.max(1, math.floor(math.min(placement.PlotFirstIndex, placement.PlotLastIndex)))
+		local lastPlotIndex = math.max(firstPlotIndex, math.floor(math.max(placement.PlotFirstIndex, placement.PlotLastIndex)))
+		for index = firstPlotIndex, lastPlotIndex do
 			local plot = gardens:FindFirstChild(string.format("Plot%d", index))
 			local reference = if plot then plot:FindFirstChild("PlotSizeReference") else nil
 			if reference and reference:IsA("BasePart") then
@@ -154,16 +172,33 @@ local function getLightningStrikePosition(): Vector3
 	if baseplate then
 		local center = baseplate:FindFirstChild("Center", true)
 		if center and center:IsA("BasePart") then
-			local areaSize = Vector3.new(math.max(240, center.Size.X), math.max(1, center.Size.Y), math.max(240, center.Size.Z))
+			local fallbackHorizontalSize = math.max(0, placement.FallbackAreaHorizontalSize)
+			local minimumAreaHeight = math.max(0, placement.MinimumAreaHeight)
+			local areaSize = Vector3.new(
+				math.max(fallbackHorizontalSize, center.Size.X),
+				math.max(minimumAreaHeight, center.Size.Y),
+				math.max(fallbackHorizontalSize, center.Size.Z)
+			)
 			if baseplate:IsA("Model") then
 				local _, modelSize = baseplate:GetBoundingBox()
-				areaSize = Vector3.new(math.max(240, modelSize.X), math.max(1, modelSize.Y), math.max(240, modelSize.Z))
+				areaSize = Vector3.new(
+					math.max(fallbackHorizontalSize, modelSize.X),
+					math.max(minimumAreaHeight, modelSize.Y),
+					math.max(fallbackHorizontalSize, modelSize.Z)
+				)
 			end
 			return raycastRandomPoint(CFrame.new(center.Position), areaSize)
 		end
 	end
 
-	return raycastRandomPoint(CFrame.new(0, 0, 0), Vector3.new(240, 1, 240))
+	return raycastRandomPoint(
+		CFrame.new(0, 0, 0),
+		Vector3.new(
+			math.max(0, placement.FallbackAreaHorizontalSize),
+			math.max(0, placement.MinimumAreaHeight),
+			math.max(0, placement.FallbackAreaHorizontalSize)
+		)
+	)
 end
 
 local function broadcastSnapshot()
@@ -175,7 +210,12 @@ end
 
 local function startLightningLoop(lifecycle: number)
 	task.spawn(function()
-		task.wait(random:NextNumber(2, 4))
+		local schedule = LightningTuning.Schedule
+		local firstDelayMin, firstDelayMax = getOrderedNonNegativeRange(
+			schedule.FirstStrikeDelayMin,
+			schedule.FirstStrikeDelayMax
+		)
+		task.wait(random:NextNumber(firstDelayMin, firstDelayMax))
 		while initialized
 			and weatherLifecycle == lifecycle
 			and activeWeatherId == "Lightning"
@@ -185,7 +225,11 @@ local function startLightningLoop(lifecycle: number)
 				EventId = "LightningStrike",
 				Position = getLightningStrikePosition(),
 			})
-			task.wait(random:NextNumber(5, 10))
+			local intervalMin, intervalMax = getOrderedNonNegativeRange(
+				schedule.StrikeIntervalMin,
+				schedule.StrikeIntervalMax
+			)
+			task.wait(random:NextNumber(intervalMin, intervalMax))
 		end
 	end)
 end

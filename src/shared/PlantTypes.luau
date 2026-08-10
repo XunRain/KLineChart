@@ -61,6 +61,8 @@ export type SeedShopPaidStockSnapshot = {
 export type PlayerData = {
 	Version: number,
 	Sheckles: number,
+	-- 历史累计获得的全部权威货币，按每次数据事务的余额正向净增量累计，只增不减并作为 Coins 排行榜来源。
+	LifetimeShecklesEarned: number,
 	OwnedExpansions: number,
 	ProcessedDeveloperProductReceipts: { [string]: number },
 	-- 每次已保存的个人种子商店刷新权益递增一次；运行时库存缓存以该代次防止串发给其他玩家。

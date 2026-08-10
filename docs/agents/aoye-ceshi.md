@@ -25,13 +25,16 @@ KLineChart 已实现首版种植与存档代码，但尚未完成 Studio Play �
 - “收获全部成熟作物”商品新增权威报价、部分容量确认、持久 intent、迟到收据 credit 与幂等结算；需覆盖取消不弹窗、数字变化重报价、重复收据、保存失败、单株收获并发和多玩家隔离。
 
 - 当前应测试 Carrot 单次收获，以及 Strawberry、Blueberry 重复收获、时间戳成长、离线成长、种子扣除、产物增加和重新加入恢复。
-- 应验证 `Workspace.Gardens.Plot1..Plot8` 分配、两个 `PlantAreaColumn` 范围、相对 `SpawnPoint` 的恢复位置以及玩家离开后的清理。
+- 应使用全新存档验证首次进入只获得 5 Sheckles、所有品种种子均为 0，背包和热栏不会生成种子 Tool；已有存档重新加入时必须保留原有种子，不能因初始配置变化被清空或重置。
+- 应验证 `Workspace.Gardens.Plot1..Plot8` 分配、两个 `PlantAreaColumn` 的 Studio 实际范围、相对 `SpawnPoint` 的恢复位置以及玩家离开后的清理；0 级地块泥土区域可正常种植，1~5 级扩地后每条 1 stud 黄色内部接缝均不可种植，接缝两侧泥土仍可用，客户端不应提交接缝请求且伪造新种植坐标仍应由服务端拒绝；旧档中仍位于 `GardenTotalArea` 内的边缘或接缝植物应原位恢复而不踢出，超出整个花园的损坏坐标仍必须安全失败。
 - 应验证种植 Remote 的非法 Tool、错误植物 ID、越界、超距、过密、超容量、无库存和高频请求拒绝。
 - 应验证收获 Prompt 的所有权、距离、成熟时间和重复触发锁，以及多人互相尝试收获时的数据安全。
 - 应分别验证可用 DataStore、Studio API 不可用时的内存降级、会话锁、自动保存和退出释放；没有实际证据时不得写成持久化已通过。
 - 已接入 Carrot、Strawberry、Blueberry 植株预制体和 Strawberry、Blueberry 果实预制体；应验收 Strawberry/Blueberry 的成熟果实保留显示、只有第一个空 FruitSlot 处于生长中、玩家不收获时也会逐颗补满、满槽后暂停、收获一颗后只消耗一颗产物并从空位重新计时、恢复阶段、资源缺失退种和客户端中途加入表现。定制 UI 仍未接入。
+- 应验收植物悬浮信息能区分树体与具体果实：树体成长期间显示首次成长倒计时，正在生长的果实显示该槽位剩余时间，成熟果实不显示倒计时；树干、不同果实槽和遮挡后的其他植物不得互相串读时间。
 - 已实现代码测试菜单；当前 `TestMenuConfig.AllowAllPlayers=false`，应验证只有白名单玩家能看到并使用测试菜单，非白名单完全不创建 UI 且伪造 Remote 无奖励。若后续临时改为 true 做全员测试，测试结束必须回归 false。玩家打开后先看到“种子 / 金币 / 天气”一级菜单，点击后展开对应二级动作；种子动作每次只增加配置指定的 5 个种子，金币动作只增加配置指定的 1K/1M/1B Sheckles，天气动作只允许开始 Rain、清空当前天气、强制 Day/Sunset/Night 或恢复自动昼夜，并覆盖冷却、未知动作、重生去重和移动端布局。
-- 已实现 Schema v5 的 Sheckles、成长权益及个人种子商店刷新代次/剩余库存快照；客户端克隆 `SeedShop.Frame.NormalShop.ItemTemplate`/合并商店模板行，应验证旧档货币、植物和库存完整保留，库存数量以 `SeedShopConfig` 当前规则为准、5 分钟 Restock 倒计时、39 R$ 商品只刷新购买者个人库存、同一有效期重连恢复已扣余量而非满库存、到期回到自然库存、按数量购买后库存按数量减少、售罄后不能继续购买，以及余额不足、远距、未知 itemId、高频和伪造价格/数量/库存请求完全不变更数据。
+- 已实现 Schema v10 的 Sheckles、历史累计财富、成长权益及个人种子商店刷新代次/剩余库存快照；客户端克隆 `SeedShop.Frame.NormalShop.ItemTemplate`/合并商店模板行，应验证旧档货币、植物和库存完整保留，库存数量以 `SeedShopConfig` 当前规则为准、5 分钟 Restock 倒计时、39 R$ 商品只刷新购买者个人库存、同一有效期重连恢复已扣余量而非满库存、到期回到自然库存、按数量购买后库存按数量减少、售罄后不能继续购买，以及余额不足、远距、未知 itemId、高频和伪造价格/数量/库存请求完全不变更数据。
+- 应验证 Coins 榜读取 `LifetimeShecklesEarned` 而非当前余额：新档初始值为 5，出售收入、管理员测试加币以及未来金币内购等所有通过 `PlayerDataService.Update` 到账的 Sheckles，均按该次事务的余额正向净增量累加；购买种子、扩地和测试菜单清空金币后累计值保持不变。还需验证出售不因旧手动逻辑而重复累计、v1-v9 旧档首次加载以当前余额建立基线，以及排行榜 OrderedDataStore 在并发服务器和迟到低值写入下不得倒退。
 - 应验证 `PlayerGui.HUD.Currencies.CoinsCounter.TextLabel` 及其子级 `TextLabel` 启动后都不再停留在 Studio 模板假值，会同步显示 `KLineInventory.Sheckles`；购买种子、出售产物、重生和 HUD 重新克隆后都应实时更新，客户端手改 HUD 文本或 `KLineInventory.Sheckles` 不得影响服务端结算。
 - 应验证种子商店 `ViewportFrame` 预览强制使用 `ReplicatedStorage.Assets.Seeds.Carrot`、`Seeds.Strawberry` 与 `Seeds.Blueberry`，缺资源时留空告警，不得继续显示模板红色占位块。
 - 应验证 SeedShop 与测试面板重叠时 Blur/FOV 只开启一次，最后一个 owner 关闭才恢复；覆盖 CurrentCamera 切换、重生、owner 销毁和缺 UI/Prompt 安全降级。

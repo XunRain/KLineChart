@@ -3,8 +3,13 @@
 -- 本模块集中合成昼夜基础光照与 Rain、Lightning、Snowfall 天气叠加，避免控制器互相覆盖 Lighting。
 
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
+
+local WeatherConfig = require(ReplicatedStorage.Shared.WeatherConfig)
+local LightningEnvironment = WeatherConfig.LightningTuning.Environment
+local LightningFlash = WeatherConfig.LightningTuning.Flash
 
 export type LightingPatch = {
 	Brightness: number?,
@@ -124,12 +129,12 @@ local function buildCombinedTarget(): LightingTarget
 		}
 	elseif activeWeatherId == "Lightning" then
 		return {
-			Brightness = base.Brightness * 0.4,
-			Ambient = Color3.fromRGB(90, 95, 115),
-			OutdoorAmbient = Color3.fromRGB(40, 45, 60),
-			FogEnd = 300,
-			FogColor = Color3.fromRGB(70, 75, 90),
-			ExposureCompensation = 0.2,
+			Brightness = base.Brightness * LightningEnvironment.BrightnessMultiplier,
+			Ambient = LightningEnvironment.Ambient,
+			OutdoorAmbient = LightningEnvironment.OutdoorAmbient,
+			FogEnd = LightningEnvironment.FogEnd,
+			FogColor = LightningEnvironment.FogColor,
+			ExposureCompensation = LightningEnvironment.ExposureCompensation,
 			ColorShift_Bottom = base.ColorShift_Bottom,
 			ColorShift_Top = base.ColorShift_Top,
 			EnvironmentDiffuseScale = base.EnvironmentDiffuseScale,
@@ -262,8 +267,8 @@ local function applyWeatherClouds(weatherId: string?)
 		clouds.Enabled = true
 		cancelTween(cloudsTween)
 		cloudsTween = TweenService:Create(clouds, TweenInfo.new(WEATHER_TWEEN_TIME, Enum.EasingStyle.Sine), {
-			Cover = if weatherId == "Lightning" then 1 else 0.85,
-			Density = if weatherId == "Lightning" then 0.35 else 0.15,
+			Cover = if weatherId == "Lightning" then LightningEnvironment.CloudsCover else 0.85,
+			Density = if weatherId == "Lightning" then LightningEnvironment.CloudsDensity else 0.15,
 		})
 		cloudsTween:Play()
 		return
@@ -370,7 +375,7 @@ function LightingStateController.SetWeatherActive(weatherId: string?)
 	applyLighting(WEATHER_TWEEN_TIME)
 end
 
--- 播放一次模板参数的双段雷电屏闪；仅在 Lightning 活动时生效，不改变基础昼夜目标。
+-- 按共享配置播放一次双段雷电屏闪；仅在 Lightning 活动时生效，不改变基础昼夜目标。
 function LightingStateController.FlashLightning()
 	if activeWeatherId ~= "Lightning" then
 		return
@@ -379,26 +384,42 @@ function LightingStateController.FlashLightning()
 	local lifecycle = flashLifecycle
 	local effect = ensureLightningEffect()
 	cancelTween(lightningFlashTween)
-	effect.Brightness = 2.5
-	effect.Contrast = 0.15
-	effect.Saturation = -0.3
-	lightningFlashTween = TweenService:Create(effect, TweenInfo.new(0.6, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
-		Brightness = 0,
-		Contrast = 0,
-		Saturation = 0,
-	})
+	effect.Brightness = LightningFlash.PrimaryBrightness
+	effect.Contrast = LightningFlash.PrimaryContrast
+	effect.Saturation = LightningFlash.PrimarySaturation
+	lightningFlashTween = TweenService:Create(
+		effect,
+		TweenInfo.new(
+			math.max(0, LightningFlash.PrimaryFadeDuration),
+			Enum.EasingStyle.Exponential,
+			Enum.EasingDirection.Out
+		),
+		{
+			Brightness = 0,
+			Contrast = 0,
+			Saturation = 0,
+		}
+	)
 	lightningFlashTween:Play()
-	task.delay(0.5, function()
+	task.delay(math.max(0, LightningFlash.SecondaryDelay), function()
 		if lifecycle ~= flashLifecycle or activeWeatherId ~= "Lightning" or not effect.Parent then
 			return
 		end
 		cancelTween(lightningFlashTween)
-		effect.Brightness = 0.4
+		effect.Brightness = LightningFlash.SecondaryBrightness
 		effect.Contrast = 0
 		effect.Saturation = 0
-		lightningFlashTween = TweenService:Create(effect, TweenInfo.new(0.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
-			Brightness = 0,
-		})
+		lightningFlashTween = TweenService:Create(
+			effect,
+			TweenInfo.new(
+				math.max(0, LightningFlash.SecondaryFadeDuration),
+				Enum.EasingStyle.Exponential,
+				Enum.EasingDirection.Out
+			),
+			{
+				Brightness = 0,
+			}
+		)
 		lightningFlashTween:Play()
 	end)
 end

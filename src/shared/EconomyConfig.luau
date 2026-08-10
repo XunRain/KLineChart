@@ -9,6 +9,8 @@ return {
 	StartingSheckles = 5,
 	-- Sheckles 可保存的最大非负整数；服务端加载与交易均限制到该值，需保持不超过 Roblox IntValue 安全范围。
 	MaximumSheckles = 2_000_000_000,
+	-- 历史累计财富可保存的最大非负整数；每次权威数据事务的余额正向净增量均计入，任何来源到账都增加且消费不会减少。
+	MaximumLifetimeSheckles = 9_007_199_254_740_991,
 	-- 单品种种子库存允许的最大非负整数；购买事务达到上限时整体拒绝，不扣除货币。
 	MaximumSeedInventory = 2_000_000_000,
 }
