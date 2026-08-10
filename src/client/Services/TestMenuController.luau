@@ -204,9 +204,17 @@ setPanelOpen = function(open: boolean)
 	TestMenuController.StateChanged:Fire(open)
 end
 
--- 切换测试菜单面板开关状态，供 Topbar 测试按钮调用。
+-- 设置测试菜单面板开关状态；面板未创建时不产生副作用。
+function TestMenuController.SetMenuOpen(open: boolean)
+	if TestMenuController.IsOpen() == open then
+		return
+	end
+	setPanelOpen(open)
+end
+
+-- 切换测试菜单面板开关状态，并复用公开的幂等设置接口。
 function TestMenuController.ToggleMenu()
-	setPanelOpen(not TestMenuController.IsOpen())
+	TestMenuController.SetMenuOpen(not TestMenuController.IsOpen())
 end
 
 -- 返回测试菜单是否已经创建并允许当前玩家使用。

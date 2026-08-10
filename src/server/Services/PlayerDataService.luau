@@ -15,6 +15,7 @@ local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local PlantGrowthIAPConfig = require(ReplicatedStorage.Shared.PlantGrowthIAPConfig)
 local PlotExpansionConfig = require(ReplicatedStorage.Shared.PlotExpansionConfig)
 local ProduceCapacityIAPConfig = require(ReplicatedStorage.Shared.ProduceCapacityIAPConfig)
+local SeedPackIAPConfig = require(ReplicatedStorage.Shared.SeedPackIAPConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.TutorialConfig)
 local DataStoreConfig = require(script.Parent.Parent.Config.DataStoreConfig)
 
@@ -66,9 +67,11 @@ type PlayerData = {
 	}?,
 	HarvestAllCredits: number,
 	ClaimedEasterEggs: { [string]: boolean },
+	StarterPackClaimed: boolean,
 	Inventory: {
 		Seeds: { [string]: number },
 		Produce: { [string]: number },
+		SeedPacks: { [string]: number },
 		ProduceCapacity: number,
 		HotbarLayout: { [string]: string },
 	},
@@ -134,9 +137,14 @@ local function defaultData(): PlayerData
 		PendingHarvestAllPurchase = nil,
 		HarvestAllCredits = 0,
 		ClaimedEasterEggs = {},
+		StarterPackClaimed = false,
 		Inventory = {
 			Seeds = ItemConfig.GetStartingSeeds(),
 			Produce = {},
+			SeedPacks = {
+				Rare = 0,
+				Epic = 0,
+			},
 			ProduceCapacity = ProduceCapacityIAPConfig.BaseCapacity,
 			HotbarLayout = {},
 		},
@@ -412,6 +420,7 @@ local function normalize(raw: any): PlayerData
 			end
 		end
 	end
+	normalized.StarterPackClaimed = raw.StarterPackClaimed == true
 	if type(raw.PendingPlantGrowthPurchases) == "table" then
 		for intentKey, intent in raw.PendingPlantGrowthPurchases do
 			if type(intentKey) == "string"
@@ -455,6 +464,15 @@ local function normalize(raw: any): PlayerData
 
 	if type(raw.Inventory) == "table" then
 		normalized.Inventory.ProduceCapacity = ProduceCapacityIAPConfig.NormalizeCapacity(raw.Inventory.ProduceCapacity)
+		if type(raw.Inventory.SeedPacks) == "table" then
+			for packId in SeedPackIAPConfig.Packs do
+				normalized.Inventory.SeedPacks[packId] = math.clamp(
+					math.floor(finiteNumber(raw.Inventory.SeedPacks[packId], 0)),
+					0,
+					SeedPackIAPConfig.MaximumInventory
+				)
+			end
+		end
 		for itemId, definition in ItemConfig.Items do
 			local seedCount = 0
 			if type(raw.Inventory.Seeds) == "table" then

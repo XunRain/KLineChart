@@ -8,9 +8,11 @@ local StarterGui = game:GetService("StarterGui")
 local UserInputService = game:GetService("UserInputService")
 
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
+local DeveloperProductCatalogConfig = require(ReplicatedStorage.Shared.DeveloperProductCatalogConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local ProduceCapacityIAPConfig = require(ReplicatedStorage.Shared.ProduceCapacityIAPConfig)
+local SeedPackIAPConfig = require(ReplicatedStorage.Shared.SeedPackIAPConfig)
 local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
 local ViewportPreviewCamera = require(script.Parent.Parent.Components.ViewportPreviewCamera)
 
@@ -28,7 +30,6 @@ local searchBox: TextBox? = nil
 local capacityGroup: Frame? = nil
 local capacityText: TextLabel? = nil
 local expandCapacityButton: TextButton? = nil
-local toggleButton: ImageButton? = nil
 local outsideCloseButton: TextButton? = nil
 local InterfaceVisualController: any = nil
 local DeveloperProductPromptController: any = nil
@@ -48,10 +49,7 @@ local HOTBAR_SLOT_Z_INDEX = 5
 local INVENTORY_Z_INDEX = 20
 local INVENTORY_SLOT_Z_INDEX = 30
 local DRAG_Z_INDEX = 100
-local TOPBAR_RIGHT_PADDING_FULL = 220
-local TOPBAR_RIGHT_PADDING_MINI = 206
-local TOPBAR_BUTTON_Y = 3
-local CATEGORY_ORDER = { "All", "Seeds", "Fruits", "Tools" }
+local CATEGORY_ORDER = { "All", "Seeds", "Packs", "Fruits", "Tools" }
 local KEY_TO_SLOT = {
 	[Enum.KeyCode.One] = 1,
 	[Enum.KeyCode.Two] = 2,
@@ -234,24 +232,6 @@ local function pointInGuiObject(point: Vector2, object: GuiObject): boolean
 		and point.Y <= position.Y + size.Y
 end
 
-local function updateTogglePosition()
-	local button = toggleButton
-	if not button then
-		return
-	end
-	local camera = workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or getViewportSize()
-	local topLeftInset = Vector2.new()
-	pcall(function()
-		local inset = GuiService:GetGuiInset()
-		topLeftInset = inset
-	end)
-	local preferredX = topLeftInset.X + (if isMiniLayout() then TOPBAR_RIGHT_PADDING_MINI else TOPBAR_RIGHT_PADDING_FULL)
-	local x = math.clamp(preferredX, topLeftInset.X + 8, math.max(topLeftInset.X + 8, viewport.X - 54))
-	button.Size = scaleSize(42, 42)
-	button.Position = scalePosition(x, TOPBAR_BUTTON_Y)
-end
-
 local function getBackpack(): Backpack?
 	return player:FindFirstChildOfClass("Backpack")
 end
@@ -279,6 +259,10 @@ local function isTrackedTool(instance: Instance): boolean
 end
 
 local function getToolKey(tool: Tool): string
+	local seedPackId = tool:GetAttribute("SeedPackId")
+	if tool:GetAttribute("KLineSeedPackTool") == true and SeedPackIAPConfig.IsPackId(seedPackId) then
+		return "Pack:" .. (seedPackId :: string)
+	end
 	if tool:GetAttribute("KLineUtilityTool") == true or tool:GetAttribute("KLineItemType") == "Utility" then
 		local utilityTool = tool:GetAttribute("UtilityTool")
 		if type(utilityTool) == "string" and utilityTool ~= "" then
@@ -354,6 +338,9 @@ local function toolMatchesFilter(tool: Tool, category: string): boolean
 	if category == "Seeds" then
 		return mainCategory == "Seed" or tool:GetAttribute("SeedTool") ~= nil
 	end
+	if category == "Packs" then
+		return mainCategory == "Pack" or tool:GetAttribute("KLineSeedPackTool") == true
+	end
 	if category == "Fruits" then
 		return mainCategory == "Fruit" or tool:GetAttribute("Fruit") ~= nil
 	end
@@ -364,6 +351,10 @@ local function toolMatchesFilter(tool: Tool, category: string): boolean
 end
 
 local function getDisplayName(tool: Tool): string
+	local seedPackId = tool:GetAttribute("SeedPackId")
+	if tool:GetAttribute("KLineSeedPackTool") == true and SeedPackIAPConfig.IsPackId(seedPackId) then
+		return SeedPackIAPConfig.Packs[seedPackId :: SeedPackIAPConfig.PackId].DisplayName
+	end
 	if tool:GetAttribute("KLineUtilityTool") == true or tool:GetAttribute("KLineItemType") == "Utility" then
 		local utilityTool = tool:GetAttribute("UtilityTool")
 		if utilityTool == ShovelConfig.ToolId then
@@ -731,6 +722,7 @@ updateCapacityDisplay = function()
 	label.TextColor3 = if used >= capacity then Color3.fromRGB(255, 216, 74) else Color3.new(1, 1, 1)
 	local configured = ProduceCapacityIAPConfig.UseMarketplacePurchases
 		and ProduceCapacityIAPConfig.GetProductId() ~= nil
+		and DeveloperProductCatalogConfig.IsGloballyUnique(ProduceCapacityIAPConfig.GetProductId())
 	local pending = DeveloperProductPromptController and DeveloperProductPromptController.IsPending()
 	setExpandButtonEnabled(configured and not pending and ProduceCapacityIAPConfig.CanExpand(capacity))
 end
@@ -742,7 +734,10 @@ local function requestCapacityPurchase()
 		return
 	end
 	local productId = ProduceCapacityIAPConfig.GetProductId()
-	if not ProduceCapacityIAPConfig.UseMarketplacePurchases or not productId then
+	if not ProduceCapacityIAPConfig.UseMarketplacePurchases
+		or not productId
+		or not DeveloperProductCatalogConfig.IsGloballyUnique(productId)
+	then
 		NotificationController.Show(ProduceCapacityIAPConfig.UnconfiguredNotice)
 		return
 	end
@@ -1395,12 +1390,6 @@ local function setInventoryOpen(open: boolean)
 	if outsideCloseButton then
 		outsideCloseButton.Visible = open
 	end
-	if toggleButton then
-		toggleButton.Image = if open
-			then "rbxasset://textures/ui/TopBar/inventoryOn.png"
-			else "rbxasset://textures/ui/TopBar/inventoryOff.png"
-	end
-	updateTogglePosition()
 	refreshLayout()
 	BackpackController.StateChanged:Fire(open)
 end
@@ -1828,7 +1817,6 @@ function BackpackController.Init(dependencies: {
 	local camera = workspace.CurrentCamera
 	if camera then
 		camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
-			updateTogglePosition()
 			requestRefresh()
 		end)
 	end

@@ -15,6 +15,8 @@ ProduceCapacityIAPConfig.BaseCapacity = 200
 ProduceCapacityIAPConfig.IncrementPerPurchase = 100
 -- 正式扩容开发者商品 ID；不得与种子、成长跳过、个人 Restock 或收获全部商品重复。
 ProduceCapacityIAPConfig.ProductId = 3634396880
+-- 商品卡目标价格，单位为 Robux；只在客户端官方价格查询失败时展示，不参与服务端收据结算。
+ProduceCapacityIAPConfig.TargetPrice = 39
 -- 持久容量及复制 IntValue 的安全最大值；客户端达到无法再完整增加一次时必须禁用购买。
 ProduceCapacityIAPConfig.MaximumCapacity = 2_000_000_000
 -- Produce used 求和的饱和上限；保持在 Luau 可精确表达的整数范围内，并避免损坏数据造成加法溢出。

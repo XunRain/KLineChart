@@ -16,6 +16,7 @@ local TutorialService: any
 local LeaderboardService: any
 local EasterEggService: any
 local GameAnalyticsService: any
+local StarterPackService: any
 local characterConnections: { [Player]: RBXScriptConnection } = {}
 local loadingPlayers: { [Player]: boolean } = {}
 
@@ -78,6 +79,7 @@ local function loadPlayer(player: Player)
 	TutorialService.PlayerReady(player)
 	LeaderboardService.PlayerReady(player)
 	EasterEggService.PlayerReady(player)
+	StarterPackService.PlayerReady(player)
 
 	local function onCharacter(character: Model)
 		task.defer(function()
@@ -114,6 +116,7 @@ function PlayerLifecycleService.Init(dependencies: {
 	LeaderboardService: any,
 	EasterEggService: any,
 	GameAnalyticsService: any,
+	StarterPackService: any,
 })
 	PlayerDataService = dependencies.PlayerDataService
 	PlotService = dependencies.PlotService
@@ -123,6 +126,7 @@ function PlayerLifecycleService.Init(dependencies: {
 	LeaderboardService = dependencies.LeaderboardService
 	EasterEggService = dependencies.EasterEggService
 	GameAnalyticsService = dependencies.GameAnalyticsService
+	StarterPackService = dependencies.StarterPackService
 
 	Players.PlayerAdded:Connect(function(player)
 		task.spawn(loadPlayer, player)

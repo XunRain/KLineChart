@@ -13,6 +13,7 @@ local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local PlantGrowthIAPConfig = require(ReplicatedStorage.Shared.PlantGrowthIAPConfig)
 local ProduceCapacityIAPConfig = require(ReplicatedStorage.Shared.ProduceCapacityIAPConfig)
 local SeedIAPConfig = require(ReplicatedStorage.Shared.SeedIAPConfig)
+local SeedPackIAPConfig = require(ReplicatedStorage.Shared.SeedPackIAPConfig)
 local SeedShopRestockIAPConfig = require(ReplicatedStorage.Shared.SeedShopRestockIAPConfig)
 
 local DeveloperProductService = {}
@@ -22,6 +23,7 @@ local RemoteService: any
 local PlantGrowthPurchaseService: any
 local HarvestAllPurchaseService: any
 local SeedShopService: any
+local SeedPackService: any
 local GameAnalyticsService: any
 local initialized = false
 local pendingCapacityGrantNotices: { [Player]: { [string]: boolean } } = {}
@@ -125,6 +127,7 @@ local function processReceipt(receiptInfo: any): Enum.ProductPurchaseDecision
 		return notProcessed()
 	end
 	local itemId, amount = SeedIAPConfig.GetRewardForProductId(productId)
+	local seedPackId, seedPackAmount = SeedPackIAPConfig.GetRewardForProductId(productId)
 	local growthScope = PlantGrowthIAPConfig.GetScopeForProductId(productId)
 	local configuredRestockProductId = SeedShopRestockIAPConfig.GetConfiguredProductId()
 	local restockProductId = SeedShopRestockIAPConfig.GetProductId()
@@ -156,6 +159,11 @@ local function processReceipt(receiptInfo: any): Enum.ProductPurchaseDecision
 	end
 	if capacityProductId == productId then
 		return processCapacityReceipt(player, rawPurchaseId)
+	end
+	if seedPackId and seedPackAmount then
+		return if SeedPackService.ProcessReceipt(player, productId, rawPurchaseId)
+			then Enum.ProductPurchaseDecision.PurchaseGranted
+			else notProcessed()
 	end
 	if harvestAllProductId == productId then
 		return if HarvestAllPurchaseService.ProcessReceipt(player, productId, rawPurchaseId)
@@ -237,6 +245,7 @@ function DeveloperProductService.Init(dependencies: {
 	PlantGrowthPurchaseService: any,
 	HarvestAllPurchaseService: any,
 	SeedShopService: any,
+	SeedPackService: any,
 	GameAnalyticsService: any,
 })
 	if initialized then
@@ -249,6 +258,7 @@ function DeveloperProductService.Init(dependencies: {
 	PlantGrowthPurchaseService = dependencies.PlantGrowthPurchaseService
 	HarvestAllPurchaseService = dependencies.HarvestAllPurchaseService
 	SeedShopService = dependencies.SeedShopService
+	SeedPackService = dependencies.SeedPackService
 	GameAnalyticsService = dependencies.GameAnalyticsService
 	MarketplaceService.ProcessReceipt = processReceipt
 	Players.PlayerRemoving:Connect(function(player)

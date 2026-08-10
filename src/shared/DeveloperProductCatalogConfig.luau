@@ -6,11 +6,12 @@ local HarvestAllIAPConfig = require(script.Parent.HarvestAllIAPConfig)
 local PlantGrowthIAPConfig = require(script.Parent.PlantGrowthIAPConfig)
 local ProduceCapacityIAPConfig = require(script.Parent.ProduceCapacityIAPConfig)
 local SeedIAPConfig = require(script.Parent.SeedIAPConfig)
+local SeedPackIAPConfig = require(script.Parent.SeedPackIAPConfig)
 local SeedShopRestockIAPConfig = require(script.Parent.SeedShopRestockIAPConfig)
 
 local DeveloperProductCatalogConfig = {}
 
--- 返回商品 ID 在种子、成长、补货、容量和一键收获全部配置中的出现次数；合法正式 ID 必须恰好为 1。
+-- 返回商品 ID 在种子、随机种子包、成长、补货、容量和一键收获全部配置中的出现次数；合法正式 ID 必须恰好为 1。
 function DeveloperProductCatalogConfig.CountMatches(productId: any): number
 	if type(productId) ~= "number" then
 		return 0
@@ -28,6 +29,7 @@ function DeveloperProductCatalogConfig.CountMatches(productId: any): number
 			matches += 1
 		end
 	end
+	matches += SeedPackIAPConfig.CountProductMatches(productId)
 	if SeedShopRestockIAPConfig.GetConfiguredProductId() == productId then
 		matches += 1
 	end

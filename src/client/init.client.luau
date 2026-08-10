@@ -12,6 +12,7 @@ local AudioController = require(Services.AudioController)
 local BackpackController = require(Services.BackpackController)
 local ConfirmationDialogController = require(Services.ConfirmationDialogController)
 local DeveloperProductPromptController = require(Services.DeveloperProductPromptController)
+local GamePassPromptController = require(Services.GamePassPromptController)
 local EasterEggController = require(Services.EasterEggController)
 local GardenVisualController = require(Services.GardenVisualController)
 local GardenOwnerSignController = require(Services.GardenOwnerSignController)
@@ -24,6 +25,8 @@ local InterfaceVisualController = require(Services.InterfaceVisualController)
 local LeaderboardController = require(Services.LeaderboardController)
 local LightingStateController = require(Services.LightingStateController)
 local NotificationController = require(Services.NotificationController)
+local RobuxShopController = require(Services.RobuxShopController)
+local SeedPackOpeningController = require(Services.SeedPackOpeningController)
 local PlotExpansionController = require(Services.PlotExpansionController)
 local PlantingFxController = require(Services.PlantingFxController)
 local PlantInteractionController = require(Services.PlantInteractionController)
@@ -44,8 +47,15 @@ local WeatherController = require(Services.WeatherController)
 InterfaceVisualController.Init()
 AudioController.Init()
 DeveloperProductPromptController.Init()
+GamePassPromptController.Init()
 ConfirmationDialogController.Init()
 NotificationController.Init()
+RobuxShopController.Init({
+	InterfaceVisualController = InterfaceVisualController,
+	DeveloperProductPromptController = DeveloperProductPromptController,
+	GamePassPromptController = GamePassPromptController,
+	NotificationController = NotificationController,
+})
 EasterEggController.Init()
 SeedShopController.Init({
 	InterfaceVisualController = InterfaceVisualController,
@@ -56,6 +66,7 @@ BackpackController.Init({
 	DeveloperProductPromptController = DeveloperProductPromptController,
 	NotificationController = NotificationController,
 })
+SeedPackOpeningController.Init({ NotificationController = NotificationController })
 HarvestFeedbackController.Init({ BackpackController = BackpackController })
 LightingStateController.Init()
 HudCurrencyController.Init()
@@ -88,6 +99,7 @@ TutorialController.Init()
 TestMenuController.Init({ InterfaceVisualController = InterfaceVisualController })
 TopbarController.Init({
 	BackpackController = BackpackController,
+	RobuxShopController = RobuxShopController,
 	TestMenuController = TestMenuController,
 })
 Players.LocalPlayer:SetAttribute(OpeningConfig.Attributes.ClientControllersReady, true)

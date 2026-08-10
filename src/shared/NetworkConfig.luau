@@ -36,6 +36,24 @@ return {
 		RequestSeedProductPurchase = "RequestSeedProductPurchase",
 		-- 服务端到单个客户端：参数为权威正数商品 ID；仅用于打开 Roblox 官方购买弹窗，弹窗结果不参与发货。
 		PromptSeedProductPurchase = "PromptSeedProductPurchase",
+		-- 客户端到服务端：无参数请求 RobuxShop 的礼包领取状态；客户端只展示，不据此发奖。
+		RequestRobuxShopState = "RequestRobuxShopState",
+		-- 服务端到单个客户端：返回 StarterPackClaimed 与可选拥有权状态，客户端只能更新商品卡。
+		RobuxShopStateChanged = "RobuxShopStateChanged",
+		-- 客户端到服务端：参数为 PackId 与固定 Amount；服务端重新校验配置、数据、冷却与种子包库存上限。
+		RequestSeedPackPurchase = "RequestSeedPackPurchase",
+		-- 服务端到单个客户端：参数为权威正数种子包商品 ID；只用于打开官方弹窗，完成事件不发货。
+		PromptSeedPackProductPurchase = "PromptSeedPackProductPurchase",
+		-- 客户端到服务端：唯一参数为当前装备的服务端种子包 Tool；服务端读取 PackId、扣包并权重抽奖。
+		RequestOpenSeedPack = "RequestOpenSeedPack",
+		-- 服务端到单个客户端：返回权威 PackId、ItemId、DisplayName 与 Quality；客户端只播放开包表现。
+		SeedPackOpened = "SeedPackOpened",
+		-- 客户端到服务端：无参数请求购买永久一次新手礼包；服务端验证 Game Pass 拥有权或准备官方弹窗。
+		RequestStarterPackPurchase = "RequestStarterPackPurchase",
+		-- 服务端到单个客户端：参数为权威正数 Game Pass ID；只用于打开官方弹窗。
+		PromptStarterPackGamePassPurchase = "PromptStarterPackGamePassPurchase",
+		-- 客户端到服务端：官方弹窗结束后无参数请求复查拥有权；购买完成事件本身绝不发奖励。
+		RequestStarterPackClaim = "RequestStarterPackClaim",
 		-- 客户端到服务端：只提交 Single+recordId 或 All 稳定范围；服务端快照并校验当前玩家尚未完成首次成长的记录。
 		RequestPlantGrowthProductPurchase = "RequestPlantGrowthProductPurchase",
 		-- 服务端到单个客户端：参数为权威成长商品 ID；只用于打开官方弹窗，弹窗结果不参与发货。

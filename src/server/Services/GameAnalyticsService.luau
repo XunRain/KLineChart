@@ -11,6 +11,7 @@ local OpeningConfig = require(ReplicatedStorage.Shared.OpeningConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local PlantGrowthIAPConfig = require(ReplicatedStorage.Shared.PlantGrowthIAPConfig)
 local SeedIAPConfig = require(ReplicatedStorage.Shared.SeedIAPConfig)
+local SeedPackIAPConfig = require(ReplicatedStorage.Shared.SeedPackIAPConfig)
 local TestMenuConfig = require(ReplicatedStorage.Shared.TestMenuConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.TutorialConfig)
 local AnalyticsConfig = require(script.Parent.Parent.Config.AnalyticsConfig)
@@ -207,6 +208,13 @@ local function isAllowedDeveloperProductSku(sku: string): boolean
 		return ItemConfig.Get(seedItemId) ~= nil
 			and SeedIAPConfig.IsPackAmount(seedAmount)
 			and SeedIAPConfig.HasItemConfiguration(seedItemId)
+	end
+	local packId, packAmountText = string.match(
+		sku,
+		"^SeedPackItem:([A-Za-z]+):([1-9][0-9]*)$"
+	)
+	if packId and packAmountText and SeedPackIAPConfig.IsPackId(packId) then
+		return SeedPackIAPConfig.IsPackAmount(tonumber(packAmountText))
 	end
 	local growthScope = string.match(sku, "^GrowthSkip:([A-Za-z]+)$")
 	return growthScope ~= nil

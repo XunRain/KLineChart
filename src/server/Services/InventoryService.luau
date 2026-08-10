@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local ProduceCapacityIAPConfig = require(ReplicatedStorage.Shared.ProduceCapacityIAPConfig)
+local SeedPackIAPConfig = require(ReplicatedStorage.Shared.SeedPackIAPConfig)
 local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
 
 local InventoryService = {}
@@ -20,6 +21,7 @@ local LeaderboardService: LeaderboardDependency? = nil
 local TOOL_TYPE_SEED = "Seed"
 local TOOL_TYPE_PRODUCE = "Produce"
 local TOOL_TYPE_UTILITY = "Utility"
+local TOOL_TYPE_SEED_PACK = "SeedPack"
 local HOTBAR_LAYOUT_MAX_SLOTS = 10
 local HOTBAR_LAYOUT_MAX_KEY_LENGTH = 128
 local EMPTY_HOTBAR_SLOT_KEY = "__EMPTY__"
@@ -89,6 +91,7 @@ local function isSafeToolKey(value: string): boolean
 			or string.sub(value, 1, 5) == "Seed:"
 			or string.sub(value, 1, 6) == "Fruit:"
 			or string.sub(value, 1, 8) == "Utility:"
+			or string.sub(value, 1, 5) == "Pack:"
 			or string.sub(value, 1, 5) == "Name:"
 		)
 end
@@ -331,6 +334,42 @@ local function syncProduceTool(player: Player, itemId: string, amount: number)
 	existingTool:SetAttribute("PreviewModelName", definition.FruitModelName or definition.PlantModelName)
 end
 
+local function syncSeedPackTool(player: Player, packId: SeedPackIAPConfig.PackId, amount: number)
+	local definition = SeedPackIAPConfig.Packs[packId]
+	local tools = findItemTools(player, TOOL_TYPE_SEED_PACK, packId)
+	local tool: Tool? = tools[1]
+	for index = 2, #tools do
+		tools[index]:Destroy()
+	end
+	if amount <= 0 then
+		if tool then
+			tool:Destroy()
+		end
+		return
+	end
+	if not tool then
+		local createdTool = Instance.new("Tool")
+		prepareTool(createdTool, player, TOOL_TYPE_SEED_PACK, packId, amount)
+		local backpackInstance = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
+		if not backpackInstance or not backpackInstance:IsA("Backpack") then
+			createdTool:Destroy()
+			return
+		end
+		createdTool.Parent = backpackInstance
+		tool = createdTool
+	end
+	local resolvedTool = tool :: Tool
+	prepareTool(resolvedTool, player, TOOL_TYPE_SEED_PACK, packId, amount)
+	resolvedTool.Name = string.format("%s x%d", definition.DisplayName, amount)
+	resolvedTool.ToolTip = "Equip and click to open one seed pack."
+	resolvedTool:SetAttribute("KLineSeedPackTool", true)
+	resolvedTool:SetAttribute("SeedPackId", packId)
+	resolvedTool:SetAttribute("Count", amount)
+	resolvedTool:SetAttribute("MainCategory", "Pack")
+	resolvedTool:SetAttribute("PreviewAssetType", definition.PreviewAssetType)
+	resolvedTool:SetAttribute("PreviewModelName", definition.PreviewModelName)
+end
+
 -- 验证传入实例是指定玩家当前持有且与 seedId 匹配的项目种子 Tool。
 function InventoryService.IsOwnedSeedTool(player: Player, tool: any, seedId: string): boolean
 	if typeof(tool) ~= "Instance" or not tool:IsA("Tool") then
@@ -387,6 +426,25 @@ function InventoryService.IsHoldingShovel(player: Player): boolean
 	return false
 end
 
+-- 验证传入实例是玩家当前装备、由服务端物化且 PackId 合法的种子包 Tool；成功返回稳定 PackId。
+function InventoryService.GetEquippedSeedPackId(player: Player, tool: any): SeedPackIAPConfig.PackId?
+	if typeof(tool) ~= "Instance" or not tool:IsA("Tool") or tool.Parent ~= player.Character then
+		return nil
+	end
+	if tool:GetAttribute("KLineItemTool") ~= true
+		or tool:GetAttribute("KLineSeedPackTool") ~= true
+		or tool:GetAttribute("KLineItemType") ~= TOOL_TYPE_SEED_PACK
+		or tool:GetAttribute("OwnerUserId") ~= player.UserId
+	then
+		return nil
+	end
+	local packId = tool:GetAttribute("SeedPackId")
+	if not SeedPackIAPConfig.IsPackId(packId) or tool:GetAttribute("ItemId") ~= packId then
+		return nil
+	end
+	return packId :: SeedPackIAPConfig.PackId
+end
+
 -- 对 Inventory.Produce 中全部数值做防御性求和；坏值按 0 处理，结果在精确整数上限饱和。
 function InventoryService.GetProduceUsed(produce: any): number
 	if type(produce) ~= "table" then
@@ -431,6 +489,11 @@ function InventoryService.Sync(player: Player)
 	)
 	setValues(ensureFolder(inventory, "Seeds"), data.Inventory.Seeds)
 	setValues(ensureFolder(inventory, "Produce"), data.Inventory.Produce)
+	local seedPacksFolder = ensureFolder(inventory, "SeedPacks")
+	for packId in SeedPackIAPConfig.Packs do
+		setIntValue(seedPacksFolder, packId, data.Inventory.SeedPacks[packId] or 0)
+		syncSeedPackTool(player, packId, data.Inventory.SeedPacks[packId] or 0)
+	end
 	for itemId in ItemConfig.Items do
 		syncSeedTool(player, itemId, data.Inventory.Seeds[itemId] or 0)
 		syncProduceTool(player, itemId, data.Inventory.Produce[itemId] or 0)
