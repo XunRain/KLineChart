@@ -5,9 +5,9 @@
 local StarterPackConfig = {}
 
 -- 仅当该开关为 true 且服务端 RunService:IsStudio() 为 true 时，ID=0 的礼包按钮才允许测试直发。
-StarterPackConfig.EnableStudioDirectGrant = true
+StarterPackConfig.EnableStudioDirectGrant = false
 -- 正式 Game Pass ID；0 只表示尚未配置，Live 服务器遇到 0 必须只提示未配置。
-StarterPackConfig.GamePassId = 0
+StarterPackConfig.GamePassId = 1938237947
 -- 商品卡当前目标价与划线原价，仅用于展示和后台配置验收，不参与服务端奖励计算。
 StarterPackConfig.TargetPrice = 149
 StarterPackConfig.WasPrice = 403

@@ -29,7 +29,7 @@ local ItemConfig = require(script.Parent.ItemConfig)
 local SeedPackIAPConfig = {}
 
 -- 仅当该开关为 true 且服务端 RunService:IsStudio() 为 true 时允许绕过官方弹窗测试发包；Live 服务器绝不读取客户端开关。
-SeedPackIAPConfig.EnableStudioDirectGrant = true
+SeedPackIAPConfig.EnableStudioDirectGrant = false
 -- 商店购买与装备开包各自的服务端最短请求间隔，单位为秒，只用于限制 Remote 滥用。
 SeedPackIAPConfig.PurchaseRequestCooldown = 0.5
 SeedPackIAPConfig.OpenRequestCooldown = 0.6
@@ -40,14 +40,14 @@ SeedPackIAPConfig.PackAmounts = { 1, 5 }
 -- Roblox 内置 Robux 字形仅用于客户端价格展示，正式价格和结算仍来自 MarketplaceService。
 SeedPackIAPConfig.RobuxCurrencyIconText = utf8.char(0xE002)
 
--- 四个开发者商品 ID 暂为 0；0 只表示未配置，正式上线前必须创建商品、回填全局唯一正整数并核对后台价格。
+-- 四个正式开发者商品 ID 必须保持全局唯一，且后台价格需与对应 TargetPrices 一致。
 SeedPackIAPConfig.Packs = {
 	Rare = {
 		Id = "Rare",
 		DisplayName = "Rare Seed Pack",
 		PreviewAssetType = "SeedPack",
 		PreviewModelName = "Rare Seed Pack",
-		ProductIds = { [1] = 0, [5] = 0 },
+		ProductIds = { [1] = 3702472034, [5] = 3702472575 },
 		TargetPrices = { [1] = 49, [5] = 245 },
 		Rewards = {
 			{ ItemId = "Watermelon", Weight = 40 },
@@ -62,8 +62,8 @@ SeedPackIAPConfig.Packs = {
 		DisplayName = "Epic Seed Pack",
 		PreviewAssetType = "SeedPack",
 		-- 业务品质仍为 Epic；当前只复用模板已有的 Mythic Seed Pack 视觉模型。
-		PreviewModelName = "Mythic Seed Pack",
-		ProductIds = { [1] = 0, [5] = 0 },
+		PreviewModelName = "Epic Seed Pack",
+		ProductIds = { [1] = 3702473118, [5] = 3702473628 },
 		TargetPrices = { [1] = 119, [5] = 595 },
 		Rewards = {
 			{ ItemId = "Cauliflower", Weight = 35 },

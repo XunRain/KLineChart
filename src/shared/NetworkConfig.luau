@@ -112,6 +112,10 @@ return {
 		TutorialStateChanged = "TutorialStateChanged",
 		-- 客户端到服务端：无参数请求跳过尚未完成的教程；服务端重新校验存档并持久化完成状态。
 		RequestSkipTutorial = "RequestSkipTutorial",
+		-- 客户端到服务端：无参数请求加入群组弹窗资格；群组 ID 只从服务端共享配置读取，客户端不得提交。
+		RequestGroupPromptEligibility = "RequestGroupPromptEligibility",
+		-- 服务端到单个客户端：仅返回 { CanPrompt = boolean, Reason = string } 会话资格结果，不代表群组加入成功。
+		GroupPromptEligibilityResult = "GroupPromptEligibilityResult",
 		-- 早期客户端到服务端：开场完成或安全跳过清理后无参数上报一次；服务端仅在数据与角色/地块 Ready 后接受，参数和重复请求均忽略。
 		ReportOpeningCompleted = "ReportOpeningCompleted",
 		-- 服务端到单个客户端：参数依次为消息字符串和可选级别字符串；仅用于界面提示，不承载任何权威状态或结算结果。

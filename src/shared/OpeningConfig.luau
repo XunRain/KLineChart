@@ -69,9 +69,13 @@ OpeningConfig.Timing = {
 
 -- 镜头距离与位移单位为 studs，FOV/Blur 为 Roblox 原生值；调整会影响移动端构图与眩晕感。
 OpeningConfig.Visual = {
-	-- 仅作用于开场克隆 UI 的 InnerFrame 背景；透明度取值范围为 0（不透明）到 1（完全透明）。
+	-- 仅作用于开场克隆 UI 的独立全屏背景；透明度取值范围为 0（不透明）到 1（完全透明）。
 	InnerFrameBackgroundColor = Color3.fromRGB(10, 14, 22),
 	InnerFrameBackgroundTransparency = 0.4,
+	-- 背景在真实 Camera.ViewportSize 四边额外延伸的像素数，运行时取整并限制在 0..64；0 表示关闭 edge bleed。
+	-- 该值只扩大背景画布与承载平面，内容根仍保持真实 viewport 像素大小并居中，因此不会放大或裁切 Logo、进度条等内容。
+	-- 设备模拟器的手机外壳不属于真实 viewport，任何取值都无法也不应覆盖外壳；过大只会增加无意义的离屏背景面积。
+	BackgroundOverscanPixels = 8,
 	-- 模板前段 FOV 为 45 + 5*Quad(InOut)，后段为 55 - 15*Back(InOut)。
 	OpeningFov = 45,
 	PushFovDelta = 5,

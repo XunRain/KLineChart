@@ -7,6 +7,7 @@ local Services = script.Services
 local PlayerDataService = require(Services.PlayerDataService)
 local RemoteService = require(Services.RemoteService)
 local GameAnalyticsService = require(Services.GameAnalyticsService)
+local EngagementPromptService = require(Services.EngagementPromptService)
 local DeveloperProductService = require(Services.DeveloperProductService)
 local PlotService = require(Services.PlotService)
 local InventoryService = require(Services.InventoryService)
@@ -35,6 +36,10 @@ local PlayerLifecycleService = require(Services.PlayerLifecycleService)
 RemoteService.Init()
 PlayerDataService.Init()
 GameAnalyticsService.Init({
+	PlayerDataService = PlayerDataService,
+	RemoteService = RemoteService,
+})
+EngagementPromptService.Init({
 	PlayerDataService = PlayerDataService,
 	RemoteService = RemoteService,
 })

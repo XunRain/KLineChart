@@ -37,12 +37,12 @@ TimeCycleConfig.WorkspaceAttributeNames = {
 	ActiveTimeWeather = "ActiveTimeWeather",
 }
 
--- Phases 沿用模板基础节奏：白天 450 秒、黄昏 30 秒、夜晚 120 秒，总循环 600 秒。
+-- Phases 当前节奏：白天 600 秒、黄昏 30 秒、夜晚 180 秒，总循环 810 秒。
 TimeCycleConfig.Phases = {
 	Day = {
 		PhaseId = "Day",
 		DisplayName = "Day",
-		Duration = 450,
+		Duration = 600,
 		StartOrder = 1,
 		TimeWeatherId = "Day",
 		BarColor = Color3.new(1, 0.882353, 0),
@@ -60,7 +60,7 @@ TimeCycleConfig.Phases = {
 	Night = {
 		PhaseId = "Night",
 		DisplayName = "Night",
-		Duration = 120,
+		Duration = 180,
 		StartOrder = 3,
 		TimeWeatherId = "Moon",
 		BarColor = Color3.new(0.117647, 0.278431, 0.580392),

@@ -110,7 +110,7 @@ export type LightningTuning = {
 local WeatherConfig = {}
 
 -- ClearGapMin 是两次天气之间最短晴天间隔，单位秒；只影响服务端自动排程，不会写入存档。
-WeatherConfig.ClearGapMin = 20
+WeatherConfig.ClearGapMin = 60
 
 -- ClearGapMax 是两次天气之间最长晴天间隔，单位秒；必须大于等于 ClearGapMin，避免天气无缝连播。
 WeatherConfig.ClearGapMax = 60

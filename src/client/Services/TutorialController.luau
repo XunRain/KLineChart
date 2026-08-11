@@ -30,16 +30,28 @@ local skipBindSerial = 0
 local skipMissingWarned = false
 local openingWasBlocking = false
 local TUTORIAL_NOTICE_KEY = "TutorialStep"
+local blockingChangedEvent = Instance.new("BindableEvent")
 
 local function isOpeningBlocking(): boolean
-	return OpeningConfig.Enabled
-		and player:GetAttribute(OpeningConfig.Attributes.Active) == true
-		and player:GetAttribute(OpeningConfig.Attributes.Done) ~= true
+	return OpeningConfig.Enabled and player:GetAttribute(OpeningConfig.Attributes.Done) ~= true
+end
+
+local function isTutorialBlocking(): boolean
+	if not TutorialConfig.Enabled then
+		return false
+	end
+	local state = currentState
+	return state == nil or (not state.Completed and TutorialConfig.IsActiveStep(state.Step))
+end
+
+local function isEngagementPromptBlocked(): boolean
+	return isOpeningBlocking() or isTutorialBlocking()
 end
 
 local function isActive(): boolean
 	local state = currentState
-	return not isOpeningBlocking()
+	return TutorialConfig.Enabled
+		and not isOpeningBlocking()
 		and state ~= nil
 		and not state.Completed
 		and TutorialConfig.IsActiveStep(state.Step)
@@ -136,6 +148,7 @@ local function applyState(payload: any)
 	}
 	local previous = currentState
 	currentState = state
+	blockingChangedEvent:Fire(isEngagementPromptBlocked())
 	if state.Completed then
 		NotificationController.ClearPersistent(TUTORIAL_NOTICE_KEY)
 		TutorialVisualUtils.Stop()
@@ -157,6 +170,7 @@ local function applyState(payload: any)
 end
 
 local function refreshOpeningGate()
+	blockingChangedEvent:Fire(isEngagementPromptBlocked())
 	if isOpeningBlocking() then
 		openingWasBlocking = true
 		NotificationController.ClearPersistent(TUTORIAL_NOTICE_KEY)
@@ -174,6 +188,18 @@ local function refreshOpeningGate()
 		TutorialVisualUtils.Start(state.Step, showTutorialNotice)
 		bindSkipButton()
 	end
+end
+
+-- 返回开场或权威教程状态是否仍禁止低优先级官方弹窗；教程启用但状态未知时 fail-closed。
+function TutorialController.IsEngagementPromptBlocked(): boolean
+	return isEngagementPromptBlocked()
+end
+
+-- 监听开场 Active/Done 或教程权威状态应用后的阻塞状态广播，不推进教程或修改存档。
+function TutorialController.ConnectBlockingChanged(
+	callback: (isBlocked: boolean) -> ()
+): RBXScriptConnection
+	return blockingChangedEvent.Event:Connect(callback)
 end
 
 -- 幂等连接教程状态 Remote；客户端只请求/展示状态，不提供步骤完成入口。

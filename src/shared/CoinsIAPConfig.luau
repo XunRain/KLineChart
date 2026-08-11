@@ -22,7 +22,7 @@ local EconomyConfig = require(script.Parent.EconomyConfig)
 local CoinsIAPConfig = {}
 
 -- 仅当此开关与服务端 RunService:IsStudio() 同时为 true 时允许绕过官方弹窗测试发金币；Live 服务器绝不直发。
-CoinsIAPConfig.EnableStudioDirectGrant = true
+CoinsIAPConfig.EnableStudioDirectGrant = false
 -- 同一玩家提交金币商品请求的最短间隔，单位为秒；只用于服务端限制 Remote 滥用。
 CoinsIAPConfig.RequestCooldown = 0.5
 -- Studio-owned RobuxShop 稳定节点名；代码只绑定现有对象，不负责创建、移动、改文案或控制显隐。
@@ -32,7 +32,7 @@ CoinsIAPConfig.HeaderButtonName = "CoinsButton"
 -- Roblox 内置 Robux 字形只用于客户端价格展示；正式价格与结算均由 MarketplaceService 和服务端决定。
 CoinsIAPConfig.RobuxCurrencyIconText = utf8.char(0xE002)
 
--- 五档 Coins 实际增加顶层 Sheckles；商品 ID 暂为 0，正式上线前必须回填全局唯一正整数并核对后台价格。
+-- 五档 Coins 实际增加顶层 Sheckles；正式商品 ID 必须保持全局唯一，且后台价格需与 TargetPrice 一致。
 CoinsIAPConfig.PackageKeys = { "Package1", "Package2", "Package3", "Package4", "Package5" } :: { PackageKey }
 CoinsIAPConfig.Packages = {
 	Package1 = {
@@ -40,35 +40,35 @@ CoinsIAPConfig.Packages = {
 		UiPackageName = "Package1",
 		Coins = 5_000,
 		TargetPrice = 10,
-		ProductId = 0,
+		ProductId = 3702452629,
 	},
 	Package2 = {
 		Key = "Package2",
 		UiPackageName = "Package2",
 		Coins = 10_000,
 		TargetPrice = 20,
-		ProductId = 0,
+		ProductId = 3702453673,
 	},
 	Package3 = {
 		Key = "Package3",
 		UiPackageName = "Package3",
 		Coins = 25_000,
 		TargetPrice = 50,
-		ProductId = 0,
+		ProductId = 3702455149,
 	},
 	Package4 = {
 		Key = "Package4",
 		UiPackageName = "Package4",
 		Coins = 50_000,
 		TargetPrice = 100,
-		ProductId = 0,
+		ProductId = 3702456111,
 	},
 	Package5 = {
 		Key = "Package5",
 		UiPackageName = "Package5",
 		Coins = 100_000,
 		TargetPrice = 200,
-		ProductId = 0,
+		ProductId = 3702456851,
 	},
 } :: { [PackageKey]: PackageDefinition }
 

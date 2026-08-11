@@ -32,6 +32,8 @@ local NetworkConfig: any = if networkConfigModule and networkConfigModule:IsA("M
 
 type UiRefs = {
 	SurfaceGui: SurfaceGui,
+	BackgroundFrame: Frame,
+	ContentRoot: GuiObject,
 	InnerFrame: GuiObject,
 	Logo: GuiObject?,
 	Counter: Instance?,
@@ -69,6 +71,7 @@ local anchoredRoots: { [BasePart]: boolean } = {}
 local promptServiceEnabled = ProximityPromptService.Enabled
 local renderName = string.format("KLineOpening_%d", player.UserId)
 local openingCompletedReported = false
+local MAX_BACKGROUND_OVERSCAN_PIXELS = 64
 
 local function warnOnce(key: string, message: string)
 	if warned[key] then
@@ -147,6 +150,14 @@ local function removeBaseScripts(root: Instance)
 	end
 end
 
+local function getBackgroundOverscanPixels(): number
+	local value = OpeningConfig.Visual.BackgroundOverscanPixels
+	if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
+		return 0
+	end
+	return math.clamp(math.floor(value + 0.5), 0, MAX_BACKGROUND_OVERSCAN_PIXELS)
+end
+
 local function resolveUi(part: BasePart): UiRefs?
 	local surfaceCandidate = part:FindFirstChild(OpeningConfig.Resource.SurfaceGuiName)
 	if not surfaceCandidate or not surfaceCandidate:IsA("SurfaceGui") then
@@ -154,6 +165,10 @@ local function resolveUi(part: BasePart): UiRefs?
 		return nil
 	end
 	local variant = surfaceCandidate:FindFirstChild(OpeningConfig.Resource.VariantFrameName)
+	if not variant or not variant:IsA("GuiObject") then
+		warnOnce("VariantFrame", "LoadingGui.Variant1Frame must be a GuiObject; opening was skipped.")
+		return nil
+	end
 	local innerCandidate = variant and variant:FindFirstChild(OpeningConfig.Resource.InnerFrameName)
 	if not innerCandidate or not innerCandidate:IsA("GuiObject") then
 		warnOnce("InnerFrame", "LoadingGui.Variant1Frame.InnerFrame is missing; opening was skipped.")
@@ -169,8 +184,23 @@ local function resolveUi(part: BasePart): UiRefs?
 	local logoCandidate = innerCandidate:FindFirstChild(OpeningConfig.Resource.LogoName)
 	local skipCandidate = innerCandidate:FindFirstChild(OpeningConfig.Resource.SkipName)
 	local continueCandidate = innerCandidate:FindFirstChild(OpeningConfig.Resource.ContinueName)
+	local backgroundFrame = Instance.new("Frame")
+	backgroundFrame.Name = "KLineOpeningOverscanBackground"
+	backgroundFrame.AnchorPoint = Vector2.zero
+	backgroundFrame.Position = UDim2.fromScale(0, 0)
+	backgroundFrame.Size = UDim2.fromScale(1, 1)
+	backgroundFrame.BackgroundColor3 = OpeningConfig.Visual.InnerFrameBackgroundColor
+	backgroundFrame.BackgroundTransparency = OpeningConfig.Visual.InnerFrameBackgroundTransparency
+	backgroundFrame.BorderSizePixel = 0
+	backgroundFrame.ClipsDescendants = false
+	backgroundFrame.Parent = surfaceCandidate
+	variant.Parent = backgroundFrame
+	variant.AnchorPoint = Vector2.new(0.5, 0.5)
+	variant.Position = UDim2.fromScale(0.5, 0.5)
 	return {
 		SurfaceGui = surfaceCandidate,
+		BackgroundFrame = backgroundFrame,
+		ContentRoot = variant,
 		InnerFrame = innerCandidate,
 		Logo = if logoCandidate and logoCandidate:IsA("GuiObject") then logoCandidate else nil,
 		Counter = innerCandidate:FindFirstChild(OpeningConfig.Resource.CounterName),
@@ -217,14 +247,26 @@ local function updateScreenPart()
 	local viewport = camera.ViewportSize
 	local safeViewportX = math.max(1, viewport.X)
 	local safeViewportY = math.max(1, viewport.Y)
+	local viewportPixelsX = math.max(1, math.floor(safeViewportX + 0.5))
+	local viewportPixelsY = math.max(1, math.floor(safeViewportY + 0.5))
+	local overscanPixels = getBackgroundOverscanPixels()
+	local canvasPixelsX = viewportPixelsX + overscanPixels * 2
+	local canvasPixelsY = viewportPixelsY + overscanPixels * 2
 	local ui = activeUi
 	if ui then
-		ui.SurfaceGui.CanvasSize = Vector2.new(math.floor(safeViewportX), math.floor(safeViewportY))
+		ui.SurfaceGui.CanvasSize = Vector2.new(canvasPixelsX, canvasPixelsY)
+		ui.BackgroundFrame.Size = UDim2.fromScale(1, 1)
+		ui.ContentRoot.Size = UDim2.fromOffset(viewportPixelsX, viewportPixelsY)
+		ui.ContentRoot.Position = UDim2.fromScale(0.5, 0.5)
 	end
 	local distance = OpeningConfig.Visual.ScreenDistance
 	local height = 2 * distance * math.tan(math.rad(camera.FieldOfView) * 0.5)
-	local aspect = safeViewportX / safeViewportY
-	part.Size = Vector3.new(height * aspect, height, 0.05)
+	local worldUnitsPerPixel = height / safeViewportY
+	part.Size = Vector3.new(
+		canvasPixelsX * worldUnitsPerPixel,
+		canvasPixelsY * worldUnitsPerPixel,
+		0.05
+	)
 	part.CFrame = camera.CFrame * CFrame.new(0, 0, -distance)
 end
 
@@ -686,8 +728,9 @@ local function runOpening()
 	clonedInstance.Parent = Workspace
 	ui.SurfaceGui.Adornee = clonedInstance
 	ui.SurfaceGui.Enabled = true
-	ui.InnerFrame.BackgroundColor3 = OpeningConfig.Visual.InnerFrameBackgroundColor
-	ui.InnerFrame.BackgroundTransparency = OpeningConfig.Visual.InnerFrameBackgroundTransparency
+	ui.BackgroundFrame.BackgroundColor3 = OpeningConfig.Visual.InnerFrameBackgroundColor
+	ui.BackgroundFrame.BackgroundTransparency = OpeningConfig.Visual.InnerFrameBackgroundTransparency
+	ui.InnerFrame.BackgroundTransparency = 1
 	setVisible(ui.Logo, OpeningConfig.ShowLogo)
 	startLogoTween(ui)
 	setVisible(ui.Skip, false)
@@ -924,7 +967,7 @@ local function runOpening()
 	end
 	local startCFrame = camera.CFrame
 	local endCFrame = startCFrame * CFrame.new(0, -5, -35)
-	beginFade(ui.InnerFrame, excludedContinue)
+	beginFade(ui.BackgroundFrame, excludedContinue)
 	local blur = openingBlur
 	if blur and blur.Parent then
 		local blurTween = TweenService:Create(

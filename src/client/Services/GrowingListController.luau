@@ -596,37 +596,48 @@ local function bindGui(): boolean
 	skipAllButton = allButton
 	bindBadge(exitButton)
 	source.Visible = false
-	-- Exit 只承载入口按钮，运行时跟随主面板尺寸和锚点，确保两者共用 Position 时边缘始终重合。
-	exitContainer.AnchorPoint = frame.AnchorPoint
-	exitContainer.Size = frame.Size
-	exitButton.AnchorPoint = Vector2.new(1, 0.5)
-	exitButton.Position = UDim2.new(0, 0, 0.5, 0)
 	if harvestAllInstance and not harvestAllButton then
 		warn("[GrowingListController] GrowingList.Exit.HarvestAllButton must be a GuiButton; optional entry ignored.")
 	elseif harvestAllButton then
-		-- 与 ExitButton 共用 X=0 停靠边缘，只保留工具人在 Studio 配置的纵向排列。
-		local studioPosition = harvestAllButton.Position
-		harvestAllButton.AnchorPoint = Vector2.new(1, harvestAllButton.AnchorPoint.Y)
-		harvestAllButton.Position = UDim2.new(0, 0, studioPosition.Y.Scale, studioPosition.Y.Offset)
 		local notification = harvestAllButton:FindFirstChild("Notification")
 		if notification and notification:IsA("GuiObject") then
 			-- 收获全部没有数量角标语义，隐藏从 ExitButton 克隆遗留的红色 Notification。
 			notification.Visible = false
 		end
 	end
-	local openPosition = frame.Position
-	local closedPosition = UDim2.new(
-		openPosition.X.Scale + frame.Size.X.Scale,
-		openPosition.X.Offset + frame.Size.X.Offset,
-		openPosition.Y.Scale,
-		openPosition.Y.Offset
-	)
+	-- 保留 Studio-authored Exit 与按钮布局；入口容器始终留在安全区内，避免移动端裁掉屏幕外父级的外溢子按钮。
+	local panelOpenPosition = frame.Position
+	local companionClosedPosition = exitContainer.Position
+	local function offsetPositionX(position: UDim2, pixels: number): UDim2
+		return UDim2.new(
+			position.X.Scale,
+			position.X.Offset + pixels,
+			position.Y.Scale,
+			position.Y.Offset
+		)
+	end
+	local function getPanelWidthPixels(): number
+		local absoluteWidth = frame.AbsoluteSize.X
+		if absoluteWidth > 1 then
+			return absoluteWidth
+		end
+		local camera = Workspace.CurrentCamera
+		local viewportWidth = if camera then camera.ViewportSize.X else 1280
+		return math.max(1, frame.Size.X.Scale * viewportWidth + frame.Size.X.Offset)
+	end
+	local function getDrawerPositions(): (UDim2, UDim2)
+		local panelWidth = getPanelWidthPixels()
+		return offsetPositionX(panelOpenPosition, panelWidth), offsetPositionX(companionClosedPosition, -panelWidth)
+	end
+	local panelClosedPosition, companionOpenPosition = getDrawerPositions()
 	_drawerAnimator = SlidingPanelAnimator.new({
 		Panel = frame,
 		TriggerButton = exitButton,
 		MovingCompanion = exitContainer,
-		OpenPosition = openPosition,
-		ClosedPosition = closedPosition,
+		OpenPosition = panelOpenPosition,
+		ClosedPosition = panelClosedPosition,
+		CompanionOpenPosition = companionOpenPosition,
+		CompanionClosedPosition = companionClosedPosition,
 		TweenInfo = TweenInfo.new(
 			PlantGrowthIAPConfig.DrawerTweenDuration,
 			PlantGrowthIAPConfig.DrawerTweenEasingStyle,
@@ -634,6 +645,30 @@ local function bindGui(): boolean
 		),
 		InitiallyOpen = false,
 	})
+	local drawerLayoutRefreshQueued = false
+	local function queueDrawerLayoutRefresh()
+		if drawerLayoutRefreshQueued then
+			return
+		end
+		drawerLayoutRefreshQueued = true
+		task.defer(function()
+			drawerLayoutRefreshQueued = false
+			local animator = _drawerAnimator
+			if not animator or not frame.Parent or not exitContainer.Parent then
+				return
+			end
+			local nextPanelClosedPosition, nextCompanionOpenPosition = getDrawerPositions()
+			animator:SetPositions(
+				panelOpenPosition,
+				nextPanelClosedPosition,
+				nextCompanionOpenPosition,
+				companionClosedPosition,
+				true
+			)
+		end)
+	end
+	table.insert(staticConnections, frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(queueDrawerLayoutRefresh))
+	queueDrawerLayoutRefresh()
 	return true
 end
 

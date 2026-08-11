@@ -570,6 +570,11 @@ function InterfaceVisualController.Close(owner: Instance)
 	end)
 end
 
+-- 返回当前是否有任意业务界面 owner 处于打开状态；只读查询不会关闭界面或改变视觉。
+function InterfaceVisualController.IsAnyOpen(): boolean
+	return hasOwners()
+end
+
 -- 为 owner 注册可选屏幕专注策略；未注册的界面继续沿用原有 Open/Close 行为。
 function InterfaceVisualController.RegisterFocusMode(owner: Instance, options: FocusModeOptions)
 	InterfaceVisualController.Init()
