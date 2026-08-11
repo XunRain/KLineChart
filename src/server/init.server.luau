@@ -18,6 +18,7 @@ local HarvestAllPurchaseService = require(Services.HarvestAllPurchaseService)
 local ShovelService = require(Services.ShovelService)
 local SeedShopService = require(Services.SeedShopService)
 local SeedPackService = require(Services.SeedPackService)
+local CoinsPurchaseService = require(Services.CoinsPurchaseService)
 local StarterPackService = require(Services.StarterPackService)
 local MarketService = require(Services.MarketService)
 local LeaderboardService = require(Services.LeaderboardService)
@@ -115,6 +116,11 @@ SeedPackService.Init({
 	RemoteService = RemoteService,
 	GameAnalyticsService = GameAnalyticsService,
 })
+CoinsPurchaseService.Init({
+	PlayerDataService = PlayerDataService,
+	InventoryService = InventoryService,
+	RemoteService = RemoteService,
+})
 StarterPackService.Init({
 	PlayerDataService = PlayerDataService,
 	InventoryService = InventoryService,
@@ -128,6 +134,7 @@ DeveloperProductService.Init({
 	HarvestAllPurchaseService = HarvestAllPurchaseService,
 	SeedShopService = SeedShopService,
 	SeedPackService = SeedPackService,
+	CoinsPurchaseService = CoinsPurchaseService,
 	GameAnalyticsService = GameAnalyticsService,
 })
 SellShopService.Init({

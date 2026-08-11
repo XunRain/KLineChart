@@ -19,6 +19,11 @@ export type PackDefinition = {
 	Rewards: { RewardDefinition },
 }
 
+export type ShopCardUiDefinition = {
+	CardName: string,
+	PurchaseButtonNames: { [number]: string },
+}
+
 local ItemConfig = require(script.Parent.ItemConfig)
 
 local SeedPackIAPConfig = {}
@@ -101,12 +106,67 @@ do
 	end
 end
 
--- Studio-owned RobuxShop 的稳定顶层节点；深层卡片缺失时客户端只告警并禁用对应商品。
+-- Studio-owned RobuxShop 的稳定节点；卡片与业务包量的映射只在此定义，客户端不得按按钮名称推断数量。
 SeedPackIAPConfig.ScreenGuiName = "RobuxShop"
 SeedPackIAPConfig.MainFrameName = "Frame"
 SeedPackIAPConfig.ScrollingFrameName = "ScrollingFrame"
-SeedPackIAPConfig.RareSectionName = "Gacha"
-SeedPackIAPConfig.EpicSectionName = "SeedPacks"
+SeedPackIAPConfig.ShopUi = {
+	SectionName = "SeedPacks",
+	CardsContainerName = "Packs",
+	LegacyButtonsName = "Buttons",
+	LegacyGachaSectionName = "Gacha",
+	ProductCardPreviewPadding = 1.22,
+	Cards = {
+		Rare = {
+			CardName = "Item1",
+			PurchaseButtonNames = { [1] = "Buy1Button", [5] = "Buy10Button" },
+		},
+		Epic = {
+			CardName = "Item2",
+			PurchaseButtonNames = { [1] = "Buy1Button", [5] = "Buy10Button" },
+		},
+	},
+	StarterPack = {
+		RewardsContainerName = "Rewards",
+		PreviewPadding = 1.35,
+		RewardCards = {
+			Rare = "Item1",
+			Epic = "Item2",
+		},
+	},
+} :: {
+	SectionName: string,
+	CardsContainerName: string,
+	LegacyButtonsName: string,
+	LegacyGachaSectionName: string,
+	ProductCardPreviewPadding: number,
+	Cards: { [PackId]: ShopCardUiDefinition },
+	StarterPack: {
+		RewardsContainerName: string,
+		PreviewPadding: number,
+		RewardCards: { [PackId]: string },
+	},
+}
+do
+	assert(SeedPackIAPConfig.ShopUi.ProductCardPreviewPadding >= 1, "[SeedPackIAPConfig] 商品卡预览 Padding 必须至少为 1")
+	assert(SeedPackIAPConfig.ShopUi.StarterPack.PreviewPadding >= 1, "[SeedPackIAPConfig] 礼包预览 Padding 必须至少为 1")
+	local cardNames: { [string]: boolean } = {}
+	for packId, uiDefinition in SeedPackIAPConfig.ShopUi.Cards do
+		assert(uiDefinition.CardName ~= "" and not cardNames[uiDefinition.CardName], string.format("[SeedPackIAPConfig] %s 商店卡名为空或重复", packId))
+		cardNames[uiDefinition.CardName] = true
+		local buttonNames: { [string]: boolean } = {}
+		for _, amount in SeedPackIAPConfig.PackAmounts do
+			local buttonName = uiDefinition.PurchaseButtonNames[amount]
+			assert(type(buttonName) == "string" and buttonName ~= "" and not buttonNames[buttonName], string.format("[SeedPackIAPConfig] %s x%d 按钮映射为空或重复", packId, amount))
+			buttonNames[buttonName] = true
+		end
+	end
+	local starterCardNames: { [string]: boolean } = {}
+	for packId, cardName in SeedPackIAPConfig.ShopUi.StarterPack.RewardCards do
+		assert(cardName ~= "" and not starterCardNames[cardName], string.format("[SeedPackIAPConfig] 礼包 %s 卡名为空或重复", packId))
+		starterCardNames[cardName] = true
+	end
+end
 SeedPackIAPConfig.OpeningScreenGuiName = "SeedPackOpening"
 
 SeedPackIAPConfig.LoadingNotice = "Player data is still loading."

@@ -40,6 +40,10 @@ return {
 		RequestRobuxShopState = "RequestRobuxShopState",
 		-- 服务端到单个客户端：返回 StarterPackClaimed 与可选拥有权状态，客户端只能更新商品卡。
 		RobuxShopStateChanged = "RobuxShopStateChanged",
+		-- 客户端到服务端：唯一参数为 Package1..Package5 稳定金币档位键；服务端权威读取金币数量、商品 ID、冷却和余额上限。
+		RequestCoinsPurchase = "RequestCoinsPurchase",
+		-- 服务端到单个客户端：参数为权威全局唯一金币商品 ID；只用于打开官方弹窗，完成事件不发货。
+		PromptCoinsProductPurchase = "PromptCoinsProductPurchase",
 		-- 客户端到服务端：参数为 PackId 与固定 Amount；服务端重新校验配置、数据、冷却与种子包库存上限。
 		RequestSeedPackPurchase = "RequestSeedPackPurchase",
 		-- 服务端到单个客户端：参数为权威正数种子包商品 ID；只用于打开官方弹窗，完成事件不发货。

@@ -7,11 +7,13 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local CoinsIAPConfig = require(ReplicatedStorage.Shared.CoinsIAPConfig)
 local DeveloperProductCatalogConfig = require(ReplicatedStorage.Shared.DeveloperProductCatalogConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local ProduceCapacityIAPConfig = require(ReplicatedStorage.Shared.ProduceCapacityIAPConfig)
 local SeedPackIAPConfig = require(ReplicatedStorage.Shared.SeedPackIAPConfig)
 local StarterPackConfig = require(ReplicatedStorage.Shared.StarterPackConfig)
+local ViewportPreviewCamera = require(script.Parent.Parent.Components.ViewportPreviewCamera)
 
 local RobuxShopController = {}
 RobuxShopController.StateChanged = Instance.new("BindableEvent")
@@ -24,6 +26,7 @@ local scrollingFrame: ScrollingFrame? = nil
 local starterBuyButton: GuiButton? = nil
 local starterPriceLabel: TextLabel? = nil
 local starterClaimed = false
+local coinButtons: { GuiButton } = {}
 local packButtons: { GuiButton } = {}
 local capacityButton: GuiButton? = nil
 local InterfaceVisualController: any
@@ -31,6 +34,7 @@ local DeveloperProductPromptController: any
 local GamePassPromptController: any
 local NotificationController: any
 local requestStateRemote: RemoteEvent? = nil
+local requestCoinsRemote: RemoteEvent? = nil
 local requestSeedPackRemote: RemoteEvent? = nil
 local requestStarterPackRemote: RemoteEvent? = nil
 local requestStarterPackClaimRemote: RemoteEvent? = nil
@@ -41,6 +45,7 @@ local observedCapacityValue: IntValue? = nil
 local inventoryChildAddedConnection: RBXScriptConnection? = nil
 local inventoryChildRemovedConnection: RBXScriptConnection? = nil
 local capacityValueConnection: RBXScriptConnection? = nil
+local GENERATED_PACK_PREVIEW_ATTRIBUTE = "KLineRobuxShopGeneratedPreview"
 
 local function warnOnce(key: string, message: string)
 	if warnings[key] then
@@ -85,7 +90,7 @@ local function setButtonEnabled(button: GuiButton?, enabled: boolean)
 end
 
 local function formatPrice(price: number): string
-	return string.format("%s %d", SeedPackIAPConfig.RobuxCurrencyIconText, price)
+	return string.format("%s %d", CoinsIAPConfig.RobuxCurrencyIconText, price)
 end
 
 local function isAnyPurchasePromptPending(): boolean
@@ -153,6 +158,9 @@ end
 
 local function updateProductAvailability()
 	local pending = isAnyPurchasePromptPending()
+	for _, button in coinButtons do
+		setButtonEnabled(button, not pending)
+	end
 	for _, button in packButtons do
 		setButtonEnabled(button, not pending)
 	end
@@ -215,15 +223,24 @@ local function observeCapacityValue()
 	updateAllAvailability()
 end
 
-local function hideAndDisable(instance: Instance?)
+local function disableInput(instance: Instance?)
 	if not instance then
 		return
 	end
-	if instance:IsA("GuiObject") then
-		instance.Visible = false
-	end
 	if instance:IsA("GuiButton") then
 		setButtonEnabled(instance, false)
+	end
+end
+
+local function disableInputTree(instance: Instance?)
+	disableInput(instance)
+	if not instance then
+		return
+	end
+	for _, descendant in instance:GetDescendants() do
+		if descendant:IsA("GuiButton") then
+			setButtonEnabled(descendant, false)
+		end
 	end
 end
 
@@ -237,7 +254,7 @@ local function bindPriceLabel(button: GuiButton, assetId: number?, infoType: Enu
 	if fallbackPrice then
 		setText(label, formatPrice(fallbackPrice), true)
 	else
-		setText(label, SeedPackIAPConfig.RobuxCurrencyIconText .. " --", true)
+		setText(label, CoinsIAPConfig.RobuxCurrencyIconText .. " --", true)
 	end
 	resolveOfficialPrice(assetId, infoType, fallbackPrice, function(price)
 		if label.Parent then
@@ -247,14 +264,16 @@ local function bindPriceLabel(button: GuiButton, assetId: number?, infoType: Enu
 	return true
 end
 
+local renderPackPreview: (GuiObject, SeedPackIAPConfig.PackId, number) -> ()
+
 local function configureStarterPack(section: GuiObject)
-	section.Visible = true
-	hideAndDisable(section:FindFirstChild("Timer"))
-	hideAndDisable(section:FindFirstChild("LimitedTime"))
+	disableInputTree(section:FindFirstChild("Timer"))
+	disableInputTree(section:FindFirstChild("LimitedTime"))
 	setText(findTextLabel(section, "Title", false), "Starter Pack", false)
 	local wasPrice = findTextLabel(section, "WasPrice", false)
 	setText(wasPrice, string.format("Was %s", formatPrice(StarterPackConfig.WasPrice)), false)
-	local rewards = section:FindFirstChild("Rewards")
+	local starterUi = SeedPackIAPConfig.ShopUi.StarterPack
+	local rewards = section:FindFirstChild(starterUi.RewardsContainerName)
 	local rewardTexts = {
 		"Rare Seed Pack x5",
 		"Epic Seed Pack x1",
@@ -263,6 +282,24 @@ local function configureStarterPack(section: GuiObject)
 	for index, rewardText in rewardTexts do
 		local rewardCard = rewards and rewards:FindFirstChild("Item" .. tostring(index))
 		setText(findTextLabel(rewardCard, "ItemName", false), rewardText, false)
+	end
+	if rewards then
+		for packId, cardName in starterUi.RewardCards do
+			local cardCandidate = rewards:FindFirstChild(cardName)
+			if cardCandidate and cardCandidate:IsA("GuiObject") then
+				renderPackPreview(cardCandidate, packId, starterUi.PreviewPadding)
+			else
+				warnOnce(
+					"StarterPack:" .. packId .. ":Card",
+					string.format("%s.%s 缺失或类型错误，礼包购买保持可用。", rewards:GetFullName(), cardName)
+				)
+			end
+		end
+	else
+		warnOnce(
+			"StarterPack:Rewards",
+			section:GetFullName() .. "." .. starterUi.RewardsContainerName .. " 缺失，礼包购买保持可用。"
+		)
 	end
 	local buyButton = findButton(section, "BuyButton", false)
 	local priceLabel = findTextLabel(buyButton, "Price", false)
@@ -283,7 +320,6 @@ local function configureStarterPack(section: GuiObject)
 end
 
 local function configureCapacity(section: GuiObject)
-	section.Visible = true
 	local cards = section:FindFirstChild("Frame")
 	local card = cards and cards:FindFirstChild("Gear1")
 	if not card or not card:IsA("GuiObject") then
@@ -291,13 +327,13 @@ local function configureCapacity(section: GuiObject)
 		return
 	end
 	for _, name in { "Gear2", "Gear3", "Gear4" } do
-		hideAndDisable(cards:FindFirstChild(name))
+		disableInputTree(cards:FindFirstChild(name))
 	end
 	setText(findTextLabel(card, "ItemName", false), "Produce Capacity +100", true)
 	setText(findTextLabel(card, "Description", false), "Permanently adds 100 produce storage.", false)
-	hideAndDisable(card:FindFirstChild("GiftButton"))
-	hideAndDisable(card:FindFirstChild("Inspect"))
-	hideAndDisable(card:FindFirstChild("OwnedText"))
+	disableInputTree(card:FindFirstChild("GiftButton"))
+	disableInputTree(card:FindFirstChild("Inspect"))
+	disableInputTree(card:FindFirstChild("OwnedText"))
 	local buyButton = findButton(card, "BuyButton", false)
 	local productId = ProduceCapacityIAPConfig.GetProductId()
 	if not buyButton
@@ -327,75 +363,219 @@ local function configureCapacity(section: GuiObject)
 	end)
 end
 
-local function configurePrizeCards(section: GuiObject, packId: SeedPackIAPConfig.PackId): boolean
-	local prizes = section:FindFirstChild("Prizes")
-	if not prizes or not prizes:IsA("GuiObject") then
-		warnOnce(packId .. ":Prizes", section:GetFullName() .. ".Prizes 缺失。")
-		return false
-	end
-	local rewards = SeedPackIAPConfig.Packs[packId].Rewards
-	for index, reward in rewards do
-		local item = prizes:FindFirstChild("Item" .. tostring(index))
-		if not item or not item:IsA("GuiObject") then
-			warnOnce(packId .. ":Prize" .. tostring(index), string.format("%s 缺少第 %d 个奖品位，对应商品已禁用。", section:GetFullName(), index))
-			return false
-		end
-		item.Visible = true
-		setText(findTextLabel(item, "ItemName", false), reward.ItemId == "LanternFruit" and "Lantern Fruit Seed" or reward.ItemId .. " Seed", false)
-		setText(findTextLabel(item, "Odds", false), string.format("%d%%", reward.Weight), false)
-		hideAndDisable(item:FindFirstChild("Inspect"))
-	end
-	for index = #rewards + 1, 10 do
-		hideAndDisable(prizes:FindFirstChild("Item" .. tostring(index)))
-	end
-	return true
-end
-
-local function configurePackSection(section: GuiObject, packId: SeedPackIAPConfig.PackId)
-	section.Visible = true
-	local header = section:FindFirstChild("Header")
-	setText(findTextLabel(header, "TextLabel", false), SeedPackIAPConfig.Packs[packId].DisplayName, true)
-	local complete = configurePrizeCards(section, packId)
-	local buttons = section:FindFirstChild("Buttons")
-	if not buttons or not buttons:IsA("GuiObject") then
-		warnOnce(packId .. ":Buttons", section:GetFullName() .. ".Buttons 缺失。")
+local function configureCoins(section: GuiObject)
+	local packagesContainer = section:FindFirstChild(CoinsIAPConfig.PackagesContainerName)
+	if not packagesContainer then
+		warnOnce("CoinsPackages", section:GetFullName() .. "." .. CoinsIAPConfig.PackagesContainerName .. " 缺失，金币商品已禁用。")
 		return
 	end
-	hideAndDisable(buttons:FindFirstChild("Set3"))
-	hideAndDisable(buttons:FindFirstChild("Set4"))
-	for _, descendant in buttons:GetDescendants() do
-		if descendant:IsA("GuiButton") and (string.find(descendant.Name, "Gift") or string.find(descendant.Name, "10") or string.find(descendant.Name, "50")) then
-			hideAndDisable(descendant)
+	for _, packageKey in CoinsIAPConfig.PackageKeys do
+		local definition = CoinsIAPConfig.Packages[packageKey]
+		local packageCandidate = packagesContainer:FindFirstChild(definition.UiPackageName)
+		if not packageCandidate or not packageCandidate:IsA("GuiObject") then
+			warnOnce(packageKey .. ":Card", string.format("%s.%s 缺失或类型错误，对应金币商品已禁用。", packagesContainer:GetFullName(), definition.UiPackageName))
+			continue
+		end
+		local buyButton = findButton(packageCandidate, "BuyButton", false)
+		if not buyButton then
+			warnOnce(packageKey .. ":BuyButton", packageCandidate:GetFullName() .. ".BuyButton 缺失，对应金币商品已禁用。")
+			continue
+		end
+		local configuredProductId = CoinsIAPConfig.GetProductId(packageKey)
+		local productId = if configuredProductId
+			and DeveloperProductCatalogConfig.IsGloballyUnique(configuredProductId)
+			then configuredProductId
+			else nil
+		if not bindPriceLabel(buyButton, productId, Enum.InfoType.Product, definition.TargetPrice) then
+			continue
+		end
+		setButtonEnabled(buyButton, not isAnyPurchasePromptPending())
+		table.insert(coinButtons, buyButton)
+		buyButton.Activated:Connect(function()
+			local remote = requestCoinsRemote
+			if remote and not isAnyPurchasePromptPending() then
+				remote:FireServer(definition.Key)
+			end
+		end)
+	end
+end
+
+local function clearPackViewport(viewport: ViewportFrame)
+	local currentCamera = viewport.CurrentCamera
+	if currentCamera and currentCamera:GetAttribute(GENERATED_PACK_PREVIEW_ATTRIBUTE) == true then
+		viewport.CurrentCamera = nil
+	end
+	for _, child in viewport:GetChildren() do
+		if child:GetAttribute(GENERATED_PACK_PREVIEW_ATTRIBUTE) == true
+			and (child:IsA("WorldModel") or child:IsA("Camera"))
+		then
+			child:Destroy()
 		end
 	end
-	local amountButtons = {
-		[1] = findButton(buttons, "Buy1Button", true),
-		[5] = findButton(buttons, "Buy5Button", true) or findButton(buttons, "Buy3Button", true),
-	}
+end
+
+local function usePackPreviewFallback(
+	viewport: ViewportFrame?,
+	packId: SeedPackIAPConfig.PackId,
+	reason: string
+)
+	if viewport then
+		clearPackViewport(viewport)
+	end
+	warnOnce(packId .. ":Preview", reason)
+end
+
+local function hasPreviewPart(root: Instance): boolean
+	if root:IsA("BasePart") then
+		return true
+	end
+	for _, descendant in root:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			return true
+		end
+	end
+	return false
+end
+
+local function preparePreviewClone(root: Instance)
+	if root:IsA("BasePart") then
+		root.Anchored = true
+		root.CanCollide = false
+		root.CanTouch = false
+		root.CanQuery = false
+	end
+	for _, descendant in root:GetDescendants() do
+		if descendant:IsA("BaseScript") then
+			descendant:Destroy()
+		elseif descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+		end
+	end
+end
+
+renderPackPreview = function(card: GuiObject, packId: SeedPackIAPConfig.PackId, padding: number)
+	local viewportCandidate = card:FindFirstChild("ViewportFrame")
+	local viewport = if viewportCandidate and viewportCandidate:IsA("ViewportFrame")
+		then viewportCandidate
+		else nil
+	if not viewport then
+		usePackPreviewFallback(nil, packId, card:GetFullName() .. ".ViewportFrame 缺失")
+		return
+	end
+	clearPackViewport(viewport)
+
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local seedPackAssets = assets and assets:FindFirstChild("SeedPacks")
+	local modelName = SeedPackIAPConfig.Packs[packId].PreviewModelName
+	local source = seedPackAssets and seedPackAssets:FindFirstChild(modelName)
+	if not source then
+		usePackPreviewFallback(viewport, packId, "缺少 ReplicatedStorage.Assets.SeedPacks." .. modelName)
+		return
+	end
+
+	local cloneOk, cloneResult = pcall(function()
+		return source:Clone()
+	end)
+	if not cloneOk or typeof(cloneResult) ~= "Instance" then
+		usePackPreviewFallback(viewport, packId, modelName .. " 克隆失败：" .. tostring(cloneResult))
+		return
+	end
+	local clone = cloneResult :: Instance
+	preparePreviewClone(clone)
+	if not hasPreviewPart(clone) then
+		clone:Destroy()
+		usePackPreviewFallback(viewport, packId, modelName .. " 不含 BasePart")
+		return
+	end
+
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Name = packId .. "SeedPackPreview"
+	worldModel:SetAttribute(GENERATED_PACK_PREVIEW_ATTRIBUTE, true)
+	worldModel.Parent = viewport
+	local renderOk, renderError = pcall(function()
+		local previewRoot = ViewportPreviewCamera.MountPreviewRoot(clone, worldModel)
+		if not previewRoot then
+			error("无法创建预览根模型")
+		end
+		previewRoot:PivotTo(CFrame.new())
+		local boundsCFrame, boundsSize = ViewportPreviewCamera.GetVisibleBounds(previewRoot)
+		previewRoot:PivotTo(CFrame.new(-boundsCFrame.Position))
+		local camera = ViewportPreviewCamera.CreateForBounds(viewport, boundsSize, Vector3.zero, {
+			FieldOfView = 35,
+			Padding = padding,
+		})
+		camera:SetAttribute(GENERATED_PACK_PREVIEW_ATTRIBUTE, true)
+		camera.Parent = viewport
+		viewport.CurrentCamera = camera
+	end)
+	if not renderOk then
+		usePackPreviewFallback(viewport, packId, modelName .. " 预览失败：" .. tostring(renderError))
+		return
+	end
+end
+
+local function configurePackCard(card: GuiObject, packId: SeedPackIAPConfig.PackId)
+	local definition = SeedPackIAPConfig.Packs[packId]
+	local uiDefinition = SeedPackIAPConfig.ShopUi.Cards[packId]
+	local itemName = findTextLabel(card, "ItemName", false)
+	if itemName then
+		setText(itemName, definition.DisplayName, false)
+	else
+		warnOnce(packId .. ":ItemName", card:GetFullName() .. ".ItemName 缺失。")
+	end
+	disableInputTree(card:FindFirstChild("Inspect"))
+	renderPackPreview(card, packId, SeedPackIAPConfig.ShopUi.ProductCardPreviewPadding)
+
 	for _, amount in SeedPackIAPConfig.PackAmounts do
-		local button = amountButtons[amount]
+		local buttonName = uiDefinition.PurchaseButtonNames[amount]
+		local button = findButton(card, buttonName, false)
 		if not button then
-			warnOnce(packId .. ":Buy" .. tostring(amount), string.format("%s 缺少 x%d 购买按钮。", section:GetFullName(), amount))
+			warnOnce(packId .. ":Buy" .. tostring(amount), string.format("%s.%s 缺失，x%d 商品已禁用。", card:GetFullName(), buttonName, amount))
 			continue
 		end
 		local amountLabel = findTextLabel(button, "TextLabel", false)
-		setText(amountLabel, string.format("%d Pack%s", amount, if amount == 1 then "" else "s"), false)
+		if not amountLabel then
+			warnOnce(packId .. ":Amount" .. tostring(amount), button:GetFullName() .. ".TextLabel 缺失，按钮已禁用。")
+			setButtonEnabled(button, false)
+			continue
+		end
+		setText(amountLabel, "x" .. tostring(amount), false)
 		local productId = SeedPackIAPConfig.GetProductId(packId, amount)
 		local targetPrice = SeedPackIAPConfig.GetTargetPrice(packId, amount)
 		if not targetPrice or not bindPriceLabel(button, productId, Enum.InfoType.Product, targetPrice) then
 			setButtonEnabled(button, false)
 			continue
 		end
-		setButtonEnabled(button, complete)
-		if complete then
-			table.insert(packButtons, button)
-		end
+		setButtonEnabled(button, not isAnyPurchasePromptPending())
+		table.insert(packButtons, button)
 		button.Activated:Connect(function()
 			local remote = requestSeedPackRemote
-			if complete and remote and not isAnyPurchasePromptPending() then
+			if remote and not isAnyPurchasePromptPending() then
 				remote:FireServer({ PackId = packId, Amount = amount })
 			end
 		end)
+	end
+end
+
+local function configureSeedPacksSection(section: GuiObject)
+	local shopUi = SeedPackIAPConfig.ShopUi
+	disableInputTree(section:FindFirstChild(shopUi.LegacyButtonsName))
+	local cards = section:FindFirstChild(shopUi.CardsContainerName)
+	if not cards then
+		warnOnce("SeedPackCards", section:GetFullName() .. "." .. shopUi.CardsContainerName .. " 缺失，种子包商品已禁用。")
+		return
+	end
+	for packId, uiDefinition in shopUi.Cards do
+		local cardCandidate = cards:FindFirstChild(uiDefinition.CardName)
+		if cardCandidate and cardCandidate:IsA("GuiObject") then
+			configurePackCard(cardCandidate, packId)
+		else
+			disableInputTree(cardCandidate)
+			warnOnce(packId .. ":Card", string.format("%s.%s 缺失或类型错误，仅 %s 商品已禁用。", cards:GetFullName(), uiDefinition.CardName, packId))
+		end
 	end
 end
 
@@ -447,13 +627,13 @@ local function bindGui(): boolean
 	resolvedScreen.ResetOnSpawn = false
 	resolvedScreen.Enabled = false
 	disableLegacyScripts(resolvedScreen)
-	setText(findTextLabel(header, "TextLabel", false), "Robux Shop", true)
 	local starterSection = listCandidate:FindFirstChild("StarterPack")
+	local coinsSection = listCandidate:FindFirstChild(CoinsIAPConfig.SectionName)
 	local capacitySection = listCandidate:FindFirstChild("Gears")
-	local rareSection = listCandidate:FindFirstChild(SeedPackIAPConfig.RareSectionName)
-	local epicSection = listCandidate:FindFirstChild(SeedPackIAPConfig.EpicSectionName)
-	for _, name in { "Sheckles", "Pets", "Admin" } do
-		hideAndDisable(listCandidate:FindFirstChild(name))
+	local shopUi = SeedPackIAPConfig.ShopUi
+	local seedPacksSection = listCandidate:FindFirstChild(shopUi.SectionName)
+	for _, name in { "Sheckles", "Pets", "Admin", shopUi.LegacyGachaSectionName } do
+		disableInputTree(listCandidate:FindFirstChild(name))
 	end
 	if starterSection and starterSection:IsA("GuiObject") then
 		starterSection.LayoutOrder = 1
@@ -461,39 +641,40 @@ local function bindGui(): boolean
 	else
 		warnOnce("StarterSection", "ScrollingFrame.StarterPack 缺失。")
 	end
+	if coinsSection and coinsSection:IsA("GuiObject") then
+		configureCoins(coinsSection)
+	else
+		warnOnce("CoinsSection", "ScrollingFrame.Coins 缺失，金币商品已禁用。")
+	end
 	if capacitySection and capacitySection:IsA("GuiObject") then
 		capacitySection.LayoutOrder = 2
 		configureCapacity(capacitySection)
 	else
 		warnOnce("CapacitySection", "ScrollingFrame.Gears 缺失。")
 	end
-	if rareSection and rareSection:IsA("GuiObject") then
-		rareSection.LayoutOrder = 3
-		configurePackSection(rareSection, "Rare")
+	if seedPacksSection and seedPacksSection:IsA("GuiObject") then
+		seedPacksSection.LayoutOrder = 3
+		configureSeedPacksSection(seedPacksSection)
 	else
-		warnOnce("RareSection", "ScrollingFrame.Gacha 缺失，Rare Seed Pack 已禁用。")
-	end
-	if epicSection and epicSection:IsA("GuiObject") then
-		epicSection.LayoutOrder = 4
-		configurePackSection(epicSection, "Epic")
-	else
-		warnOnce("EpicSection", "ScrollingFrame.SeedPacks 缺失，Epic Seed Pack 已禁用。")
+		warnOnce("SeedPacksSection", "ScrollingFrame.SeedPacks 缺失，Rare/Epic Seed Pack 已禁用。")
 	end
 	local navDefinitions = {
-		{ Name = "ShecklesButton", Text = "Starter Pack", Target = starterSection },
-		{ Name = "GearsButton", Text = "Capacity", Target = capacitySection },
-		{ Name = "SeedsButton", Text = "Seed Packs", Target = rareSection or epicSection },
+		{ Name = CoinsIAPConfig.HeaderButtonName, Target = coinsSection },
+		{ Name = "GearsButton", Target = capacitySection },
+		{ Name = "SeedsButton", Target = seedPacksSection },
 	}
 	for _, nav in navDefinitions do
 		local button = findButton(header, nav.Name, false)
 		if button then
-			setText(findTextLabel(button, "TextLabel", false), nav.Text, true)
-			button.Activated:Connect(function()
-				local target = nav.Target
-				if target and target:IsA("GuiObject") then
-					scrollTo(target)
-				end
-			end)
+			local target = nav.Target
+			local targetGui = if target and target:IsA("GuiObject") then target else nil
+			local targetIsValid = targetGui ~= nil
+			setButtonEnabled(button, targetIsValid)
+			if targetGui then
+				button.Activated:Connect(function()
+					scrollTo(targetGui)
+				end)
+			end
 		end
 	end
 	exitButton.Activated:Connect(function()
@@ -511,10 +692,12 @@ end
 local function bindRemotes()
 	local folder = ReplicatedStorage:WaitForChild(NetworkConfig.FolderName)
 	requestStateRemote = folder:WaitForChild(NetworkConfig.Events.RequestRobuxShopState) :: RemoteEvent
+	requestCoinsRemote = folder:WaitForChild(NetworkConfig.Events.RequestCoinsPurchase) :: RemoteEvent
 	requestSeedPackRemote = folder:WaitForChild(NetworkConfig.Events.RequestSeedPackPurchase) :: RemoteEvent
 	requestStarterPackRemote = folder:WaitForChild(NetworkConfig.Events.RequestStarterPackPurchase) :: RemoteEvent
 	requestStarterPackClaimRemote = folder:WaitForChild(NetworkConfig.Events.RequestStarterPackClaim) :: RemoteEvent
 	local stateChanged = folder:WaitForChild(NetworkConfig.Events.RobuxShopStateChanged) :: RemoteEvent
+	local promptCoins = folder:WaitForChild(NetworkConfig.Events.PromptCoinsProductPurchase) :: RemoteEvent
 	local promptSeedPack = folder:WaitForChild(NetworkConfig.Events.PromptSeedPackProductPurchase) :: RemoteEvent
 	local promptStarterPack = folder:WaitForChild(NetworkConfig.Events.PromptStarterPackGamePassPurchase) :: RemoteEvent
 	stateChanged.OnClientEvent:Connect(function(payload)
@@ -522,6 +705,21 @@ local function bindRemotes()
 			return
 		end
 		starterClaimed = payload.StarterPackClaimed
+		updateAllAvailability()
+	end)
+	promptCoins.OnClientEvent:Connect(function(productId)
+		if not CoinsIAPConfig.GetPackageForProductId(productId)
+			or not DeveloperProductCatalogConfig.IsGloballyUnique(productId)
+		then
+			return
+		end
+		if isAnyPurchasePromptPending() then
+			return
+		end
+		local prompted = DeveloperProductPromptController.Prompt(productId)
+		if not prompted then
+			NotificationController.Show(CoinsIAPConfig.PromptFailedNotice)
+		end
 		updateAllAvailability()
 	end)
 	promptSeedPack.OnClientEvent:Connect(function(productId)

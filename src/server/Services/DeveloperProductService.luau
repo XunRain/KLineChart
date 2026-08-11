@@ -1,11 +1,12 @@
 --!strict
 
--- 本模块唯一接管 Roblox 开发者商品收据，并幂等分发种子、成长、刷新、容量或收获全部奖励。
+-- 本模块唯一接管 Roblox 开发者商品收据，并幂等分发金币、种子、成长、刷新、容量或收获全部奖励。
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local CoinsIAPConfig = require(ReplicatedStorage.Shared.CoinsIAPConfig)
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local DeveloperProductCatalogConfig = require(ReplicatedStorage.Shared.DeveloperProductCatalogConfig)
 local HarvestAllIAPConfig = require(ReplicatedStorage.Shared.HarvestAllIAPConfig)
@@ -24,6 +25,7 @@ local PlantGrowthPurchaseService: any
 local HarvestAllPurchaseService: any
 local SeedShopService: any
 local SeedPackService: any
+local CoinsPurchaseService: any
 local GameAnalyticsService: any
 local initialized = false
 local pendingCapacityGrantNotices: { [Player]: { [string]: boolean } } = {}
@@ -127,6 +129,7 @@ local function processReceipt(receiptInfo: any): Enum.ProductPurchaseDecision
 		return notProcessed()
 	end
 	local itemId, amount = SeedIAPConfig.GetRewardForProductId(productId)
+	local coinPackage = CoinsIAPConfig.GetPackageForProductId(productId)
 	local seedPackId, seedPackAmount = SeedPackIAPConfig.GetRewardForProductId(productId)
 	local growthScope = PlantGrowthIAPConfig.GetScopeForProductId(productId)
 	local configuredRestockProductId = SeedShopRestockIAPConfig.GetConfiguredProductId()
@@ -156,6 +159,11 @@ local function processReceipt(receiptInfo: any): Enum.ProductPurchaseDecision
 	local player = Players:GetPlayerByUserId(playerId)
 	if not player or not PlayerDataService.IsLoaded(player) then
 		return notProcessed()
+	end
+	if coinPackage then
+		return if CoinsPurchaseService.ProcessReceipt(player, productId, rawPurchaseId)
+			then Enum.ProductPurchaseDecision.PurchaseGranted
+			else notProcessed()
 	end
 	if capacityProductId == productId then
 		return processCapacityReceipt(player, rawPurchaseId)
@@ -246,6 +254,7 @@ function DeveloperProductService.Init(dependencies: {
 	HarvestAllPurchaseService: any,
 	SeedShopService: any,
 	SeedPackService: any,
+	CoinsPurchaseService: any,
 	GameAnalyticsService: any,
 })
 	if initialized then
@@ -259,6 +268,7 @@ function DeveloperProductService.Init(dependencies: {
 	HarvestAllPurchaseService = dependencies.HarvestAllPurchaseService
 	SeedShopService = dependencies.SeedShopService
 	SeedPackService = dependencies.SeedPackService
+	CoinsPurchaseService = dependencies.CoinsPurchaseService
 	GameAnalyticsService = dependencies.GameAnalyticsService
 	MarketplaceService.ProcessReceipt = processReceipt
 	Players.PlayerRemoving:Connect(function(player)
