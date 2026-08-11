@@ -24,6 +24,24 @@ export type ShopCardUiDefinition = {
 	PurchaseButtonNames: { [number]: string },
 }
 
+export type OddsUiDefinition = {
+	ScreenGuiName: string,
+	FrameName: string,
+	HeaderName: string,
+	HeaderTextLabelName: string,
+	ExitButtonName: string,
+	ScrollingFrameName: string,
+	TemplateName: string,
+	GrandTemplateName: string,
+	CellName: string,
+	ViewportFrameName: string,
+	ItemNameLabelName: string,
+	OddsLabelName: string,
+	InspectName: string,
+	GeneratedCardAttribute: string,
+	GeneratedPreviewAttribute: string,
+}
+
 local ItemConfig = require(script.Parent.ItemConfig)
 
 local SeedPackIAPConfig = {}
@@ -61,7 +79,6 @@ SeedPackIAPConfig.Packs = {
 		Id = "Epic",
 		DisplayName = "Epic Seed Pack",
 		PreviewAssetType = "SeedPack",
-		-- 业务品质仍为 Epic；当前只复用模板已有的 Mythic Seed Pack 视觉模型。
 		PreviewModelName = "Epic Seed Pack",
 		ProductIds = { [1] = 3702473118, [5] = 3702473628 },
 		TargetPrices = { [1] = 119, [5] = 595 },
@@ -134,6 +151,24 @@ SeedPackIAPConfig.ShopUi = {
 			Epic = "Item2",
 		},
 	},
+	-- Odds 是 Studio-owned 的独立上层 ScreenGui；这些稳定名称只用于客户端只读生成奖池卡，不参与抽奖结算。
+	Odds = {
+		ScreenGuiName = "Odds",
+		FrameName = "Frame",
+		HeaderName = "Header",
+		HeaderTextLabelName = "TextLabel",
+		ExitButtonName = "ExitButton",
+		ScrollingFrameName = "ScrollingFrame",
+		TemplateName = "Template",
+		GrandTemplateName = "GrandTemplate",
+		CellName = "Cell",
+		ViewportFrameName = "ViewportFrame",
+		ItemNameLabelName = "ItemName",
+		OddsLabelName = "Odds",
+		InspectName = "Inspect",
+		GeneratedCardAttribute = "KLineSeedPackOddsGeneratedCard",
+		GeneratedPreviewAttribute = "KLineSeedPackOddsGeneratedPreview",
+	},
 } :: {
 	SectionName: string,
 	CardsContainerName: string,
@@ -146,6 +181,7 @@ SeedPackIAPConfig.ShopUi = {
 		PreviewPadding: number,
 		RewardCards: { [PackId]: string },
 	},
+	Odds: OddsUiDefinition,
 }
 do
 	assert(SeedPackIAPConfig.ShopUi.ProductCardPreviewPadding >= 1, "[SeedPackIAPConfig] 商品卡预览 Padding 必须至少为 1")
@@ -165,6 +201,9 @@ do
 	for packId, cardName in SeedPackIAPConfig.ShopUi.StarterPack.RewardCards do
 		assert(cardName ~= "" and not starterCardNames[cardName], string.format("[SeedPackIAPConfig] 礼包 %s 卡名为空或重复", packId))
 		starterCardNames[cardName] = true
+	end
+	for fieldName, value in SeedPackIAPConfig.ShopUi.Odds do
+		assert(type(value) == "string" and value ~= "", string.format("[SeedPackIAPConfig] Odds.%s 稳定名称不能为空", fieldName))
 	end
 end
 SeedPackIAPConfig.OpeningScreenGuiName = "SeedPackOpening"

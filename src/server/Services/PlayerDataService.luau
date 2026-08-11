@@ -73,6 +73,7 @@ type PlayerData = {
 		Produce: { [string]: number },
 		SeedPacks: { [string]: number },
 		ProduceCapacity: number,
+		-- 旧版热栏布局只做存档透传，Purse 与运行时库存逻辑不读取。
 		HotbarLayout: { [string]: string },
 	},
 	Plants: { [string]: PlantRecord },
@@ -146,6 +147,7 @@ local function defaultData(): PlayerData
 				Epic = 0,
 			},
 			ProduceCapacity = ProduceCapacityIAPConfig.BaseCapacity,
+			-- 保留空的旧字段，避免改变 Schema 或破坏旧档深度补全。
 			HotbarLayout = {},
 		},
 		Plants = {},
@@ -188,21 +190,6 @@ local function mergeLegacyInventoryCount(
 	counts[legacyItemId] = nil
 end
 
-local function migrateLegacyHotbarKey(value: string, legacyItemId: string, replacementItemId: string): string
-	local legacySeedKey = "Seed:" .. legacyItemId
-	if value == legacySeedKey then
-		return "Seed:" .. replacementItemId
-	end
-	local legacyFruitPrefix = "Fruit:" .. legacyItemId
-	local suffix = string.sub(value, #legacyFruitPrefix + 1)
-	if string.sub(value, 1, #legacyFruitPrefix) == legacyFruitPrefix
-		and (suffix == "" or string.sub(suffix, 1, 1) == ":")
-	then
-		return "Fruit:" .. replacementItemId .. suffix
-	end
-	return value
-end
-
 -- 在 ItemConfig 过滤未知键前，将 v1-v6 的旧蓝莓标识幂等迁移到茄子。
 local function migrateLegacyBlueberryData(raw: any)
 	if type(raw) ~= "table" then
@@ -216,13 +203,6 @@ local function migrateLegacyBlueberryData(raw: any)
 			EconomyConfig.MaximumSeedInventory
 		)
 		mergeLegacyInventoryCount(raw.Inventory.Produce, LEGACY_BLUEBERRY_ITEM_ID, EGGPLANT_ITEM_ID, MAX_SAFE_INTEGER)
-		if type(raw.Inventory.HotbarLayout) == "table" then
-			for slot, value in raw.Inventory.HotbarLayout do
-				if type(value) == "string" then
-					raw.Inventory.HotbarLayout[slot] = migrateLegacyHotbarKey(value, LEGACY_BLUEBERRY_ITEM_ID, EGGPLANT_ITEM_ID)
-				end
-			end
-		end
 	end
 	if type(raw.Plants) == "table" then
 		for _, record in raw.Plants do
@@ -242,7 +222,7 @@ local function migrateLegacyBlueberryData(raw: any)
 	end
 end
 
--- 在 ItemConfig 过滤旧键前，将 Tulip 数量、热栏、植株和付费商店余量幂等合并到 Dandelion。
+-- 在 ItemConfig 过滤旧键前，将 Tulip 数量、植株和付费商店余量幂等合并到 Dandelion。
 local function migrateLegacyTulipData(raw: any)
 	if type(raw) ~= "table" then
 		return
@@ -250,13 +230,6 @@ local function migrateLegacyTulipData(raw: any)
 	if type(raw.Inventory) == "table" then
 		mergeLegacyInventoryCount(raw.Inventory.Seeds, LEGACY_TULIP_ITEM_ID, DANDELION_ITEM_ID, EconomyConfig.MaximumSeedInventory)
 		mergeLegacyInventoryCount(raw.Inventory.Produce, LEGACY_TULIP_ITEM_ID, DANDELION_ITEM_ID, MAX_SAFE_INTEGER)
-		if type(raw.Inventory.HotbarLayout) == "table" then
-			for slot, value in raw.Inventory.HotbarLayout do
-				if type(value) == "string" then
-					raw.Inventory.HotbarLayout[slot] = migrateLegacyHotbarKey(value, LEGACY_TULIP_ITEM_ID, DANDELION_ITEM_ID)
-				end
-			end
-		end
 	end
 	if type(raw.Plants) == "table" then
 		for _, record in raw.Plants do
@@ -488,6 +461,7 @@ local function normalize(raw: any): PlayerData
 				)
 			end
 		end
+		-- 旧热栏字段只做长度受限的惰性透传，不参与任何运行时槽位排序。
 		if type(raw.Inventory.HotbarLayout) == "table" then
 			for index = 1, 10 do
 				local rawKey = raw.Inventory.HotbarLayout[tostring(index)] or raw.Inventory.HotbarLayout[index]

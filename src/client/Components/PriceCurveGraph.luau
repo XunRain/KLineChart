@@ -4,6 +4,8 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
+
 export type Theme = {
 	BackgroundTransparency: number?,
 	GridColor: Color3?,
@@ -341,7 +343,7 @@ local function configureGuide(container: Frame, index: number, y: number, height
 		return
 	end
 
-	label.Text = formatGuideValue(value) .. "$"
+	label.Text = NumberFormatter.Abbreviate(value, 0) .. "$"
 	label.ZIndex = guide.ZIndex + 1
 	label.Visible = true
 end

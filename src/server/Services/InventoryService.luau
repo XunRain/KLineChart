@@ -12,7 +12,6 @@ local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
 
 local InventoryService = {}
 local PlayerDataService: any
-local RemoteService: any
 type LeaderboardDependency = {
 	NotifyStockChanged: (Player) -> (),
 }
@@ -22,9 +21,6 @@ local TOOL_TYPE_SEED = "Seed"
 local TOOL_TYPE_PRODUCE = "Produce"
 local TOOL_TYPE_UTILITY = "Utility"
 local TOOL_TYPE_SEED_PACK = "SeedPack"
-local HOTBAR_LAYOUT_MAX_SLOTS = 10
-local HOTBAR_LAYOUT_MAX_KEY_LENGTH = 128
-local EMPTY_HOTBAR_SLOT_KEY = "__EMPTY__"
 
 local function ensureFolder(parent: Instance, name: string): Folder
 	local existing = parent:FindFirstChild(name)
@@ -81,41 +77,6 @@ local function setIntValue(parent: Instance, name: string, amount: number)
 		value.Parent = parent
 	end
 	value.Value = amount
-end
-
-local function isSafeToolKey(value: string): boolean
-	return #value > 0
-		and #value <= HOTBAR_LAYOUT_MAX_KEY_LENGTH
-		and (
-			value == EMPTY_HOTBAR_SLOT_KEY
-			or string.sub(value, 1, 5) == "Seed:"
-			or string.sub(value, 1, 6) == "Fruit:"
-			or string.sub(value, 1, 8) == "Utility:"
-			or string.sub(value, 1, 5) == "Pack:"
-			or string.sub(value, 1, 5) == "Name:"
-		)
-end
-
-local function normalizeHotbarLayout(layout: any): { [string]: string }
-	local result: { [string]: string } = {}
-	if type(layout) ~= "table" then
-		return result
-	end
-	for index = 1, HOTBAR_LAYOUT_MAX_SLOTS do
-		local value = layout[index] or layout[tostring(index)]
-		if type(value) == "string" and isSafeToolKey(value) then
-			result[tostring(index)] = value
-		end
-	end
-	return result
-end
-
-local function getHotbarLayoutSnapshot(player: Player): { [string]: string }
-	local data = PlayerDataService.GetSnapshot(player)
-	if not data or type(data.Inventory.HotbarLayout) ~= "table" then
-		return {}
-	end
-	return normalizeHotbarLayout(data.Inventory.HotbarLayout)
 end
 
 local function getToolContainers(player: Player): { Instance? }
@@ -499,53 +460,19 @@ function InventoryService.Sync(player: Player)
 		syncProduceTool(player, itemId, data.Inventory.Produce[itemId] or 0)
 	end
 	syncShovelTool(player)
-	InventoryService.SendHotbarLayout(player)
 	local leaderboardService = LeaderboardService
 	if leaderboardService then
 		leaderboardService.NotifyStockChanged(player)
 	end
 end
 
--- 向客户端下发当前存档中的热栏布局偏好，客户端只用它重排已持有 Tool。
-function InventoryService.SendHotbarLayout(player: Player)
-	if not RemoteService then
-		return
-	end
-	RemoteService.GetEvent("HotbarLayoutChanged"):FireClient(player, getHotbarLayoutSnapshot(player))
-end
-
-local function bindHotbarLayoutRemotes()
-	if not RemoteService then
-		return
-	end
-	RemoteService.GetEvent("RequestHotbarLayout").OnServerEvent:Connect(function(player)
-		InventoryService.SendHotbarLayout(player)
-	end)
-	RemoteService.GetEvent("SaveHotbarLayout").OnServerEvent:Connect(function(player, layout)
-		local normalizedLayout = normalizeHotbarLayout(layout)
-		local ok, reason = PlayerDataService.Update(player, function(data)
-			data.Inventory.HotbarLayout = normalizedLayout
-			return true
-		end)
-		if not ok then
-			warn(string.format("[InventoryService] 保存热栏布局失败 %s：%s", player.Name, tostring(reason)))
-			return
-		end
-		PlayerDataService.RequestSave(player)
-		InventoryService.SendHotbarLayout(player)
-	end)
-end
-
--- 注入权威玩家数据、Remote 与可选排行榜服务，供库存同步和热栏布局复用。
+-- 注入权威玩家数据与可选排行榜服务，供库存物化和库存榜刷新复用。
 function InventoryService.Init(dependencies: {
 	PlayerDataService: any,
-	RemoteService: any?,
 	LeaderboardService: LeaderboardDependency?,
 })
 	PlayerDataService = dependencies.PlayerDataService
-	RemoteService = dependencies.RemoteService
 	LeaderboardService = dependencies.LeaderboardService
-	bindHotbarLayoutRemotes()
 end
 
 return InventoryService

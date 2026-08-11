@@ -98,12 +98,6 @@ return {
 		RequestTeleport = "RequestTeleport",
 		-- 服务端到单个客户端：传送成功后回传最终落点 CFrame，客户端仅用于重置摄像机视角。
 		TeleportCompleted = "TeleportCompleted",
-		-- 客户端到服务端：参数为 1..10 热栏槽位到稳定 ToolKey 或空槽标记的表；服务端只保存布局偏好，不据此增减库存或装备物品。
-		SaveHotbarLayout = "SaveHotbarLayout",
-		-- 客户端到服务端：无参数请求当前玩家已保存的热栏布局；服务端只返回该玩家存档中的偏好快照。
-		RequestHotbarLayout = "RequestHotbarLayout",
-		-- 服务端到单个客户端：参数为已保存热栏布局表；客户端只用它排列当前已持有的 Tool，不改变权威库存。
-		HotbarLayoutChanged = "HotbarLayoutChanged",
 		-- 客户端到服务端：无参数请求购买下一档地块扩展；等级、价格、扣款、存档和地块尺寸均由服务端权威决定。
 		RequestExpandPlot = "RequestExpandPlot",
 		-- 客户端到服务端：无参数请求当前玩家教程展示状态；客户端不能借此推进或完成步骤。

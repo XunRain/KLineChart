@@ -9,6 +9,7 @@ local TweenService = game:GetService("TweenService")
 
 local CoinsIAPConfig = require(ReplicatedStorage.Shared.CoinsIAPConfig)
 local DeveloperProductCatalogConfig = require(ReplicatedStorage.Shared.DeveloperProductCatalogConfig)
+local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
 local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local ProduceCapacityIAPConfig = require(ReplicatedStorage.Shared.ProduceCapacityIAPConfig)
 local SeedPackIAPConfig = require(ReplicatedStorage.Shared.SeedPackIAPConfig)
@@ -23,6 +24,12 @@ local initialized = false
 local isOpen = false
 local screen: ScreenGui? = nil
 local scrollingFrame: ScrollingFrame? = nil
+local oddsScreen: ScreenGui? = nil
+local oddsScrollingFrame: ScrollingFrame? = nil
+local oddsTemplate: GuiObject? = nil
+local oddsGrandTemplate: GuiObject? = nil
+local oddsHeaderLabel: TextLabel? = nil
+local oddsHeaderFaceLabel: TextLabel? = nil
 local starterBuyButton: GuiButton? = nil
 local starterPriceLabel: TextLabel? = nil
 local starterClaimed = false
@@ -517,6 +524,262 @@ renderPackPreview = function(card: GuiObject, packId: SeedPackIAPConfig.PackId, 
 	end
 end
 
+local function setOddsOpen(open: boolean)
+	local resolvedOddsScreen = oddsScreen
+	if resolvedOddsScreen then
+		resolvedOddsScreen.Enabled = open and isOpen
+	end
+end
+
+local function disableOddsLegacyScripts(root: Instance)
+	for _, descendant in root:GetDescendants() do
+		if descendant:IsA("LocalScript") then
+			descendant.Disabled = true
+			warnOnce(
+				"OddsLegacy:" .. descendant:GetFullName(),
+				descendant:GetFullName() .. " 属于 Odds 模板遗留逻辑，运行时已禁用；仍需工具人在 Studio 删除或勾选 Disabled。"
+			)
+		end
+	end
+end
+
+local function resolveOddsTemplate(template: Instance?, templateName: string): GuiObject?
+	local oddsUi = SeedPackIAPConfig.ShopUi.Odds
+	if not template or not template:IsA("GuiObject") then
+		warnOnce("Odds:" .. templateName, "Odds." .. templateName .. " 缺失或类型错误，Inspect 已禁用。")
+		return nil
+	end
+	local cell = template:FindFirstChild(oddsUi.CellName)
+	local viewport = cell and cell:FindFirstChild(oddsUi.ViewportFrameName)
+	if not cell or not cell:IsA("GuiObject") or not viewport or not viewport:IsA("ViewportFrame") then
+		warnOnce(
+			"Odds:" .. templateName .. ":Cell",
+			string.format("Odds.%s.%s.%s 缺失或类型错误，Inspect 已禁用。", templateName, oddsUi.CellName, oddsUi.ViewportFrameName)
+		)
+		return nil
+	end
+	local itemName = findTextLabel(template, oddsUi.ItemNameLabelName, true)
+	local oddsLabel = findTextLabel(template, oddsUi.OddsLabelName, true)
+	if not itemName or not oddsLabel then
+		warnOnce("Odds:" .. templateName .. ":Text", "Odds." .. templateName .. " 缺少 ItemName/Odds 文案节点，Inspect 已禁用。")
+		return nil
+	end
+	return template
+end
+
+local function bindOddsGui(playerGui: PlayerGui, robuxShopScreen: ScreenGui)
+	local oddsUi = SeedPackIAPConfig.ShopUi.Odds
+	local screenCandidate = playerGui:FindFirstChild(oddsUi.ScreenGuiName)
+	if not screenCandidate or not screenCandidate:IsA("ScreenGui") then
+		warnOnce("Odds:Screen", "缺少 PlayerGui." .. oddsUi.ScreenGuiName .. " ScreenGui，种子包 Inspect 已禁用，购买保持可用。")
+		return
+	end
+	local resolvedOddsScreen = screenCandidate :: ScreenGui
+	resolvedOddsScreen.Enabled = false
+	disableOddsLegacyScripts(resolvedOddsScreen)
+	local frameCandidate = resolvedOddsScreen:FindFirstChild(oddsUi.FrameName)
+	local headerCandidate = frameCandidate and frameCandidate:FindFirstChild(oddsUi.HeaderName)
+	local exitButton = findButton(headerCandidate, oddsUi.ExitButtonName, false)
+	local listCandidate = frameCandidate and frameCandidate:FindFirstChild(oddsUi.ScrollingFrameName)
+	if not frameCandidate
+		or not frameCandidate:IsA("GuiObject")
+		or not headerCandidate
+		or not headerCandidate:IsA("GuiObject")
+		or not exitButton
+		or not listCandidate
+		or not listCandidate:IsA("ScrollingFrame")
+	then
+		warnOnce("Odds:Hierarchy", "Odds 需要 Frame/Header/ExitButton/ScrollingFrame，种子包 Inspect 已禁用。")
+		return
+	end
+	local headerLabel = findTextLabel(headerCandidate, oddsUi.HeaderTextLabelName, false)
+	local headerFaceCandidate = headerLabel and headerLabel:FindFirstChild(oddsUi.HeaderTextLabelName)
+	local headerFaceLabel = if headerFaceCandidate and headerFaceCandidate:IsA("TextLabel") then headerFaceCandidate else nil
+	if not headerLabel or not headerFaceLabel then
+		warnOnce("Odds:HeaderText", "Odds.Frame.Header.TextLabel 及其直接子 TextLabel 必须同时存在，种子包 Inspect 已禁用。")
+		return
+	end
+	local regularTemplate = resolveOddsTemplate(listCandidate:FindFirstChild(oddsUi.TemplateName), oddsUi.TemplateName)
+	local grandTemplate = resolveOddsTemplate(listCandidate:FindFirstChild(oddsUi.GrandTemplateName), oddsUi.GrandTemplateName)
+	if not regularTemplate or not grandTemplate then
+		return
+	end
+	if resolvedOddsScreen.DisplayOrder <= robuxShopScreen.DisplayOrder then
+		resolvedOddsScreen.DisplayOrder = robuxShopScreen.DisplayOrder + 1
+		warnOnce("Odds:DisplayOrder", "Odds.DisplayOrder 未高于 RobuxShop，运行时已提升一级；请工具人在 Studio 固化该值。")
+	end
+	oddsScreen = resolvedOddsScreen
+	oddsScrollingFrame = listCandidate
+	oddsTemplate = regularTemplate
+	oddsGrandTemplate = grandTemplate
+	oddsHeaderLabel = headerLabel
+	oddsHeaderFaceLabel = headerFaceLabel
+	exitButton.Activated:Connect(function()
+		setOddsOpen(false)
+	end)
+end
+
+local function clearGeneratedOddsCards(list: ScrollingFrame)
+	local generatedAttribute = SeedPackIAPConfig.ShopUi.Odds.GeneratedCardAttribute
+	for _, child in list:GetChildren() do
+		if child:GetAttribute(generatedAttribute) == true then
+			child:Destroy()
+		end
+	end
+end
+
+local function clearOddsViewport(viewport: ViewportFrame)
+	viewport.CurrentCamera = nil
+	for _, child in viewport:GetChildren() do
+		if child:IsA("WorldModel") or child:IsA("Camera") then
+			child:Destroy()
+		end
+	end
+end
+
+local function renderOddsSeedPreview(
+	viewport: ViewportFrame,
+	packId: SeedPackIAPConfig.PackId,
+	itemId: string
+)
+	clearOddsViewport(viewport)
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local seeds = assets and assets:FindFirstChild("Seeds")
+	local source = seeds and seeds:FindFirstChild(itemId)
+	if not source or (not source:IsA("Model") and not source:IsA("BasePart")) then
+		warnOnce("Odds:" .. packId .. ":Seed:" .. itemId, "缺少 ReplicatedStorage.Assets.Seeds." .. itemId .. " Model/BasePart，概率卡预览留空。")
+		return
+	end
+	local cloneOk, cloneResult = pcall(function()
+		return source:Clone()
+	end)
+	if not cloneOk or typeof(cloneResult) ~= "Instance" then
+		warnOnce("Odds:" .. packId .. ":Clone:" .. itemId, itemId .. " 种子预览克隆失败，概率卡预览留空。")
+		return
+	end
+	local clone = cloneResult :: Instance
+	preparePreviewClone(clone)
+	if not hasPreviewPart(clone) then
+		clone:Destroy()
+		warnOnce("Odds:" .. packId .. ":Parts:" .. itemId, itemId .. " 种子预览不含 BasePart，概率卡预览留空。")
+		return
+	end
+	local generatedAttribute = SeedPackIAPConfig.ShopUi.Odds.GeneratedPreviewAttribute
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Name = itemId .. "OddsPreview"
+	worldModel:SetAttribute(generatedAttribute, true)
+	worldModel.Parent = viewport
+	local renderOk, renderError = pcall(function()
+		local previewRoot = ViewportPreviewCamera.MountPreviewRoot(clone, worldModel)
+		if not previewRoot then
+			error("无法创建预览根模型")
+		end
+		previewRoot:PivotTo(CFrame.new())
+		local boundsCFrame, boundsSize = ViewportPreviewCamera.GetVisibleBounds(previewRoot)
+		previewRoot:PivotTo(CFrame.new(-boundsCFrame.Position))
+		local camera = ViewportPreviewCamera.CreateForBounds(viewport, boundsSize, Vector3.zero, {
+			FieldOfView = 35,
+			Padding = 1.20,
+		})
+		camera:SetAttribute(generatedAttribute, true)
+		camera.Parent = viewport
+		viewport.CurrentCamera = camera
+	end)
+	if not renderOk then
+		clearOddsViewport(viewport)
+		warnOnce("Odds:" .. packId .. ":Render:" .. itemId, itemId .. " 种子预览渲染失败：" .. tostring(renderError))
+	end
+end
+
+local function populateAndOpenOdds(packId: SeedPackIAPConfig.PackId)
+	local resolvedOddsScreen = oddsScreen
+	local list = oddsScrollingFrame
+	local regularTemplate = oddsTemplate
+	local grandTemplate = oddsGrandTemplate
+	local headerLabel = oddsHeaderLabel
+	local headerFaceLabel = oddsHeaderFaceLabel
+	if not isOpen or not resolvedOddsScreen or not list or not regularTemplate or not grandTemplate or not headerLabel or not headerFaceLabel then
+		return
+	end
+	local definition = SeedPackIAPConfig.Packs[packId]
+	clearGeneratedOddsCards(list)
+	local minimumWeight = math.huge
+	local grandIndex = 1
+	for index, reward in definition.Rewards do
+		if reward.Weight < minimumWeight then
+			minimumWeight = reward.Weight
+			grandIndex = index
+		end
+	end
+	local oddsUi = SeedPackIAPConfig.ShopUi.Odds
+	for index, reward in definition.Rewards do
+		local sourceTemplate = if index == grandIndex then grandTemplate else regularTemplate
+		local cloneOk, cloneResult = pcall(function()
+			return sourceTemplate:Clone()
+		end)
+		if not cloneOk or typeof(cloneResult) ~= "Instance" or not cloneResult:IsA("GuiObject") then
+			if typeof(cloneResult) == "Instance" then
+				cloneResult:Destroy()
+			end
+			warnOnce("Odds:" .. packId .. ":Card:" .. tostring(index), "Odds 概率模板克隆失败或类型错误，已跳过该奖励。")
+			continue
+		end
+		local card = cloneResult :: GuiObject
+		card.Name = packId .. "Reward" .. tostring(index)
+		card:SetAttribute(oddsUi.GeneratedCardAttribute, true)
+		card.LayoutOrder = index
+		card.Visible = true
+		local itemName = findTextLabel(card, oddsUi.ItemNameLabelName, true)
+		local oddsLabel = findTextLabel(card, oddsUi.OddsLabelName, true)
+		local cell = card:FindFirstChild(oddsUi.CellName)
+		local viewportCandidate = cell and cell:FindFirstChild(oddsUi.ViewportFrameName)
+		local viewport = if viewportCandidate and viewportCandidate:IsA("ViewportFrame") then viewportCandidate else nil
+		local itemDefinition = ItemConfig.Get(reward.ItemId)
+		if itemName and itemDefinition then
+			itemName.Text = itemDefinition.DisplayName .. " Seed"
+		elseif not itemDefinition then
+			warnOnce("Odds:" .. packId .. ":Item:" .. reward.ItemId, "ItemConfig 缺少 " .. reward.ItemId .. "，概率卡名称留空。")
+		end
+		if oddsLabel then
+			oddsLabel.Text = tostring(reward.Weight) .. "%"
+		end
+		card.Parent = list
+		if viewport then
+			renderOddsSeedPreview(viewport, packId, reward.ItemId)
+		end
+	end
+	local headerText = definition.DisplayName .. " Odds"
+	headerLabel.Text = headerText
+	headerFaceLabel.Text = headerText
+	list.CanvasPosition = Vector2.zero
+	setOddsOpen(true)
+end
+
+local function bindPackInspect(card: GuiObject, packId: SeedPackIAPConfig.PackId)
+	local oddsUi = SeedPackIAPConfig.ShopUi.Odds
+	local inspectRoot = card:FindFirstChild(oddsUi.InspectName)
+	local inspectButton: GuiButton? = nil
+	if inspectRoot and inspectRoot:IsA("GuiButton") then
+		inspectButton = inspectRoot
+	elseif inspectRoot then
+		local candidate = inspectRoot:FindFirstChildWhichIsA("GuiButton", true)
+		inspectButton = if candidate and candidate:IsA("GuiButton") then candidate else nil
+	end
+	if not inspectButton then
+		warnOnce(packId .. ":Inspect", card:GetFullName() .. "." .. oddsUi.InspectName .. " 缺少可点击按钮，Inspect 已禁用。")
+		disableInputTree(inspectRoot)
+		return
+	end
+	if not oddsScreen then
+		setButtonEnabled(inspectButton, false)
+		return
+	end
+	setButtonEnabled(inspectButton, true)
+	inspectButton.Activated:Connect(function()
+		populateAndOpenOdds(packId)
+	end)
+end
+
 local function configurePackCard(card: GuiObject, packId: SeedPackIAPConfig.PackId)
 	local definition = SeedPackIAPConfig.Packs[packId]
 	local uiDefinition = SeedPackIAPConfig.ShopUi.Cards[packId]
@@ -526,7 +789,7 @@ local function configurePackCard(card: GuiObject, packId: SeedPackIAPConfig.Pack
 	else
 		warnOnce(packId .. ":ItemName", card:GetFullName() .. ".ItemName 缺失。")
 	end
-	disableInputTree(card:FindFirstChild("Inspect"))
+	bindPackInspect(card, packId)
 	renderPackPreview(card, packId, SeedPackIAPConfig.ShopUi.ProductCardPreviewPadding)
 
 	for _, amount in SeedPackIAPConfig.PackAmounts do
@@ -627,6 +890,7 @@ local function bindGui(): boolean
 	resolvedScreen.ResetOnSpawn = false
 	resolvedScreen.Enabled = false
 	disableLegacyScripts(resolvedScreen)
+	bindOddsGui(playerGui, resolvedScreen)
 	local starterSection = listCandidate:FindFirstChild("StarterPack")
 	local coinsSection = listCandidate:FindFirstChild(CoinsIAPConfig.SectionName)
 	local capacitySection = listCandidate:FindFirstChild("Gears")
@@ -684,7 +948,7 @@ local function bindGui(): boolean
 		RobuxShopController.SetOpen(false)
 	end)
 	InterfaceVisualController.RegisterFocusMode(resolvedScreen, {
-		PreserveScreenGuiNames = { "Notice" },
+		PreserveScreenGuiNames = { "Notice", SeedPackIAPConfig.ShopUi.Odds.ScreenGuiName },
 	})
 	return true
 end
@@ -771,6 +1035,9 @@ function RobuxShopController.SetOpen(open: boolean)
 		return
 	end
 	isOpen = nextOpen
+	if not nextOpen then
+		setOddsOpen(false)
+	end
 	if resolvedScreen then
 		resolvedScreen.Enabled = nextOpen
 		if nextOpen then
@@ -812,6 +1079,9 @@ function RobuxShopController.Init(dependencies: {
 	end
 	DeveloperProductPromptController.ConnectChanged(updateAllAvailability)
 	GamePassPromptController.ConnectChanged(updateAllAvailability)
+	player.CharacterAdded:Connect(function()
+		setOddsOpen(false)
+	end)
 	player.ChildAdded:Connect(function(child)
 		if child.Name == "KLineInventory" then
 			task.defer(observeCapacityValue)

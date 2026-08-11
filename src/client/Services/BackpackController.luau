@@ -1,1825 +1,271 @@
 --!strict
 
--- 本模块参考种植花园模板，用 Tool 作为数据源生成热栏与可展开背包，并用项目已有模型渲染物品预览。
-local Players = game:GetService("Players")
-local GuiService = game:GetService("GuiService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local StarterGui = game:GetService("StarterGui")
-local UserInputService = game:GetService("UserInputService")
+-- 本模块只初始化一次 Purse，并把其背包开关、热栏节点和状态事件适配到项目现有界面接口。
 
-local ItemConfig = require(ReplicatedStorage.Shared.ItemConfig)
-local DeveloperProductCatalogConfig = require(ReplicatedStorage.Shared.DeveloperProductCatalogConfig)
-local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
-local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
-local ProduceCapacityIAPConfig = require(ReplicatedStorage.Shared.ProduceCapacityIAPConfig)
-local SeedPackIAPConfig = require(ReplicatedStorage.Shared.SeedPackIAPConfig)
-local ShovelConfig = require(ReplicatedStorage.Shared.ShovelConfig)
-local ViewportPreviewCamera = require(script.Parent.Parent.Components.ViewportPreviewCamera)
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local BackpackController = {}
 BackpackController.StateChanged = Instance.new("BindableEvent")
+BackpackController.StateChanged.Name = "BackpackStateChanged"
+
+type PurseApi = {
+	OpenClose: (() -> ())?,
+	IsOpen: boolean,
+	StateChanged: BindableEvent,
+	SetInventoryFilter: (((Tool) -> boolean)?) -> (),
+	RefreshInventoryFilter: () -> (),
+	PromoteToolToLowestEmptyHotbar: (Tool) -> boolean,
+}
+
+type InterfaceVisualApi = {
+	Open: (Instance) -> (),
+	Close: (Instance) -> (),
+	RegisterExclusive: (Instance, () -> ()) -> (),
+}
+
+type Dependencies = {
+	InterfaceVisualController: InterfaceVisualApi,
+}
+
+type QuantityBinding = {
+	EffectiveCount: number,
+	PendingPromotion: boolean,
+	PendingBaseline: number?,
+	Connections: { RBXScriptConnection },
+}
 
 local player = Players.LocalPlayer
 local initialized = false
 local inventoryOpen = false
-local gui: ScreenGui? = nil
+local purseApi: PurseApi? = nil
 local hotbarFrame: Frame? = nil
 local inventoryFrame: Frame? = nil
-local gridFrame: ScrollingFrame? = nil
-local searchBox: TextBox? = nil
-local capacityGroup: Frame? = nil
-local capacityText: TextLabel? = nil
-local expandCapacityButton: TextButton? = nil
-local outsideCloseButton: TextButton? = nil
-local InterfaceVisualController: any = nil
-local DeveloperProductPromptController: any = nil
-local NotificationController: any = nil
-
-local HOTBAR_SLOTS_FULL = 10
-local HOTBAR_SLOTS_MINI = 5
-local SLOT_SIZE = 60
-local SLOT_GAP = 5
-local HOTBAR_SELECTED_SCALE = 1.16
-local INVENTORY_ROWS_FULL = 4
-local INVENTORY_ROWS_MINI = 2
-local INVENTORY_HEADER_SIZE_FULL = 40
-local INVENTORY_HEADER_SIZE_MINI = 72
-local HOTBAR_Z_INDEX = 2
-local HOTBAR_SLOT_Z_INDEX = 5
-local INVENTORY_Z_INDEX = 20
-local INVENTORY_SLOT_Z_INDEX = 30
-local DRAG_Z_INDEX = 100
-local CATEGORY_ORDER = { "All", "Seeds", "Packs", "Fruits", "Tools" }
-local KEY_TO_SLOT = {
-	[Enum.KeyCode.One] = 1,
-	[Enum.KeyCode.Two] = 2,
-	[Enum.KeyCode.Three] = 3,
-	[Enum.KeyCode.Four] = 4,
-	[Enum.KeyCode.Five] = 5,
-	[Enum.KeyCode.Six] = 6,
-	[Enum.KeyCode.Seven] = 7,
-	[Enum.KeyCode.Eight] = 8,
-	[Enum.KeyCode.Nine] = 9,
-	[Enum.KeyCode.Zero] = 10,
-}
-
-local hotbarTools: { [number]: Tool? } = {}
-local inventoryTools: { Tool } = {}
-local toolConnections: { [Tool]: { RBXScriptConnection } } = {}
-local containerConnections: { RBXScriptConnection } = {}
-local capacityConnections: { RBXScriptConnection } = {}
-local selectedCategory = "All"
-local pendingRefresh = false
-local activeHotbarSlots: { any } = {}
-local dragCandidate: any = nil
-local dragState: any = nil
-local refreshLayout = function() end
-local requestSaveHotbarLayout = function() end
-local updateCapacityDisplay = function() end
-local rebindCapacityState = function() end
-local saveHotbarLayoutEvent: RemoteEvent? = nil
-local savedHotbarLayout: { [number]: string } = {}
-local savedHotbarLayoutReady = false
-local savedHotbarLayoutApplied = false
-local hotbarLayoutSaveScheduled = false
-local hotbarLayoutSaveInFlight = false
-local EMPTY_HOTBAR_SLOT_KEY = "__EMPTY__"
-
-local function getViewportSize(): Vector2
-	local camera = workspace.CurrentCamera
-	return camera and camera.ViewportSize or Vector2.new(1280, 720)
-end
-
-local function scaleSize(widthPx: number, heightPx: number): UDim2
-	local viewport = getViewportSize()
-	return UDim2.fromScale(widthPx / viewport.X, heightPx / viewport.Y)
-end
-
-local function scalePosition(xPx: number, yPx: number): UDim2
-	local viewport = getViewportSize()
-	return UDim2.fromScale(xPx / viewport.X, yPx / viewport.Y)
-end
-
-local function isMiniLayout(): boolean
-	local viewport = getViewportSize()
-	return viewport.X < 1000 or UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-end
-
--- 根据屏幕短边缩放代码生成的热栏与背包控件尺寸。
-local function getUiScaleFactor(): number
-	local viewport = getViewportSize()
-	local shortSide = math.min(viewport.X, viewport.Y)
-	if isMiniLayout() then
-		return math.clamp(shortSide / 560, 0.58, 0.74)
-	end
-	return math.clamp(shortSide / 720, 0.9, 1)
-end
-
-local function scalePixel(value: number, minimum: number): number
-	return math.max(minimum, math.floor(value * getUiScaleFactor() + 0.5))
-end
-
-local function getSlotSize(): number
-	return scalePixel(SLOT_SIZE, 34)
-end
-
-local function getSlotGap(): number
-	return scalePixel(SLOT_GAP, 3)
-end
-
-local function getInventoryHeaderSize(): number
-	return if isMiniLayout()
-		then scalePixel(INVENTORY_HEADER_SIZE_MINI, 64)
-		else scalePixel(INVENTORY_HEADER_SIZE_FULL, 36)
-end
-
-local function getScaledTextSize(baseSize: number, minimum: number): number
-	return scalePixel(baseSize, minimum)
-end
-
-local function getSearchWidth(): number
-	return scalePixel(190, 112)
-end
-
-local function getCapacityGroupWidth(): number
-	return scalePixel(122, 96)
-end
-
-local function getSearchInset(): number
-	return scalePixel(5, 3)
-end
-
-local function getCategorySidebarWidth(): number
-	return scalePixel(87, 64)
-end
-
-local function getHotbarSlotCount(): number
-	return if isMiniLayout() then HOTBAR_SLOTS_MINI else HOTBAR_SLOTS_FULL
-end
-
-local function getInventoryRowCount(): number
-	return if isMiniLayout() then INVENTORY_ROWS_MINI else INVENTORY_ROWS_FULL
-end
-
-local function getHotbarBottomMargin(): number
-	if not (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled) then
-		return 0
-	end
-	local viewport = getViewportSize()
-	return if math.max(viewport.X, viewport.Y) >= 1000 then 18 else 0
-end
-
-local function getTemplateHotbarPixelSize(slotCount: number): Vector2
-	local slotSize = getSlotSize()
-	local slotGap = getSlotGap()
-	return Vector2.new(slotGap + slotCount * (slotSize + slotGap), slotGap + slotSize + slotGap)
-end
-
-local function getTemplateHotbarSize(slotCount: number): UDim2
-	local pixelSize = getTemplateHotbarPixelSize(slotCount)
-	return scaleSize(pixelSize.X, pixelSize.Y)
-end
-
-local function getTemplateInventoryPixelSize(slotCount: number): Vector2
-	local hotbarSize = getTemplateHotbarPixelSize(slotCount)
-	return Vector2.new(hotbarSize.X, hotbarSize.Y * getInventoryRowCount() + getInventoryHeaderSize())
-end
-
-local function getTemplateInventorySize(slotCount: number): UDim2
-	local pixelSize = getTemplateInventoryPixelSize(slotCount)
-	return scaleSize(pixelSize.X, pixelSize.Y)
-end
-
-local function getBottomAnchoredPosition(heightPx: number): UDim2
-	local viewport = getViewportSize()
-	return UDim2.fromScale(0.5, 1 - (heightPx + getHotbarBottomMargin()) / math.max(1, viewport.Y))
-end
-
-local function getHotbarPosition(): UDim2
-	return getBottomAnchoredPosition(0)
-end
-
-local function getInventoryPosition(slotCount: number): UDim2
-	return getBottomAnchoredPosition(getTemplateHotbarPixelSize(slotCount).Y)
-end
-
-local function inputPosition(input: InputObject): Vector2
-	local point = Vector2.new(input.Position.X, input.Position.Y)
-	pcall(function()
-		local inset = GuiService:GetGuiInset()
-		point += inset
-	end)
-	return point
-end
-
-local function inputHitTestPositions(point: Vector2): { Vector2 }
-	local positions = { point }
-	pcall(function()
-		local inset = GuiService:GetGuiInset()
-		if inset.Magnitude > 0 then
-			table.insert(positions, point - inset)
-		end
-	end)
-	return positions
-end
-
-local function pointInGuiObject(point: Vector2, object: GuiObject): boolean
-	local position = object.AbsolutePosition
-	local size = object.AbsoluteSize
-	return point.X >= position.X
-		and point.X <= position.X + size.X
-		and point.Y >= position.Y
-		and point.Y <= position.Y + size.Y
-end
-
-local function getBackpack(): Backpack?
-	return player:FindFirstChildOfClass("Backpack")
-end
-
-local function getCharacter(): Model?
-	local character = player.Character
-	return if character and character:IsDescendantOf(workspace) then character else nil
-end
-
-local function getToolContainers(): { Instance }
-	local containers: { Instance } = {}
-	local backpack = getBackpack()
-	if backpack then
-		table.insert(containers, backpack)
-	end
-	local character = getCharacter()
-	if character then
-		table.insert(containers, character)
-	end
-	return containers
-end
-
-local function isTrackedTool(instance: Instance): boolean
-	return instance:IsA("Tool") and instance:GetAttribute("KLineItemTool") == true
-end
-
-local function getToolKey(tool: Tool): string
-	local seedPackId = tool:GetAttribute("SeedPackId")
-	if tool:GetAttribute("KLineSeedPackTool") == true and SeedPackIAPConfig.IsPackId(seedPackId) then
-		return "Pack:" .. (seedPackId :: string)
-	end
-	if tool:GetAttribute("KLineUtilityTool") == true or tool:GetAttribute("KLineItemType") == "Utility" then
-		local utilityTool = tool:GetAttribute("UtilityTool")
-		if type(utilityTool) == "string" and utilityTool ~= "" then
-			return "Utility:" .. utilityTool
-		end
-		local itemId = tool:GetAttribute("ItemId")
-		if type(itemId) == "string" and itemId ~= "" then
-			return "Utility:" .. itemId
-		end
-	end
-	local seedTool = tool:GetAttribute("SeedTool")
-	if type(seedTool) == "string" then
-		return "Seed:" .. seedTool
-	end
-	local fruit = tool:GetAttribute("Fruit")
-	if type(fruit) == "string" then
-		local key = "Fruit:" .. fruit
-		local mutation = tool:GetAttribute("Mutation")
-		if type(mutation) == "string" and mutation ~= "" then
-			key ..= ":" .. mutation
-		end
-		local weight = tool:GetAttribute("Weight")
-		if type(weight) == "number" then
-			key ..= ":" .. tostring(math.floor(weight * 1000))
-		end
-		return key
-	end
-	return "Name:" .. tool.Name
-end
-
-local function sanitizeHotbarLayout(layout: any): { [number]: string }
-	local result: { [number]: string } = {}
-	if type(layout) ~= "table" then
-		return result
-	end
-	for index = 1, HOTBAR_SLOTS_FULL do
-		local value = layout[index] or layout[tostring(index)]
-		if type(value) == "string" and #value > 0 and #value <= 128 then
-			result[index] = value
-		end
-	end
-	return result
-end
-
-local function getCurrentHotbarLayout(): { [number]: string }
-	local layout: { [number]: string } = {}
-	local slotCount = getHotbarSlotCount()
-	for index = 1, HOTBAR_SLOTS_FULL do
-		if index <= slotCount then
-			local tool = hotbarTools[index]
-			layout[index] = if tool then getToolKey(tool) else EMPTY_HOTBAR_SLOT_KEY
-		else
-			layout[index] = savedHotbarLayout[index] or EMPTY_HOTBAR_SLOT_KEY
-		end
-	end
-	return layout
-end
-
-local function hotbarLayoutsEqual(left: { [number]: string }, right: { [number]: string }): boolean
-	for index = 1, HOTBAR_SLOTS_FULL do
-		if left[index] ~= right[index] then
-			return false
-		end
-	end
-	return true
-end
-
-local function toolMatchesFilter(tool: Tool, category: string): boolean
-	if category == "All" then
-		return true
-	end
-	local mainCategory = tool:GetAttribute("MainCategory")
-	if category == "Seeds" then
-		return mainCategory == "Seed" or tool:GetAttribute("SeedTool") ~= nil
-	end
-	if category == "Packs" then
-		return mainCategory == "Pack" or tool:GetAttribute("KLineSeedPackTool") == true
-	end
-	if category == "Fruits" then
-		return mainCategory == "Fruit" or tool:GetAttribute("Fruit") ~= nil
-	end
-	if category == "Tools" then
-		return mainCategory == "Tool" or tool:GetAttribute("KLineUtilityTool") == true
-	end
-	return true
-end
-
-local function getDisplayName(tool: Tool): string
-	local seedPackId = tool:GetAttribute("SeedPackId")
-	if tool:GetAttribute("KLineSeedPackTool") == true and SeedPackIAPConfig.IsPackId(seedPackId) then
-		return SeedPackIAPConfig.Packs[seedPackId :: SeedPackIAPConfig.PackId].DisplayName
-	end
-	if tool:GetAttribute("KLineUtilityTool") == true or tool:GetAttribute("KLineItemType") == "Utility" then
-		local utilityTool = tool:GetAttribute("UtilityTool")
-		if utilityTool == ShovelConfig.ToolId then
-			return ShovelConfig.DisplayName
-		end
-		if type(utilityTool) == "string" and utilityTool ~= "" then
-			return utilityTool
-		end
-	end
-	local seedTool = tool:GetAttribute("SeedTool")
-	if type(seedTool) == "string" then
-		if string.lower(string.sub(seedTool, -5)) == " seed" then
-			return seedTool
-		end
-		return seedTool .. " Seed"
-	end
-	local fruit = tool:GetAttribute("Fruit")
-	if type(fruit) == "string" then
-		return fruit
-	end
-	local itemId = tool:GetAttribute("ItemId")
-	if type(itemId) == "string" then
-		local definition = ItemConfig.Get(itemId)
-		if definition then
-			return definition.DisplayName
-		end
-	end
-	return tool.Name
-end
-
-local function getCount(tool: Tool): number?
-	local count = tool:GetAttribute("Count")
-	if type(count) == "number" then
-		return math.max(0, math.floor(count))
-	end
-	local stackCount = tool:GetAttribute("StackCount")
-	if type(stackCount) == "number" then
-		return math.max(0, math.floor(stackCount))
-	end
-	return nil
-end
-
-local function formatCount(count: number?): string
-	if not count or count <= 1 then
-		return ""
-	end
-	return "x" .. NumberFormatter.Abbreviate(count, 2)
-end
-
-local function getPreviewTemplate(tool: Tool): Instance?
-	local itemId = tool:GetAttribute("ItemId")
-	local itemType = tool:GetAttribute("KLineItemType")
-	local previewAssetType = tool:GetAttribute("PreviewAssetType")
-	local previewModelName = tool:GetAttribute("PreviewModelName")
-	if type(itemId) ~= "string" or type(itemType) ~= "string" then
-		return nil
-	end
-	local assets = ReplicatedStorage:FindFirstChild("Assets")
-	if not assets then
-		return nil
-	end
-	if type(previewAssetType) == "string" and type(previewModelName) == "string" then
-		local folder = assets:FindFirstChild(previewAssetType .. "s")
-		local template = folder and folder:FindFirstChild(previewModelName)
-		if template then
-			return template
-		end
-		if previewAssetType == "Tool" then
-			local directTemplate = assets:FindFirstChild(previewModelName)
-			if directTemplate then
-				return directTemplate
-			end
-		end
-	end
-	if itemType == "Utility" then
-		return nil
-	end
-	local definition = ItemConfig.Get(itemId)
-	if not definition then
-		return nil
-	end
-	if itemType == "Seed" then
-		local seeds = assets:FindFirstChild("Seeds")
-		local seedTemplate = seeds and seeds:FindFirstChild(itemId)
-		if seedTemplate then
-			return seedTemplate
-		end
-		local plants = assets:FindFirstChild("Plants")
-		return plants and plants:FindFirstChild(definition.PlantModelName) or nil
-	end
-	local fruits = assets:FindFirstChild("Fruits")
-	local fruitTemplateName = definition.FruitModelName or itemId
-	local fruitTemplate = fruits and fruits:FindFirstChild(fruitTemplateName)
-	if fruitTemplate then
-		return fruitTemplate
-	end
-	local plants = assets:FindFirstChild("Plants")
-	return plants and plants:FindFirstChild(definition.PlantModelName) or nil
-end
-
-local function stripScripts(root: Instance)
-	for _, descendant in root:GetDescendants() do
-		if descendant:IsA("BaseScript") then
-			descendant:Destroy()
-		end
-	end
-end
-
-local function prepareViewportInstance(root: Instance)
-	for _, descendant in root:GetDescendants() do
-		if descendant:IsA("BasePart") then
-			descendant.Anchored = true
-			descendant.CanCollide = false
-			descendant.CanQuery = false
-			descendant.CanTouch = false
-		end
-	end
-	if root:IsA("BasePart") then
-		root.Anchored = true
-		root.CanCollide = false
-		root.CanQuery = false
-		root.CanTouch = false
-	end
-end
-
-local function renderToolModel(viewport: ViewportFrame, tool: Tool?)
-	for _, child in viewport:GetChildren() do
-		child:Destroy()
-	end
-	if not tool then
-		return
-	end
-	local template = getPreviewTemplate(tool)
-	if not template then
-		return
-	end
-	local ok, clone = pcall(function()
-		return template:Clone()
-	end)
-	if not ok or not clone then
-		return
-	end
-	stripScripts(clone)
-	prepareViewportInstance(clone)
-
-	local worldModel = Instance.new("WorldModel")
-	worldModel.Name = "PreviewWorld"
-	worldModel.Parent = viewport
-
-	local previewRoot = ViewportPreviewCamera.MountPreviewRoot(clone, worldModel)
-	if not previewRoot then
-		return
-	end
-	previewRoot:PivotTo(CFrame.new())
-	local boundsCFrame, boundsSize = ViewportPreviewCamera.GetVisibleBounds(previewRoot)
-	previewRoot:PivotTo(CFrame.new(-boundsCFrame.Position))
-
-	local itemType = tool:GetAttribute("KLineItemType")
-	local previewPadding = if itemType == "Utility" then 1.05 else 1.22
-	local camera = ViewportPreviewCamera.CreateForBounds(viewport, boundsSize, Vector3.new(0, 0, 0), {
-		FieldOfView = 35,
-		Padding = previewPadding,
-	})
-	camera.Parent = viewport
-	viewport.CurrentCamera = camera
-end
-
-local function newText(parent: Instance, name: string, text: string, size: UDim2, position: UDim2): TextLabel
-	local label = Instance.new("TextLabel")
-	label.Name = name
-	label.BackgroundTransparency = 1
-	label.BorderSizePixel = 0
-	label.Font = Enum.Font.GothamBold
-	label.Text = text
-	label.TextColor3 = Color3.new(1, 1, 1)
-	label.TextSize = getScaledTextSize(12, 9)
-	label.TextStrokeTransparency = 0.45
-	label.TextWrapped = true
-	label.Size = size
-	label.Position = position
-	label.Parent = parent
-	return label
-end
-
-local function makeSlot(
-	parent: Instance,
-	name: string,
-	hotbar: boolean,
-	index: number,
-	parentWidthPx: number?,
-	parentHeightPx: number?
-): any
-	local button = Instance.new("TextButton")
-	local slotParentWidth = math.max(parentWidthPx or getViewportSize().X, 1)
-	local slotParentHeight = math.max(parentHeightPx or getViewportSize().Y, 1)
-	local slotSize = getSlotSize()
-	button.Name = name
-	button.AutoButtonColor = false
-	button.BackgroundColor3 = Color3.fromRGB(49, 49, 49)
-	button.BackgroundTransparency = 0.25
-	button.BorderSizePixel = 0
-	button.ClipsDescendants = false
-	button.Size = if parentWidthPx or parentHeightPx
-		then UDim2.fromScale(slotSize / slotParentWidth, slotSize / slotParentHeight)
-		else scaleSize(slotSize, slotSize)
-	button.Text = ""
-	button.Parent = parent
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = button
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.new(1, 1, 1)
-	stroke.Transparency = 1
-	stroke.Thickness = 1
-	stroke.Parent = button
-
-	local selectedScale = Instance.new("UIScale")
-	selectedScale.Name = "SelectedScale"
-	selectedScale.Scale = 1
-	selectedScale.Parent = button
-
-	local selectedOutline = Instance.new("Frame")
-	selectedOutline.Name = "SelectedOutline"
-	selectedOutline.AnchorPoint = Vector2.new(0.5, 0.5)
-	selectedOutline.BackgroundTransparency = 1
-	selectedOutline.BorderSizePixel = 0
-	selectedOutline.ClipsDescendants = false
-	selectedOutline.Position = UDim2.fromScale(0.5, 0.5)
-	selectedOutline.Size = UDim2.fromScale(1, 1)
-	selectedOutline.Visible = false
-	selectedOutline.Parent = button
-
-	local selectedOutlineCorner = Instance.new("UICorner")
-	selectedOutlineCorner.CornerRadius = UDim.new(0, 8)
-	selectedOutlineCorner.Parent = selectedOutline
-
-	local selectedOutlineStroke = Instance.new("UIStroke")
-	selectedOutlineStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	selectedOutlineStroke.Color = Color3.new(1, 1, 1)
-	selectedOutlineStroke.LineJoinMode = Enum.LineJoinMode.Round
-	selectedOutlineStroke.Thickness = 2
-	selectedOutlineStroke.Transparency = 0
-	selectedOutlineStroke.Parent = selectedOutline
-
-	local viewport = Instance.new("ViewportFrame")
-	viewport.Name = "Icon"
-	viewport.BackgroundTransparency = 1
-	viewport.BorderSizePixel = 0
-	viewport.Size = UDim2.fromScale(0.78, 0.78)
-	viewport.Position = UDim2.fromScale(0.11, 0.06)
-	viewport.Ambient = Color3.fromRGB(180, 180, 180)
-	viewport.LightColor = Color3.fromRGB(255, 255, 255)
-	viewport.LightDirection = Vector3.new(-1, -1, -1)
-	viewport.Parent = button
-
-	local countLabel = newText(button, "ToolCount", "", UDim2.fromScale(0.5, 0.3), UDim2.fromScale(0.45, 0.03))
-	countLabel.TextXAlignment = Enum.TextXAlignment.Right
-	countLabel.TextSize = getScaledTextSize(13, 10)
-
-	local nameLabel = newText(button, "ToolName", "", UDim2.fromScale(0.94, 0.36), UDim2.fromScale(0.03, 0.61))
-	nameLabel.TextSize = getScaledTextSize(9, 7)
-	nameLabel.LineHeight = 0.9
-
-	local keyLabel = nil
-	if hotbar then
-		keyLabel = newText(button, "HotbarKey", index == 10 and "0" or tostring(index), UDim2.fromScale(0.26, 0.26), UDim2.fromScale(0.05, 0.03))
-		keyLabel.TextSize = getScaledTextSize(11, 8)
-		keyLabel.TextTransparency = 0.25
-	end
-
-	return {
-		Frame = button,
-		Stroke = stroke,
-		SelectedScale = selectedScale,
-		SelectedOutline = selectedOutline,
-		Viewport = viewport,
-		CountLabel = countLabel,
-		NameLabel = nameLabel,
-		KeyLabel = keyLabel,
-		Tool = nil,
-		Hotbar = hotbar,
-		Index = index,
-	}
-end
-
-local function clearLayout(parent: Instance?)
-	if not parent then
-		return
-	end
-	for _, child in parent:GetChildren() do
-		child:Destroy()
-	end
-end
-
-local function collectCurrentTools(): { Tool }
-	local tools: { Tool } = {}
-	local seen: { [Tool]: boolean } = {}
-	for _, container in getToolContainers() do
-		for _, child in container:GetChildren() do
-			if child:IsA("Tool") and isTrackedTool(child) and not seen[child] then
-				seen[child] = true
-				table.insert(tools, child)
-			end
-		end
-	end
-	table.sort(tools, function(left, right)
-		return getToolKey(left) < getToolKey(right)
-	end)
-	return tools
-end
-
-local function getCapacityState(): (number?, number?)
-	local inventory = player:FindFirstChild("KLineInventory")
-	if not inventory or not inventory:IsA("Folder") then
+local interfaceVisualController: InterfaceVisualApi? = nil
+local quantityBindings: { [Tool]: QuantityBinding } = {}
+local watchedContainers: { [Instance]: { RBXScriptConnection } } = {}
+
+local function resolveBackpackUi(): (Frame?, Frame?)
+	local playerGui = player:FindFirstChildOfClass("PlayerGui")
+	if not playerGui then
 		return nil, nil
 	end
-	local capacityValue = inventory:FindFirstChild(ProduceCapacityIAPConfig.CapacityValueName)
-	local usedValue = inventory:FindFirstChild(ProduceCapacityIAPConfig.UsedValueName)
-	if not capacityValue or not capacityValue:IsA("IntValue") or not usedValue or not usedValue:IsA("IntValue") then
+	local screen = playerGui:FindFirstChild("BackpackGui")
+	if not screen or not screen:IsA("ScreenGui") then
 		return nil, nil
 	end
-	local capacity = ProduceCapacityIAPConfig.GetValidCapacity(capacityValue.Value)
-	local used = usedValue.Value
-	if not capacity or used < 0 or used > ProduceCapacityIAPConfig.MaximumTrackedProduceUnits then
+	local main = screen:FindFirstChild("Backpack")
+	if not main or not main:IsA("Frame") then
 		return nil, nil
 	end
-	return capacity, used
+	local hotbar = main:FindFirstChild("Hotbar")
+	local inventory = main:FindFirstChild("Inventory")
+	return if hotbar and hotbar:IsA("Frame") then hotbar else nil,
+		if inventory and inventory:IsA("Frame") then inventory else nil
 end
 
-local function formatCapacityValue(value: number): string
-	if value < 1000 then
-		return tostring(value)
-	end
-	return NumberFormatter.Abbreviate(value, if isMiniLayout() then 1 else 2)
-end
-
-local function setExpandButtonEnabled(enabled: boolean)
-	local button = expandCapacityButton
-	if not button then
-		return
-	end
-	button.Active = enabled
-	button.Interactable = enabled
-	button.AutoButtonColor = enabled
-	button.Selectable = enabled
-	button.BackgroundColor3 = if enabled then Color3.fromRGB(48, 123, 194) else Color3.fromRGB(65, 70, 78)
-	button.TextTransparency = if enabled then 0 else 0.45
-end
-
-updateCapacityDisplay = function()
-	local label = capacityText
-	if not label then
-		return
-	end
-	local capacity, used = getCapacityState()
-	if not capacity or not used then
-		label.Text = "--/--"
-		label.TextColor3 = Color3.new(1, 1, 1)
-		setExpandButtonEnabled(false)
-		return
-	end
-	label.Text = string.format("%s/%s", formatCapacityValue(used), formatCapacityValue(capacity))
-	label.TextColor3 = if used >= capacity then Color3.fromRGB(255, 216, 74) else Color3.new(1, 1, 1)
-	local configured = ProduceCapacityIAPConfig.UseMarketplacePurchases
-		and ProduceCapacityIAPConfig.GetProductId() ~= nil
-		and DeveloperProductCatalogConfig.IsGloballyUnique(ProduceCapacityIAPConfig.GetProductId())
-	local pending = DeveloperProductPromptController and DeveloperProductPromptController.IsPending()
-	setExpandButtonEnabled(configured and not pending and ProduceCapacityIAPConfig.CanExpand(capacity))
-end
-
-local function requestCapacityPurchase()
-	local capacity = getCapacityState()
-	if not capacity then
-		NotificationController.Show(ProduceCapacityIAPConfig.LoadingNotice)
-		return
-	end
-	local productId = ProduceCapacityIAPConfig.GetProductId()
-	if not ProduceCapacityIAPConfig.UseMarketplacePurchases
-		or not productId
-		or not DeveloperProductCatalogConfig.IsGloballyUnique(productId)
-	then
-		NotificationController.Show(ProduceCapacityIAPConfig.UnconfiguredNotice)
-		return
-	end
-	if not ProduceCapacityIAPConfig.CanExpand(capacity) then
-		NotificationController.Show(ProduceCapacityIAPConfig.MaximumNotice)
-		return
-	end
-	local prompted = DeveloperProductPromptController.Prompt(productId)
-	if not prompted then
-		NotificationController.Show(ProduceCapacityIAPConfig.PromptFailedNotice)
-	end
-	updateCapacityDisplay()
-end
-
-rebindCapacityState = function()
-	for _, connection in capacityConnections do
-		connection:Disconnect()
-	end
-	table.clear(capacityConnections)
-	local inventory = player:FindFirstChild("KLineInventory")
-	if not inventory or not inventory:IsA("Folder") then
-		updateCapacityDisplay()
-		return
-	end
-	table.insert(capacityConnections, inventory.ChildAdded:Connect(function()
-		task.defer(rebindCapacityState)
-	end))
-	table.insert(capacityConnections, inventory.ChildRemoved:Connect(function()
-		task.defer(rebindCapacityState)
-	end))
-	for _, valueName in {
-		ProduceCapacityIAPConfig.CapacityValueName,
-		ProduceCapacityIAPConfig.UsedValueName,
-	} do
-		local value = inventory:FindFirstChild(valueName)
-		if value and value:IsA("IntValue") then
-			table.insert(capacityConnections, value:GetPropertyChangedSignal("Value"):Connect(updateCapacityDisplay))
-		end
-	end
-	updateCapacityDisplay()
-end
-
-local function toolStillHeld(tool: Tool, present: { [Tool]: boolean }): boolean
-	return present[tool] == true
-end
-
-local function removeMissingTools(present: { [Tool]: boolean })
-	for index, tool in hotbarTools do
-		if tool and not toolStillHeld(tool, present) then
-			hotbarTools[index] = nil
-		end
-	end
-	local nextInventory = {}
-	for _, tool in inventoryTools do
-		if toolStillHeld(tool, present) then
-			table.insert(nextInventory, tool)
-		end
-	end
-	inventoryTools = nextInventory
-end
-
-local function hasAssignedTool(tool: Tool): boolean
-	for _, existing in hotbarTools do
-		if existing == tool then
-			return true
-		end
-	end
-	for _, existing in inventoryTools do
-		if existing == tool then
-			return true
-		end
-	end
-	return false
-end
-
-local function firstEmptyHotbarSlot(slotCount: number, reservedEmptySlots: { [number]: boolean }?): number?
-	for index = 1, slotCount do
-		if not hotbarTools[index] and not (reservedEmptySlots and reservedEmptySlots[index]) then
-			return index
-		end
-	end
-	return nil
-end
-
-local function buildSavedHotbarReservations(slotCount: number): { [number]: boolean }
-	local reservedSlots: { [number]: boolean } = {}
-	if not savedHotbarLayoutReady then
-		return reservedSlots
-	end
-	for index = 1, slotCount do
-		if savedHotbarLayout[index] ~= nil then
-			reservedSlots[index] = true
-		end
-	end
-	return reservedSlots
-end
-
-local function assignNewTools(tools: { Tool })
-	local slotCount = getHotbarSlotCount()
-	local reservedSlots = buildSavedHotbarReservations(slotCount)
-
-	for _, tool in tools do
-		if not hasAssignedTool(tool) then
-			local toolKey = getToolKey(tool)
-			local emptySlot: number? = nil
-			if savedHotbarLayoutReady then
-				for index = 1, slotCount do
-					if savedHotbarLayout[index] == toolKey and not hotbarTools[index] then
-						emptySlot = index
-						break
-					end
-				end
-			end
-			emptySlot = emptySlot or firstEmptyHotbarSlot(slotCount, reservedSlots)
-			if emptySlot then
-				hotbarTools[emptySlot] = tool
-			else
-				table.insert(inventoryTools, tool)
-			end
-		end
-	end
-end
-
-local function applySavedHotbarLayout(tools: { Tool })
-	table.clear(hotbarTools)
-	table.clear(inventoryTools)
-
-	local used: { [Tool]: boolean } = {}
-	local reservedSlots: { [number]: boolean } = {}
-	local slotCount = getHotbarSlotCount()
-	for index = 1, slotCount do
-		local expectedKey = savedHotbarLayout[index]
-		if expectedKey == EMPTY_HOTBAR_SLOT_KEY then
-			reservedSlots[index] = true
-		elseif expectedKey then
-			reservedSlots[index] = true
-			for _, tool in tools do
-				if not used[tool] and getToolKey(tool) == expectedKey then
-					hotbarTools[index] = tool
-					used[tool] = true
-					break
-				end
-			end
-		end
-	end
-
-	for _, tool in tools do
-		if not used[tool] then
-			local emptySlot = firstEmptyHotbarSlot(slotCount, reservedSlots)
-			if emptySlot then
-				hotbarTools[emptySlot] = tool
-			else
-				table.insert(inventoryTools, tool)
-			end
-			used[tool] = true
-		end
-	end
-end
-
-local function removeToolFromInventory(tool: Tool)
-	for index = #inventoryTools, 1, -1 do
-		if inventoryTools[index] == tool then
-			table.remove(inventoryTools, index)
-		end
-	end
-end
-
-local function removeToolFromHotbar(tool: Tool)
-	for index, existing in hotbarTools do
-		if existing == tool then
-			hotbarTools[index] = nil
-		end
-	end
-end
-
-local function addToolToInventory(tool: Tool)
-	removeToolFromInventory(tool)
-	table.insert(inventoryTools, tool)
-end
-
-local function findHotbarSlotAt(point: Vector2): any?
-	for _, hitPoint in inputHitTestPositions(point) do
-		for _, slot in activeHotbarSlots do
-			if pointInGuiObject(hitPoint, slot.Frame) then
-				return slot
-			end
-		end
-	end
-	return nil
-end
-
-local function isPointInInventory(point: Vector2): boolean
-	local frame = inventoryFrame
-	if not frame then
-		return false
-	end
-	for _, hitPoint in inputHitTestPositions(point) do
-		if pointInGuiObject(hitPoint, frame) then
-			return true
-		end
-	end
-	return false
-end
-
-local function moveToolToHotbar(tool: Tool, targetIndex: number)
-	local previousTool = hotbarTools[targetIndex]
-	removeToolFromInventory(tool)
-	removeToolFromHotbar(tool)
-	hotbarTools[targetIndex] = tool
-	if previousTool and previousTool ~= tool then
-		addToolToInventory(previousTool)
-	end
-end
-
-local function moveToolToInventory(tool: Tool)
-	removeToolFromHotbar(tool)
-	addToolToInventory(tool)
-end
-
-local function updateSlot(slot: any, tool: Tool?)
-	slot.Tool = tool
-	local equipped = tool ~= nil and tool.Parent == getCharacter()
-	local hotbarSelected = slot.Hotbar and equipped
-	slot.SelectedScale.Scale = if hotbarSelected then HOTBAR_SELECTED_SCALE else 1
-	slot.SelectedOutline.Visible = hotbarSelected
-	slot.Stroke.Color = Color3.new(1, 1, 1)
-	slot.Stroke.Thickness = 1
-	slot.Stroke.Transparency = if tool then 0.35 else 0.65
-	slot.Frame.BackgroundTransparency = if hotbarSelected then 0.08 else if tool then 0.18 else 0.52
-	slot.CountLabel.Text = if tool then formatCount(getCount(tool)) else ""
-	slot.NameLabel.Text = if tool then getDisplayName(tool) else ""
-	renderToolModel(slot.Viewport, tool)
-end
-
-local function passesSearch(tool: Tool): boolean
-	local box = searchBox
-	local query = box and string.lower(box.Text) or ""
-	if query == "" then
-		return true
-	end
-	local haystack = string.lower(getDisplayName(tool) .. " " .. tool.Name .. " " .. tool.ToolTip)
-	local itemId = tool:GetAttribute("ItemId")
-	if type(itemId) == "string" then
-		haystack ..= " " .. string.lower(itemId)
-	end
-	return string.find(haystack, query, 1, true) ~= nil
-end
-
-local function equipTool(tool: Tool?)
-	if not tool then
-		return
-	end
-	local character = getCharacter()
-	if not character then
-		return
-	end
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if tool.Parent == character then
-		if humanoid then
-			humanoid:UnequipTools()
-		else
-			local backpack = getBackpack()
-			if backpack then
-				tool.Parent = backpack
-			end
-		end
-		return
-	end
-	local backpack = getBackpack()
-	if tool.Parent ~= backpack then
-		return
-	end
-	local expectedDescendants = tool:GetAttribute("ToolDescendants")
-	if type(expectedDescendants) == "number" and #tool:GetDescendants() < expectedDescendants then
-		local deadline = os.clock() + 1
-		while tool.Parent == backpack and #tool:GetDescendants() < expectedDescendants and os.clock() < deadline do
-			task.wait()
-		end
-	end
-	if tool.Parent ~= backpack or not character:IsDescendantOf(workspace) then
-		return
-	end
-	if humanoid then
-		humanoid:UnequipTools()
-	end
-	tool.Parent = character
-end
-
-local function setZIndexRecursive(root: Instance?, zIndex: number)
-	if not root then
-		return
-	end
-	if root:IsA("GuiObject") then
-		root.ZIndex = zIndex
-	end
-	for _, descendant in root:GetDescendants() do
-		if descendant:IsA("GuiObject") then
-			descendant.ZIndex = zIndex
-		end
-	end
-end
-
-local function updateInventoryStaticLayout(panel: Frame, panelPixelSize: Vector2)
-	local headerSize = getInventoryHeaderSize()
-	local searchInset = getSearchInset()
-	local panelWidth = math.max(1, panelPixelSize.X)
-	local panelHeight = math.max(1, panelPixelSize.Y)
-	local gap = scalePixel(6, 4)
-	local capacityWidth = math.min(getCapacityGroupWidth(), math.floor(panelWidth * 0.5))
-	local header = panel:FindFirstChild("Header")
-	if header and header:IsA("GuiObject") then
-		header.Position = UDim2.fromScale(0, 0)
-		header.Size = UDim2.fromScale(1, headerSize / panelHeight)
-
-		local title = header:FindFirstChild("Title")
-		if title and title:IsA("GuiObject") then
-			local titleInset = scalePixel(8, 5)
-			if isMiniLayout() then
-				local firstRowHeight = math.floor(headerSize * 0.5)
-				local titleWidth = math.max(1, panelWidth - capacityWidth - searchInset - gap - titleInset)
-				title.Position = UDim2.fromScale(titleInset / panelWidth, 0)
-				title.Size = UDim2.fromScale(titleWidth / panelWidth, firstRowHeight / headerSize)
-			else
-				local searchWidth = math.min(getSearchWidth(), math.floor(panelWidth * 0.42))
-				local groupX = panelWidth - searchWidth - searchInset - gap - capacityWidth
-				local titleWidth = math.max(1, groupX - gap - titleInset)
-				title.Position = UDim2.fromScale(titleInset / panelWidth, 0)
-				title.Size = UDim2.fromScale(titleWidth / panelWidth, 1)
-			end
-		end
-	end
-	local search = searchBox
-	if search then
-		if isMiniLayout() then
-			local firstRowHeight = math.floor(headerSize * 0.5)
-			search.Position = UDim2.fromScale(searchInset / panelWidth, (firstRowHeight + searchInset) / headerSize)
-			search.Size = UDim2.fromScale(
-				(panelWidth - searchInset * 2) / panelWidth,
-				math.max(1, headerSize - firstRowHeight - searchInset * 2) / headerSize
-			)
-		else
-			local searchWidth = math.min(getSearchWidth(), math.floor(panelWidth * 0.42))
-			search.Position = UDim2.fromScale((panelWidth - searchWidth - searchInset) / panelWidth, searchInset / headerSize)
-			search.Size = UDim2.fromScale(searchWidth / panelWidth, (headerSize - searchInset * 2) / headerSize)
-		end
-		search.TextSize = getScaledTextSize(12, 9)
-	end
-	local group = capacityGroup
-	if group then
-		local groupHeight: number
-		if isMiniLayout() then
-			local firstRowHeight = math.floor(headerSize * 0.5)
-			groupHeight = math.max(1, firstRowHeight - searchInset * 2)
-			group.Position = UDim2.fromScale(
-				(panelWidth - capacityWidth - searchInset) / panelWidth,
-				searchInset / headerSize
-			)
-		else
-			groupHeight = math.max(1, headerSize - searchInset * 2)
-			local searchWidth = math.min(getSearchWidth(), math.floor(panelWidth * 0.42))
-			group.Position = UDim2.fromScale(
-				(panelWidth - searchWidth - searchInset - gap - capacityWidth) / panelWidth,
-				searchInset / headerSize
-			)
-		end
-		group.Size = UDim2.fromScale(capacityWidth / panelWidth, groupHeight / headerSize)
-		local buttonSize = math.min(groupHeight, scalePixel(28, 22))
-		local groupGap = scalePixel(4, 2)
-		local label = capacityText
-		if label then
-			label.Size = UDim2.fromScale(math.max(1, capacityWidth - buttonSize - groupGap) / capacityWidth, 1)
-			label.TextSize = getScaledTextSize(12, 9)
-		end
-		local button = expandCapacityButton
-		if button then
-			button.Size = UDim2.fromScale(buttonSize / capacityWidth, buttonSize / groupHeight)
-			button.TextSize = getScaledTextSize(18, 13)
-		end
-		local layout = group:FindFirstChildOfClass("UIListLayout")
-		if layout then
-			layout.Padding = UDim.new(groupGap / capacityWidth, 0)
-		end
-	end
-	local sideBar = panel:FindFirstChild("SideBar")
-	if sideBar and sideBar:IsA("GuiObject") then
-		local sidebarWidth = getCategorySidebarWidth()
-		sideBar.Position = UDim2.fromScale(-10 / math.max(1, panelPixelSize.X), 0.5)
-		sideBar.Size = UDim2.fromScale(sidebarWidth / math.max(1, panelPixelSize.X), 1)
-		sideBar.Visible = true
-	end
-	updateCapacityDisplay()
-end
-
-local function canUseInputForSlot(input: InputObject): boolean
-	return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
-end
-
-local function isCandidateInput(candidate: any, input: InputObject): boolean
-	return input == candidate.Input
-		or candidate.Input.UserInputType == Enum.UserInputType.MouseButton1
-			and input.UserInputType == Enum.UserInputType.MouseMovement
-end
-
-local function isCandidateEndedInput(candidate: any, input: InputObject): boolean
-	return input == candidate.Input
-		or candidate.Input.UserInputType == Enum.UserInputType.MouseButton1
-			and input.UserInputType == Enum.UserInputType.MouseButton1
-end
-
-local function updateDragGhost(point: Vector2)
-	if not dragState or not dragState.GhostSlot then
-		return
-	end
-	local slotSize = getSlotSize()
-	dragState.GhostSlot.Frame.Position = scalePosition(point.X - slotSize / 2, point.Y - slotSize / 2)
-end
-
-local function startDrag(candidate: any, point: Vector2)
-	local screenGui = gui
-	if not screenGui or not candidate.Tool then
-		return
-	end
-	local ghostSlot = makeSlot(screenGui, "DragGhost", false, 0)
-	updateSlot(ghostSlot, candidate.Tool)
-	ghostSlot.Frame.AnchorPoint = Vector2.new(0, 0)
-	ghostSlot.Frame.BackgroundTransparency = 0.04
-	ghostSlot.Frame.Active = false
-	setZIndexRecursive(ghostSlot.Frame, DRAG_Z_INDEX)
-	dragState = {
-		Tool = candidate.Tool,
-		SourceHotbar = candidate.SourceHotbar,
-		SourceIndex = candidate.SourceIndex,
-		GhostSlot = ghostSlot,
-	}
-	updateDragGhost(point)
-end
-
-local function clearDrag()
-	if dragState and dragState.GhostSlot then
-		dragState.GhostSlot.Frame:Destroy()
-	end
-	dragCandidate = nil
-	dragState = nil
-end
-
-local function finishDrop(point: Vector2)
-	if not dragState then
-		clearDrag()
-		return
-	end
-	local tool = dragState.Tool
-	local targetHotbarSlot = findHotbarSlotAt(point)
-	local layoutChanged = false
-	if targetHotbarSlot then
-		if dragState.SourceHotbar and dragState.SourceIndex and dragState.SourceIndex ~= targetHotbarSlot.Index then
-			local targetTool = hotbarTools[targetHotbarSlot.Index]
-			hotbarTools[targetHotbarSlot.Index] = tool
-			hotbarTools[dragState.SourceIndex] = targetTool
-		else
-			moveToolToHotbar(tool, targetHotbarSlot.Index)
-		end
-		layoutChanged = true
-	elseif isPointInInventory(point) then
-		moveToolToInventory(tool)
-		layoutChanged = true
-	end
-	clearDrag()
-	if layoutChanged then
-		requestSaveHotbarLayout()
-	end
-	refreshLayout()
-end
-
-local function connectSlotInput(slot: any)
-	slot.Frame.InputBegan:Connect(function(input)
-		if not canUseInputForSlot(input) or not slot.Tool then
-			return
-		end
-		dragCandidate = {
-			Slot = slot,
-			Tool = slot.Tool,
-			SourceHotbar = slot.Hotbar,
-			SourceIndex = slot.Index,
-			Input = input,
-			Start = inputPosition(input),
-		}
-	end)
-end
-
-local function renderHotbar()
-	local parent = hotbarFrame
-	if not parent then
-		return
-	end
-	clearLayout(parent)
-	table.clear(activeHotbarSlots)
-
-	local slotCount = getHotbarSlotCount()
-	local visibleSlots = if inventoryOpen then slotCount else 0
-	if not inventoryOpen then
-		for index = 1, slotCount do
-			if hotbarTools[index] then
-				visibleSlots += 1
-			end
-		end
-	end
-	local visibleSlotCount = math.max(visibleSlots, 1)
-	local hotbarPixelSize = getTemplateHotbarPixelSize(visibleSlotCount)
-	local hotbarSize = getTemplateHotbarSize(visibleSlotCount)
-	parent.Size = hotbarSize
-	parent.Position = getHotbarPosition()
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	layout.VerticalAlignment = Enum.VerticalAlignment.Center
-	layout.Padding = UDim.new(getSlotGap() / math.max(1, hotbarPixelSize.X), 0)
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = parent
-
-	for index = 1, slotCount do
-		local tool = hotbarTools[index]
-		if inventoryOpen or tool then
-			local slot = makeSlot(parent, "HotbarSlot" .. index, true, index, hotbarPixelSize.X, hotbarPixelSize.Y)
-			slot.Frame.LayoutOrder = index
-			setZIndexRecursive(slot.Frame, HOTBAR_SLOT_Z_INDEX)
-			updateSlot(slot, tool)
-			if tool ~= nil and tool.Parent == getCharacter() then
-				setZIndexRecursive(slot.Frame, HOTBAR_SLOT_Z_INDEX + 2)
-			end
-			table.insert(activeHotbarSlots, slot)
-			connectSlotInput(slot)
-		end
-	end
-end
-
-local function renderInventory()
-	local parent = gridFrame
-	if not parent then
-		return
-	end
-	clearLayout(parent)
-	local slotCount = getHotbarSlotCount()
-	local panelPixelSize = getTemplateInventoryPixelSize(slotCount)
-	local panelSize = getTemplateInventorySize(slotCount)
-	local headerSize = getInventoryHeaderSize()
-	local slotGap = getSlotGap()
-	local slotSize = getSlotSize()
-	local gridHeightPx = math.max(1, panelPixelSize.Y - headerSize)
-	parent.CanvasSize = UDim2.fromScale(0, 0)
-
-	local layout = Instance.new("UIGridLayout")
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.CellPadding = UDim2.fromScale(slotGap / math.max(1, panelPixelSize.X), slotGap / gridHeightPx)
-	layout.CellSize = UDim2.fromScale(slotSize / math.max(1, panelPixelSize.X), slotSize / gridHeightPx)
-	layout.Parent = parent
-
-	local visibleCount = 0
-	for _, tool in inventoryTools do
-		if toolMatchesFilter(tool, selectedCategory) and passesSearch(tool) then
-			visibleCount += 1
-			local slot = makeSlot(parent, "InventorySlot" .. visibleCount, false, visibleCount, panelPixelSize.X, gridHeightPx)
-			slot.Frame.LayoutOrder = visibleCount
-			setZIndexRecursive(slot.Frame, INVENTORY_SLOT_Z_INDEX)
-			updateSlot(slot, tool)
-			connectSlotInput(slot)
-		end
-	end
-
-	if inventoryFrame then
-		inventoryFrame.Position = getInventoryPosition(slotCount)
-		inventoryFrame.Size = panelSize
-		updateInventoryStaticLayout(inventoryFrame, panelPixelSize)
-	end
-	parent.Position = UDim2.fromScale(0, headerSize / math.max(1, panelPixelSize.Y))
-	parent.Size = UDim2.fromScale(1, gridHeightPx / math.max(1, panelPixelSize.Y))
-	local columns = math.max(1, math.floor(panelPixelSize.X / (slotSize + slotGap)))
-	local rows = math.ceil(visibleCount / columns)
-	local contentHeight = math.max(1, rows) * (slotSize + slotGap) + slotGap
-	parent.CanvasSize = UDim2.fromScale(0, math.max(1, contentHeight / gridHeightPx))
-end
-
-refreshLayout = function()
-	local tools = collectCurrentTools()
-	local present: { [Tool]: boolean } = {}
-	for _, tool in tools do
-		present[tool] = true
-	end
-	removeMissingTools(present)
-	if savedHotbarLayoutReady and not savedHotbarLayoutApplied then
-		applySavedHotbarLayout(tools)
-		savedHotbarLayoutApplied = true
-	else
-		assignNewTools(tools)
-	end
-	renderHotbar()
-	renderInventory()
-end
-
-local function requestRefresh()
-	if pendingRefresh then
-		return
-	end
-	pendingRefresh = true
-	task.defer(function()
-		pendingRefresh = false
-		refreshLayout()
-	end)
-end
-
-requestSaveHotbarLayout = function()
-	if not savedHotbarLayoutReady then
-		return
-	end
-	if hotbarLayoutSaveScheduled then
-		return
-	end
-	savedHotbarLayout = getCurrentHotbarLayout()
-	savedHotbarLayoutReady = true
-	savedHotbarLayoutApplied = true
-	hotbarLayoutSaveInFlight = true
-	hotbarLayoutSaveScheduled = true
-	task.delay(0.35, function()
-		hotbarLayoutSaveScheduled = false
-		local layout = getCurrentHotbarLayout()
-		savedHotbarLayout = layout
-		savedHotbarLayoutReady = true
-		savedHotbarLayoutApplied = true
-		local remote = saveHotbarLayoutEvent
-		if remote then
-			remote:FireServer(layout)
-		end
-		task.delay(3, function()
-			hotbarLayoutSaveInFlight = false
-		end)
-	end)
-end
-
-local function setInventoryOpen(open: boolean)
+local function applyInventoryState(open: boolean, emit: boolean)
 	inventoryOpen = open
-	if inventoryFrame then
-		inventoryFrame.Visible = open
-		if InterfaceVisualController then
-			if open then
-				InterfaceVisualController.Open(inventoryFrame)
-			else
-				InterfaceVisualController.Close(inventoryFrame)
-			end
+	local visualController = interfaceVisualController
+	local inventory = inventoryFrame
+	if visualController and inventory then
+		if open then
+			visualController.Open(inventory)
+		else
+			visualController.Close(inventory)
 		end
 	end
-	if outsideCloseButton then
-		outsideCloseButton.Visible = open
+	if emit then
+		BackpackController.StateChanged:Fire(open)
 	end
-	refreshLayout()
-	BackpackController.StateChanged:Fire(open)
 end
 
--- 设置背包面板开关状态，供 Topbar 或快捷键复用同一套 UI 行为。
+-- 把 Purse 背包设置为指定开关状态；状态相同时不重复触发原生切换。
 function BackpackController.SetInventoryOpen(open: boolean)
-	setInventoryOpen(open)
+	if inventoryOpen == open then
+		return
+	end
+	local resolvedPurse = purseApi
+	if not resolvedPurse then
+		return
+	end
+	local openClose = resolvedPurse.OpenClose
+	if openClose then
+		openClose()
+	end
 end
 
--- 切换背包面板开关状态，供外部按钮直接调用。
+-- 切换 Purse 背包的当前开关状态。
 function BackpackController.ToggleInventory()
-	setInventoryOpen(not inventoryOpen)
+	BackpackController.SetInventoryOpen(not inventoryOpen)
 end
 
--- 返回当前背包面板是否展开，供外部按钮同步选中态。
+-- 返回 Purse 背包当前是否展开。
 function BackpackController.IsInventoryOpen(): boolean
 	return inventoryOpen
 end
 
--- 返回运行时快捷栏 Frame，供需要跟随其实际布局的本地反馈 UI 定位；调用方不得修改快捷栏属性。
+-- 返回 Purse 的热栏 Frame，供收获反馈定位；初始化失败时返回 nil。
 function BackpackController.GetHotbarFrame(): Frame?
 	return hotbarFrame
 end
 
-local function makeCategoryButton(parent: Instance, category: string, order: number): TextButton
-	local button = Instance.new("TextButton")
-	button.Name = category
-	button.AutoButtonColor = false
-	button.BackgroundColor3 = if selectedCategory == category then Color3.fromRGB(90, 142, 233) else Color3.fromRGB(38, 38, 38)
-	button.BackgroundTransparency = 0.05
-	button.BorderSizePixel = 0
-	button.Font = Enum.Font.GothamBold
-	button.LayoutOrder = order
-	button.Size = UDim2.fromScale(1, 0.125)
-	button.Text = category
-	button.TextColor3 = Color3.new(1, 1, 1)
-	button.TextSize = getScaledTextSize(12, 9)
-	button.Parent = parent
+-- 返回 Purse 的背包面板 Frame，供项目分类栏挂载；调用方不得改写原生槽位层级。
+function BackpackController.GetInventoryFrame(): Frame?
+	return inventoryFrame
+end
 
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = button
+-- 设置与 Purse 原生搜索取交集的背包 Tool 过滤器；传 nil 恢复全部分类。
+function BackpackController.SetInventoryFilter(filter: ((Tool) -> boolean)?)
+	local resolvedPurse = purseApi
+	if resolvedPurse then
+		resolvedPurse.SetInventoryFilter(filter)
+	end
+end
 
-	button.MouseButton1Click:Connect(function()
-		selectedCategory = category
-		for _, sibling in parent:GetChildren() do
-			if sibling:IsA("TextButton") then
-				sibling.BackgroundColor3 = if sibling.Name == selectedCategory
-					then Color3.fromRGB(90, 142, 233)
-					else Color3.fromRGB(38, 38, 38)
-			end
+local function getEffectiveToolCount(tool: Tool): number
+	local highest = 0
+	for _, attributeName in { "Count", "StackCount" } do
+		local value = tool:GetAttribute(attributeName)
+		if typeof(value) == "number" then
+			highest = math.max(highest, value)
 		end
-		renderInventory()
-	end)
-	return button
+	end
+	return math.max(0, highest)
 end
 
-local function buildGui()
-	local playerGui = player:WaitForChild("PlayerGui")
-	local existing = playerGui:FindFirstChild("BackpackGui")
-	if existing then
-		existing:Destroy()
-	end
-
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "BackpackGui"
-	screenGui.DisplayOrder = 120
-	screenGui.IgnoreGuiInset = true
-	screenGui.ResetOnSpawn = false
-	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	screenGui.Parent = playerGui
-	gui = screenGui
-
-	local root = Instance.new("Frame")
-	root.Name = "Backpack"
-	root.BackgroundTransparency = 1
-	root.Size = UDim2.fromScale(1, 1)
-	root.Parent = screenGui
-
-	local closeLayer = Instance.new("TextButton")
-	closeLayer.Name = "OutsideClose"
-	closeLayer.Active = true
-	closeLayer.AutoButtonColor = false
-	closeLayer.BackgroundTransparency = 1
-	closeLayer.BorderSizePixel = 0
-	closeLayer.Size = UDim2.fromScale(1, 1)
-	closeLayer.Text = ""
-	closeLayer.Visible = false
-	closeLayer.ZIndex = 1
-	closeLayer.Parent = root
-	outsideCloseButton = closeLayer
-	closeLayer.MouseButton1Click:Connect(function()
-		setInventoryOpen(false)
-	end)
-
-	local hotbar = Instance.new("Frame")
-	hotbar.Name = "Hotbar"
-	hotbar.AnchorPoint = Vector2.new(0.5, 1)
-	hotbar.BackgroundTransparency = 1
-	hotbar.Position = getHotbarPosition()
-	hotbar.Size = getTemplateHotbarSize(1)
-	hotbar.ZIndex = HOTBAR_Z_INDEX
-	hotbar.Parent = root
-	hotbarFrame = hotbar
-
-	local inventory = Instance.new("Frame")
-	local initialSlotCount = getHotbarSlotCount()
-	local initialPanelPixelSize = getTemplateInventoryPixelSize(initialSlotCount)
-	local initialPanelSize = getTemplateInventorySize(initialSlotCount)
-	local initialHeaderSize = getInventoryHeaderSize()
-	local initialSearchInset = getSearchInset()
-	local initialSearchWidth = getSearchWidth()
-	inventory.Name = "Inventory"
-	inventory.AnchorPoint = Vector2.new(0.5, 1)
-	inventory.BackgroundColor3 = Color3.fromRGB(31, 31, 31)
-	inventory.BackgroundTransparency = 0.25
-	inventory.BorderSizePixel = 0
-	inventory.Position = getInventoryPosition(initialSlotCount)
-	inventory.Size = initialPanelSize
-	inventory.Visible = false
-	inventory.ZIndex = INVENTORY_Z_INDEX
-	inventory.Parent = root
-	inventoryFrame = inventory
-	if InterfaceVisualController then
-		InterfaceVisualController.RegisterExclusive(inventory, function()
-			setInventoryOpen(false)
-		end)
-	end
-
-	local inventoryCorner = Instance.new("UICorner")
-	inventoryCorner.CornerRadius = UDim.new(0, 8)
-	inventoryCorner.Parent = inventory
-
-	local header = Instance.new("Frame")
-	header.Name = "Header"
-	header.BackgroundTransparency = 1
-	header.Position = UDim2.fromScale(0, 0)
-	header.Size = UDim2.fromScale(1, initialHeaderSize / math.max(1, initialPanelPixelSize.Y))
-	header.Parent = inventory
-
-	local title = newText(header, "Title", "Backpack", UDim2.fromScale(0.36, 1), UDim2.fromScale(8 / math.max(1, initialPanelPixelSize.X), 0))
-	title.TextSize = getScaledTextSize(14, 10)
-	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.TextScaled = false
-
-	local capacity = Instance.new("Frame")
-	capacity.Name = "CapacityGroup"
-	capacity.BackgroundTransparency = 1
-	capacity.BorderSizePixel = 0
-	capacity.Parent = header
-	capacityGroup = capacity
-
-	local capacityLayout = Instance.new("UIListLayout")
-	capacityLayout.FillDirection = Enum.FillDirection.Horizontal
-	capacityLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
-	capacityLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	capacityLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	capacityLayout.Parent = capacity
-
-	local capacityLabel = newText(capacity, "CapacityText", "--/--", UDim2.fromScale(0.72, 1), UDim2.fromScale(0, 0))
-	capacityLabel.LayoutOrder = 1
-	capacityLabel.TextScaled = false
-	capacityLabel.TextWrapped = false
-	capacityLabel.TextXAlignment = Enum.TextXAlignment.Right
-	capacityLabel.TextYAlignment = Enum.TextYAlignment.Center
-	capacityText = capacityLabel
-
-	local expandButton = Instance.new("TextButton")
-	expandButton.Name = "ExpandCapacityButton"
-	expandButton.AutoButtonColor = false
-	expandButton.BackgroundColor3 = Color3.fromRGB(48, 123, 194)
-	expandButton.BackgroundTransparency = 0
-	expandButton.BorderSizePixel = 0
-	expandButton.Font = Enum.Font.GothamBold
-	expandButton.LayoutOrder = 2
-	expandButton.Size = UDim2.fromScale(0.24, 1)
-	expandButton.Text = "+"
-	expandButton.TextColor3 = Color3.new(1, 1, 1)
-	expandButton.TextScaled = false
-	expandButton.TextSize = getScaledTextSize(18, 13)
-	expandButton.Parent = capacity
-	expandCapacityButton = expandButton
-	local expandCorner = Instance.new("UICorner")
-	expandCorner.CornerRadius = UDim.new(0.25, 0)
-	expandCorner.Parent = expandButton
-	expandButton.Activated:Connect(requestCapacityPurchase)
-	setExpandButtonEnabled(false)
-
-	local search = Instance.new("TextBox")
-	search.Name = "Search"
-	search.BackgroundColor3 = Color3.fromRGB(38, 38, 38)
-	search.BackgroundTransparency = 0.05
-	search.BorderSizePixel = 0
-	search.ClearTextOnFocus = false
-	search.Font = Enum.Font.Gotham
-	search.PlaceholderText = "Search"
-	search.Position = UDim2.fromScale(
-		1 - (initialSearchWidth + initialSearchInset) / math.max(1, initialPanelPixelSize.X),
-		initialSearchInset / math.max(1, initialHeaderSize)
-	)
-	search.Size = UDim2.fromScale(
-		initialSearchWidth / math.max(1, initialPanelPixelSize.X),
-		(initialHeaderSize - initialSearchInset * 2) / math.max(1, initialHeaderSize)
-	)
-	search.Text = ""
-	search.TextColor3 = Color3.new(1, 1, 1)
-	search.TextScaled = false
-	search.TextSize = getScaledTextSize(12, 9)
-	search.Parent = header
-	searchBox = search
-
-	local searchCorner = Instance.new("UICorner")
-	searchCorner.CornerRadius = UDim.new(0, 8)
-	searchCorner.Parent = search
-	search:GetPropertyChangedSignal("Text"):Connect(renderInventory)
-
-	local categories = Instance.new("Frame")
-	categories.Name = "SideBar"
-	categories.BackgroundTransparency = 1
-	categories.AnchorPoint = Vector2.new(1, 0.5)
-	categories.Position = UDim2.fromScale(-10 / math.max(1, initialPanelPixelSize.X), 0.5)
-	categories.Size = UDim2.fromScale(getCategorySidebarWidth() / math.max(1, initialPanelPixelSize.X), 1)
-	categories.Visible = true
-	categories.Parent = inventory
-
-	local categoryLayout = Instance.new("UIListLayout")
-	categoryLayout.FillDirection = Enum.FillDirection.Vertical
-	categoryLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	categoryLayout.Padding = UDim.new(0, 5)
-	categoryLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	categoryLayout.Parent = categories
-
-	for index, category in CATEGORY_ORDER do
-		makeCategoryButton(categories, category, index)
-	end
-
-	local grid = Instance.new("ScrollingFrame")
-	grid.Name = "ScrollingFrame"
-	grid.Active = true
-	grid.BackgroundTransparency = 1
-	grid.BorderSizePixel = 0
-	grid.CanvasSize = UDim2.fromScale(0, 0)
-	grid.Position = UDim2.fromScale(0, initialHeaderSize / math.max(1, initialPanelPixelSize.Y))
-	grid.ScrollBarThickness = 6
-	grid.Size = UDim2.fromScale(1, (initialPanelPixelSize.Y - initialHeaderSize) / math.max(1, initialPanelPixelSize.Y))
-	grid.Parent = inventory
-	gridFrame = grid
-	setZIndexRecursive(inventory, INVENTORY_Z_INDEX)
-	updateInventoryStaticLayout(inventory, initialPanelPixelSize)
-end
-
-local function bindTool(tool: Tool)
-	if toolConnections[tool] then
+local function unbindQuantityTool(tool: Tool)
+	local binding = quantityBindings[tool]
+	if not binding then
 		return
 	end
-	local connections = {}
-	toolConnections[tool] = connections
-	table.insert(connections, tool.Changed:Connect(function(propertyName)
-		if propertyName == "Name" or propertyName == "ToolTip" or propertyName == "TextureId" then
-			requestRefresh()
-		end
-	end))
-	table.insert(connections, tool.AttributeChanged:Connect(requestRefresh))
-	table.insert(connections, tool.Destroying:Connect(function()
-		local existing = toolConnections[tool]
-		if existing then
-			for _, connection in existing do
-				connection:Disconnect()
-			end
-			toolConnections[tool] = nil
-		end
-		requestRefresh()
-	end))
-end
-
-local function watchContainer(container: Instance)
-	for _, child in container:GetChildren() do
-		if child:IsA("Tool") then
-			bindTool(child)
-		end
-	end
-	table.insert(containerConnections, container.ChildAdded:Connect(function(child)
-		if child:IsA("Tool") then
-			bindTool(child)
-			requestRefresh()
-		end
-	end))
-	table.insert(containerConnections, container.ChildRemoved:Connect(function()
-		requestRefresh()
-	end))
-end
-
-local function rebindContainers()
-	for _, connection in containerConnections do
+	quantityBindings[tool] = nil
+	for _, connection in binding.Connections do
 		connection:Disconnect()
 	end
-	table.clear(containerConnections)
-	local backpack = getBackpack()
-	if backpack then
-		watchContainer(backpack)
-	end
-	local character = getCharacter()
-	if character then
-		watchContainer(character)
-	end
-	requestRefresh()
 end
 
-local function bindHotbarLayoutRemotes()
-	local folder = ReplicatedStorage:WaitForChild(NetworkConfig.FolderName, 10)
-	if not folder then
-		warn("[BackpackController] 未找到 KLineRemotes，热栏布局不会跨局保存。")
+local function bindQuantityTool(tool: Tool)
+	if quantityBindings[tool] then
 		return
 	end
-	local saveRemote = folder:WaitForChild(NetworkConfig.Events.SaveHotbarLayout, 10)
-	local requestRemote = folder:WaitForChild(NetworkConfig.Events.RequestHotbarLayout, 10)
-	local changedRemote = folder:WaitForChild(NetworkConfig.Events.HotbarLayoutChanged, 10)
-	if not (saveRemote and saveRemote:IsA("RemoteEvent"))
-		or not (requestRemote and requestRemote:IsA("RemoteEvent"))
-		or not (changedRemote and changedRemote:IsA("RemoteEvent"))
-	then
-		warn("[BackpackController] 热栏布局 Remote 缺失或类型错误。")
-		return
-	end
-	saveHotbarLayoutEvent = saveRemote
-	changedRemote.OnClientEvent:Connect(function(layout)
-		local nextLayout = sanitizeHotbarLayout(layout)
-		local currentLayout = getCurrentHotbarLayout()
-		if hotbarLayoutSaveInFlight and not hotbarLayoutsEqual(nextLayout, currentLayout) then
+	local binding: QuantityBinding = {
+		EffectiveCount = getEffectiveToolCount(tool),
+		PendingPromotion = false,
+		PendingBaseline = nil,
+		Connections = {},
+	}
+	quantityBindings[tool] = binding
+
+	table.insert(binding.Connections, tool.AttributeChanged:Connect(function(attributeName: string)
+		if attributeName ~= "Count" and attributeName ~= "StackCount" then
 			return
 		end
-		hotbarLayoutSaveInFlight = false
-		savedHotbarLayout = nextLayout
-		savedHotbarLayoutReady = true
-		if hotbarLayoutsEqual(nextLayout, currentLayout) then
-			savedHotbarLayoutApplied = true
-		else
-			savedHotbarLayoutApplied = false
-			requestRefresh()
+		local previousCount = binding.EffectiveCount
+		local nextCount = getEffectiveToolCount(tool)
+		binding.EffectiveCount = nextCount
+		if nextCount <= previousCount then
+			return
 		end
-	end)
-	requestRemote:FireServer()
+		if binding.PendingPromotion then
+			local pendingBaseline = binding.PendingBaseline
+			binding.PendingBaseline = if pendingBaseline then math.min(pendingBaseline, previousCount) else previousCount
+			return
+		end
+
+		binding.PendingPromotion = true
+		binding.PendingBaseline = previousCount
+		task.defer(function()
+			if quantityBindings[tool] ~= binding then
+				return
+			end
+			binding.PendingPromotion = false
+			local baseline = binding.PendingBaseline
+			binding.PendingBaseline = nil
+			if baseline == nil or getEffectiveToolCount(tool) <= baseline then
+				return
+			end
+			local resolvedPurse = purseApi
+			if resolvedPurse then
+				resolvedPurse.PromoteToolToLowestEmptyHotbar(tool)
+			end
+		end)
+	end))
+	table.insert(binding.Connections, tool.Destroying:Connect(function()
+		unbindQuantityTool(tool)
+	end))
 end
 
--- 注入独占界面、开发者商品弹窗与通用 Notice，并监听 Tool 和服务端容量复制值变化。
-function BackpackController.Init(dependencies: {
-	InterfaceVisualController: any,
-	DeveloperProductPromptController: any,
-	NotificationController: any,
-})
+local function watchToolContainer(container: Instance)
+	if watchedContainers[container] then
+		return
+	end
+	local connections: { RBXScriptConnection } = {}
+	watchedContainers[container] = connections
+	for _, child in container:GetChildren() do
+		if child:IsA("Tool") then
+			bindQuantityTool(child)
+		end
+	end
+	table.insert(connections, container.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			bindQuantityTool(child)
+		end
+	end))
+	table.insert(connections, container.Destroying:Connect(function()
+		local activeConnections = watchedContainers[container]
+		watchedContainers[container] = nil
+		if activeConnections then
+			for _, connection in activeConnections do
+				connection:Disconnect()
+			end
+		end
+	end))
+end
+
+local function bindQuantityPromotion()
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if backpack then
+		watchToolContainer(backpack)
+	end
+	local character = player.Character
+	if character then
+		watchToolContainer(character)
+	end
+	player.CharacterAdded:Connect(watchToolContainer)
+	player.ChildAdded:Connect(function(child)
+		if child:IsA("Backpack") then
+			watchToolContainer(child)
+		end
+	end)
+end
+
+-- 初始化 Purse 与项目界面互斥桥接；重复调用不会重复创建背包或连接事件。
+function BackpackController.Init(dependencies: Dependencies)
 	if initialized then
 		return
 	end
 	initialized = true
-	InterfaceVisualController = dependencies.InterfaceVisualController
-	DeveloperProductPromptController = dependencies.DeveloperProductPromptController
-	NotificationController = dependencies.NotificationController
+	interfaceVisualController = dependencies.InterfaceVisualController
 
-	pcall(function()
-		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
-	end)
-	buildGui()
-	rebindContainers()
-	rebindCapacityState()
-	bindHotbarLayoutRemotes()
-	DeveloperProductPromptController.ConnectChanged(updateCapacityDisplay)
+	local resolvedPurse = require(ReplicatedStorage.Shared.Vendor.Purse) :: PurseApi
+	purseApi = resolvedPurse
+	hotbarFrame, inventoryFrame = resolveBackpackUi()
+	bindQuantityPromotion()
 
-	player.CharacterAdded:Connect(function()
-		task.defer(rebindContainers)
-	end)
-	player.ChildAdded:Connect(function(child)
-		if child:IsA("Backpack") then
-			task.defer(rebindContainers)
-		elseif child.Name == "KLineInventory" and child:IsA("Folder") then
-			task.defer(rebindCapacityState)
-		end
-	end)
-	player.ChildRemoved:Connect(function(child)
-		if child.Name == "KLineInventory" then
-			task.defer(rebindCapacityState)
-		end
-	end)
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then
-			return
-		end
-		if input.KeyCode == Enum.KeyCode.Backquote or input.KeyCode == Enum.KeyCode.DPadUp then
-			setInventoryOpen(not inventoryOpen)
-			return
-		end
-		local slot = KEY_TO_SLOT[input.KeyCode]
-		if slot and slot <= getHotbarSlotCount() then
-			equipTool(hotbarTools[slot])
-		end
-	end)
-	UserInputService.InputChanged:Connect(function(input)
-		local candidate = dragCandidate
-		if not candidate or not isCandidateInput(candidate, input) then
-			return
-		end
-		local point = inputPosition(input)
-		if not dragState then
-			if inventoryOpen and (point - candidate.Start).Magnitude > 8 then
-				startDrag(candidate, point)
-			else
-				return
-			end
-		end
-		updateDragGhost(point)
-	end)
-	UserInputService.InputEnded:Connect(function(input)
-		local candidate = dragCandidate
-		if not candidate or not isCandidateEndedInput(candidate, input) then
-			return
-		end
-		local point = inputPosition(input)
-		if dragState then
-			finishDrop(point)
-		else
-			local tool = candidate.Tool
-			dragCandidate = nil
-			equipTool(tool)
-		end
-	end)
-	local camera = workspace.CurrentCamera
-	if camera then
-		camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
-			requestRefresh()
+	local inventory = inventoryFrame
+	if not hotbarFrame or not inventory then
+		warn("[BackpackController] Purse 未创建预期的 BackpackGui.Backpack.Hotbar/Inventory。")
+	else
+		dependencies.InterfaceVisualController.RegisterExclusive(inventory, function()
+			BackpackController.SetInventoryOpen(false)
 		end)
 	end
+
+	resolvedPurse.StateChanged.Event:Connect(function(open: boolean)
+		applyInventoryState(open, true)
+	end)
+	applyInventoryState(resolvedPurse.IsOpen == true, false)
 end
 
 return BackpackController

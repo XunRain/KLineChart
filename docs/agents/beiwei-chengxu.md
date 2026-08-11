@@ -27,7 +27,7 @@ KLineChart 已实现第一版种植与存档基础：
 - `HudCurrencyController` 从服务端物化的 `KLineInventory.Sheckles` 只读同步 HUD 金币显示，当前会同时写入 `PlayerGui.HUD.Currencies.CoinsCounter.TextLabel` 描边底字和其子级 `TextLabel` 前景数字，并同步模板 `Target`/`Goal` NumberValue，避免显示 Studio 假值或父子文字重影。
 - `InterfaceVisualController` 用 owner 集合统一管理多个界面的 Blur=20 与当前真实 FOV-10，最后一个界面关闭后恢复；SeedShop 与测试菜单共用该模块。
 - `TeleportController` 只绑定 `PlayerGui.TeleportButtons.TeleportButtons` 的三个现有按钮并提交稳定目的地标识；`TeleportService` 校验白名单、冷却和存活角色后，权威解析固定目标或玩家自己的地块 SpawnPoint，当前仍待 Studio Play 验收。
-- `MarketService` 在单个服务器内维护 Carrot 10 秒、Strawberry 20 秒、Blueberry 30 秒的产物当前价刷新和最近 10 次价格历史，并通过 `RequestMarketState`/`MarketStateChanged` 同步给客户端；状态不进 DataStore、不跨服务器同步。
+- `MarketService` 在单个服务器内维护各品种产物当前价和最近 10 次价格历史；新服务器首位玩家进入时会幂等执行一次全部可普通刷新品种的随机刷新并重置各自完整周期，后续玩家加入不重复触发，天气暂停中的品种保持天气权威价；行情通过 `RequestMarketState`/`MarketStateChanged` 同步给客户端，状态不进 DataStore、不跨服务器同步。
 - `SellShopService` 已改为从 `MarketService.GetCurrentPrice` 读取服务端当前市场价完成单品种出售、按数量出售、手持出售或 SellAll 原子事务，并通过 `SellProduceResult` 把出售数量、收益、动态单价、基础价和失败原因回传给触发玩家；客户端只提交稳定动作，动态市场仍待 Studio Play 验收。
 - `NpcPromptVisualController` 严格识别已流送的 Sam/Steven Prompt 并幂等恢复默认样式；`SellShopController` 只使用当前已补齐并验证的 `Assets.NpcUIs` 资源契约，克隆 Talk_UI/Response_UI/Option_UI 副本并防御性剥离 BaseScript，按“种植花园2模板”的 NPC 对话样式在本地生成 `Billboard_UI.Objects` 承载选项；当前 `Option_UI.Frame.Frame.Text_Element` 为选项文案节点，控制器递归查找以兼容该嵌套层级，未来缺失时安全禁用出售 UI。
 - `NpcPromptService` 在服务器完整 Workspace 中统一配置 Sam/Steven 现有 Prompt；客户端商店控制器通过 `ProximityPromptService.PromptShown/PromptTriggered` 严格匹配 NPC 路径，兼容 StreamingEnabled 下 NPC 延迟流送、流出和替换，当前待 Studio Play 验收。

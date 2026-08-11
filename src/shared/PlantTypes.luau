@@ -35,7 +35,7 @@ export type InventoryData = {
 	Produce: { [string]: number },
 	-- 收获物总容量的服务端权威持久值；客户端复制值只用于展示。
 	ProduceCapacity: number,
-	-- 玩家热栏布局偏好，键为槽位字符串 "1".."10"，值为稳定 ToolKey 或空槽标记；不承载库存数量。
+	-- 旧版热栏布局惰性兼容字段；Purse 不读取该值，只为避免现有存档保存时丢失旧数据。
 	HotbarLayout: { [string]: string },
 }
 

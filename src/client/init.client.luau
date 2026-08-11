@@ -9,7 +9,9 @@ local OpeningConfig = require(ReplicatedStorage.Shared.OpeningConfig)
 local Services = script.Services
 
 local AudioController = require(Services.AudioController)
+local BackpackCategoryController = require(Services.BackpackCategoryController)
 local BackpackController = require(Services.BackpackController)
+local BackpackSlotPreviewController = require(Services.BackpackSlotPreviewController)
 local ConfirmationDialogController = require(Services.ConfirmationDialogController)
 local DeveloperProductPromptController = require(Services.DeveloperProductPromptController)
 local EngagementPromptController = require(Services.EngagementPromptController)
@@ -66,9 +68,9 @@ SeedShopController.Init({
 })
 BackpackController.Init({
 	InterfaceVisualController = InterfaceVisualController,
-	DeveloperProductPromptController = DeveloperProductPromptController,
-	NotificationController = NotificationController,
 })
+BackpackCategoryController.Init(BackpackController)
+BackpackSlotPreviewController.Init()
 SeedPackOpeningController.Init({ NotificationController = NotificationController })
 HarvestFeedbackController.Init({ BackpackController = BackpackController })
 LightingStateController.Init()

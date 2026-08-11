@@ -17,6 +17,7 @@ local NetworkConfig = require(ReplicatedStorage.Shared.NetworkConfig)
 local NumberFormatter = require(ReplicatedStorage.Shared.NumberFormatter)
 local SellShopConfig = require(ReplicatedStorage.Shared.SellShopConfig)
 local NpcPromptVisualController = require(script.Parent.NpcPromptVisualController)
+local NestedScrollLock = require(script.Parent.Parent.Components.NestedScrollLock)
 local PriceCurveGraph = require(script.Parent.Parent.Components.PriceCurveGraph)
 local SlidingPanelAnimator = require(script.Parent.Parent.Components.SlidingPanelAnimator)
 local ViewportPreviewCamera = require(script.Parent.Parent.Components.ViewportPreviewCamera)
@@ -122,12 +123,28 @@ local canvasTween: Tween? = nil
 local guideLayerWarnings: { [number]: boolean } = {}
 local layoutRefreshPending = false
 local PREVIEW_RUNTIME_ATTRIBUTE = "KLineSellPreviewRuntime"
+local nestedTagScrollLock: NestedScrollLock.Binding? = nil
 
 local function disconnectAll(connections: { RBXScriptConnection })
 	for _, connection in connections do
 		connection:Disconnect()
 	end
 	table.clear(connections)
+end
+
+local function destroyNestedTagScrollLock()
+	local binding = nestedTagScrollLock
+	nestedTagScrollLock = nil
+	if binding then
+		binding:Destroy()
+	end
+end
+
+local function setNestedTagScrollLockEnabled(enabled: boolean)
+	local binding = nestedTagScrollLock
+	if binding then
+		binding:SetEnabled(enabled)
+	end
 end
 
 local function removeRuntimeScripts(root: Instance)
@@ -946,6 +963,7 @@ local function finalizeClose(session: number)
 end
 
 local function closeShop(immediate: boolean?)
+	setNestedTagScrollLockEnabled(false)
 	shopSession += 1
 	local session = shopSession
 	shopIsOpen = false
@@ -989,6 +1007,7 @@ local function openShop(prompt: ProximityPrompt, root: BasePart, npc: Model)
 	activePromptWasEnabled = prompt.Enabled
 	prompt.Enabled = false
 	screen.Enabled = true
+	setNestedTagScrollLockEnabled(true)
 	InterfaceVisualController.Open(screen)
 	local animator = rightAnimator
 	if animator then
@@ -1123,6 +1142,7 @@ local function resolveChartArea(trendBox: GuiObject): Frame?
 end
 
 local function bindGui(): boolean
+	destroyNestedTagScrollLock()
 	local playerGui = player:WaitForChild("PlayerGui") :: PlayerGui
 	local screenCandidate = playerGui:WaitForChild(SellShopConfig.ScreenGuiName, 15)
 	if not screenCandidate or not screenCandidate:IsA("ScreenGui") then
@@ -1173,6 +1193,15 @@ local function bindGui(): boolean
 	normalShop = list
 	itemTemplate = template
 	sellShelf = shelf
+	local shelfMain = shelf:FindFirstChild("Main_Frame")
+	local tagScrollingFrame = shelfMain and shelfMain:FindFirstChild("ScrollingFrame")
+	if shelfMain and shelfMain:IsA("GuiObject")
+		and tagScrollingFrame and tagScrollingFrame:IsA("ScrollingFrame")
+	then
+		nestedTagScrollLock = NestedScrollLock.new(list, tagScrollingFrame)
+	else
+		warn("[SellShopController] NormalShop.Sell_Shelf.Main_Frame.ScrollingFrame 缺失，嵌套滚动锁已安全禁用")
+	end
 	if refreshTimer and refreshTimer:IsA("TextLabel") then
 		rightRefreshTimer = refreshTimer
 	else
@@ -1218,6 +1247,7 @@ local function bindGui(): boolean
 	table.insert(layoutConnections, screen:GetPropertyChangedSignal("AbsolutePosition"):Connect(queueResponsivePanelLayoutRefresh))
 	queueResponsivePanelLayoutRefresh()
 	if not bindSellButton(shelf) then
+		destroyNestedTagScrollLock()
 		return false
 	end
 	bindSellStockButton(header)
@@ -1235,6 +1265,8 @@ local function bindGui(): boolean
 		},
 	})
 	screen.Destroying:Connect(function()
+		setNestedTagScrollLockEnabled(false)
+		destroyNestedTagScrollLock()
 		disconnectAll(layoutConnections)
 		local animator = rightAnimator
 		if animator then

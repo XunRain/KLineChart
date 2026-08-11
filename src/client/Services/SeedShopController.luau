@@ -18,6 +18,7 @@ local SeedIAPConfig = require(ReplicatedStorage.Shared.SeedIAPConfig)
 local SeedShopConfig = require(ReplicatedStorage.Shared.SeedShopConfig)
 local SeedShopRestockIAPConfig = require(ReplicatedStorage.Shared.SeedShopRestockIAPConfig)
 local NpcPromptVisualController = require(script.Parent.NpcPromptVisualController)
+local NestedScrollLock = require(script.Parent.Parent.Components.NestedScrollLock)
 local ViewportPreviewCamera = require(script.Parent.Parent.Components.ViewportPreviewCamera)
 
 type ShopItem = {
@@ -67,6 +68,7 @@ local robuxHoveredAmount: number? = nil
 local robuxOfficialPriceByProductId: { [number]: number | false } = {}
 local robuxPriceFetchInFlight: { [number]: boolean } = {}
 local canvasTween: Tween? = nil
+local nestedTagScrollLock: NestedScrollLock.Binding? = nil
 
 local requestBuy: RemoteEvent? = nil
 local requestProductPurchase: RemoteEvent? = nil
@@ -107,6 +109,21 @@ local function warnTagOnce(key: string, message: string)
 	end
 	tagWarnings[key] = true
 	warn("[SeedShopController] " .. message)
+end
+
+local function destroyNestedTagScrollLock()
+	local binding = nestedTagScrollLock
+	nestedTagScrollLock = nil
+	if binding then
+		binding:Destroy()
+	end
+end
+
+local function setNestedTagScrollLockEnabled(enabled: boolean)
+	local binding = nestedTagScrollLock
+	if binding then
+		binding:SetEnabled(enabled)
+	end
 end
 
 -- 绑定模板确认的标签父子文案；结构不完整时隐藏该标签并安全跳过。
@@ -186,6 +203,7 @@ local function refreshSeedTags(itemId: string?)
 end
 
 local function bindSeedTags(coins: Frame)
+	destroyNestedTagScrollLock()
 	table.clear(weatherTagBindings)
 	harvestTypeTagBinding = nil
 	seedTagFrame = nil
@@ -204,6 +222,12 @@ local function bindSeedTags(coins: Frame)
 			string.format("%s.%s is missing", SeedShopConfig.TagFrameName, SeedShopConfig.TagScrollingFrameName)
 		)
 		return
+	end
+	local parentScrollingFrame = normalShop
+	if parentScrollingFrame then
+		nestedTagScrollLock = NestedScrollLock.new(parentScrollingFrame, scrollingFrame)
+	else
+		warnTagOnce("MissingTagScrollParent", "NormalShop is unavailable for nested tag scrolling")
 	end
 
 	for weatherId, tagName in SeedShopConfig.WeatherBonusTagNames do
@@ -1023,6 +1047,7 @@ function SeedShopController.Init(dependencies: {
 		if expectedSession and expectedSession ~= shopSessionVersion then
 			return
 		end
+		setNestedTagScrollLockEnabled(false)
 		shopSessionVersion += 1
 		clearShopContext()
 		endRestockPriceHover()
@@ -1046,6 +1071,7 @@ function SeedShopController.Init(dependencies: {
 		endRestockPriceHover()
 		clearRobuxPriceHover()
 		screen.Enabled = true
+		setNestedTagScrollLockEnabled(true)
 		InterfaceVisualController.Open(screen)
 		requestState:FireServer()
 		table.insert(shopContextConnections, prompt.Destroying:Connect(function()
@@ -1122,6 +1148,7 @@ function SeedShopController.Init(dependencies: {
 	end)
 	screen.Destroying:Connect(function()
 		closeShop()
+		destroyNestedTagScrollLock()
 	end)
 
 	requestState:FireServer()

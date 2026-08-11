@@ -3,7 +3,7 @@
 -- 本配置集中定义默认铲子的工具身份、交互手感、服务端校验边界与玩家可见英文文案。
 local ShovelConfig = {}
 
--- ToolId 是铲子在工具、热栏保存和服务端校验中的稳定程序标识；不要改成显示名，否则老热栏布局会失效。
+-- ToolId 是铲子在 Tool 属性和服务端校验中的稳定程序标识；不要改成显示名。
 ShovelConfig.ToolId = "Shovel"
 
 -- DisplayName 是玩家在背包和工具提示中看到的英文名；项目规则要求玩家可见文案不要使用中文。
@@ -15,9 +15,6 @@ ShovelConfig.ToolTip = "Hold on your plant to remove it."
 -- PreviewAssetType 与 PreviewModelName 指向 Studio 资源路径 ReplicatedStorage.Assets.Tools.Shovel；缺失时 UI 会安全降级为空预览。
 ShovelConfig.PreviewAssetType = "Tool"
 ShovelConfig.PreviewModelName = "Shovel"
-
--- HotbarKey 是热栏布局持久化使用的稳定键；铲子不进消耗库存，但可以记住玩家摆放位置。
-ShovelConfig.HotbarKey = "Utility:Shovel"
 
 -- HoldDuration 是客户端长按植物后弹出确认框前的持续时间，模板约为 0.65 秒；只影响表现，服务端仍重新校验。
 ShovelConfig.HoldDuration = 0.65

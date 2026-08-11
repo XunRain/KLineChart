@@ -33,6 +33,7 @@ local random = Random.new(os.time())
 local stateByItem: { [string]: MarketItemState } = {}
 local activeWeatherId: string? = nil
 local initialized = false
+local firstPlayerRefreshTriggered = false
 
 local function roundNumber(value: number): number
 	return math.floor(value + 0.5)
@@ -147,6 +148,19 @@ local function refreshItem(itemId: string, timeNow: number): boolean
 	return true
 end
 
+local function refreshForFirstPlayer()
+	if firstPlayerRefreshTriggered then
+		return
+	end
+	firstPlayerRefreshTriggered = true
+
+	local timeNow = os.time()
+	for itemId in stateByItem do
+		refreshItem(itemId, timeNow)
+	end
+	broadcastSnapshot()
+end
+
 local function startRefreshLoop()
 	task.spawn(function()
 		while initialized do
@@ -259,6 +273,14 @@ function MarketService.Init(dependencies: { RemoteService: any })
 	local timeNow = os.time()
 	for itemId, definition in ItemConfig.Items do
 		stateByItem[itemId] = buildItemState(itemId, definition, timeNow)
+	end
+	Players.PlayerAdded:Connect(function(player)
+		if player.Parent == Players then
+			refreshForFirstPlayer()
+		end
+	end)
+	if #Players:GetPlayers() > 0 then
+		refreshForFirstPlayer()
 	end
 	RemoteService.GetEvent("RequestMarketState").OnServerEvent:Connect(function(player)
 		if player.Parent == Players then

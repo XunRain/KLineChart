@@ -63,7 +63,6 @@ TimeCycleService.Init()
 PlotService.Init()
 InventoryService.Init({
 	PlayerDataService = PlayerDataService,
-	RemoteService = RemoteService,
 	LeaderboardService = LeaderboardService,
 })
 PlantService.Init({

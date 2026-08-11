@@ -20,7 +20,7 @@
 - 已实现代码测试菜单，当前 `TestMenuConfig.AllowAllPlayers=false`，仅白名单玩家可看到并使用；菜单采用“种子 / 金币 / 天气”一级分类展开二级动作：种子可按服务端配置增加 5 个胡萝卜、草莓或蓝莓种子，金币可增加 1K/1M/1B Sheckles，天气可开始 Rain、清空当前天气、强制切换 Day/Sunset/Night 或恢复自动昼夜；它只用于开发验证，不属于正式玩家功能或正式 UI。
 - 已实现首版 Sheckles 与种子商店刷新：新玩家及旧档缺失货币字段时默认获得 5 Sheckles，新玩家初始种子全部为 0，需先到 Sam 处购买种子；种子价格来自 `ItemConfig`，个人刷新库存来自 `SeedShopConfig`；合并商店支持按选中数量购买、购买当前可买最大数量，刷新按钮为 39 R$ 个人开发者商品，当前已开启正式购买并只由唯一收据回调幂等发放且不影响其他玩家；服务端继续按库存、余额、背包上限、商店距离和冷却权威校验，并将 `KLineInventory.Sheckles` 同步到 HUD 金币父子两层 TextLabel。
 - Coins 排行榜已改为历史累计财富榜：新玩家从初始 5 Sheckles 起算，每次权威数据事务中余额的正向净增量都会累计，不区分出售、管理员测试加币或未来金币内购等获取渠道；购买种子、扩地、清空金币等余额下降不会降低榜值，旧档首次升级以当时余额作为无法追溯历史的安全基线。
-- 已实现首版单服务器共享动态市场：Carrot 每 10 秒、Strawberry 每 20 秒、Blueberry 每 30 秒刷新一次产物出售当前价，价格在各自 BaseSellPrice 的 0.5x~2x 区间内四舍五入，并保留最近 10 次带时间戳价格历史；服务端出售结算已改用当前市场价。
+- 已实现首版单服务器共享动态市场：新服务器在首位玩家进入时会立即为全部可普通刷新的品种执行一次随机价格刷新，后续再按各品种配置周期刷新；价格在各自 BaseSellPrice 的 0.5x~2x 区间内四舍五入，并保留最近 10 次带时间戳价格历史，服务端出售结算已改用当前市场价。
 - Sam 与 Steven 的 Custom Prompt 由服务器统一恢复为 Roblox 默认可见样式，客户端在对象流送后幂等兜底；Steven 对话所需 `ReplicatedStorage.Assets.NpcUIs` 三个模板当前已补齐并只读验证，出售结果由 `SellProduceResult` 返回后用于 NPC 对话展示，未来缺失时仍会保留可见 Prompt 并安全禁用出售 UI。
 - 已针对 `Workspace.StreamingEnabled=true` 修复商店 Prompt：服务器统一把 Sam/Steven 现有 Prompt 配置为默认样式，客户端按实际流送并触发的 NPC Prompt 打开界面，不再要求 NPC 在启动时已加载；仍待 Studio Play 验收流入、流出与 NPC 替换。
 - 已实现首版服务端权威传送：现有 `TeleportButtons` 的 Seeds、Garden、Sell 按钮只提交稳定目的地标识，服务端分别解析固定传送点或玩家自己的地块 SpawnPoint；代码已落地但仍待 Studio Play 验收。
